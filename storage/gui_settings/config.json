@@ -21,7 +21,7 @@
   "rl_reward": "Profit + Sharpe Ratio",
   "rl_checkpoint": "",
   "rl_live_enabled": true,
-  "pairs": "EURUSD, GBPUSD, USDJPY, USDCHF, AUDUSD, USDCAD, NZDUSD, EURGBP, EURJPY, GBPJPY, AUDNZD, CADJPY, AUDCAD, NZDJPY",
+  "pairs": "BTCUSD",
   "account_type": "Live",
   "magic_number": "42069",
   "log_level": "INFO",

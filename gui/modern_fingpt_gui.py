@@ -159,6 +159,7 @@ class ModernFinGPTGUI(ctk.CTk):
         self.tabview.add("🤖 RL Studio")
         self.tabview.add("📝 Journal")
         self.tabview.add("📰 News")
+        self.tabview.add("📉 Backtest")
         self.tabview.add("💻 Terminal")
         self.tabview.add("⚙️ Konfiguration")
         self.tabview.add("❓ FAQ")
@@ -170,6 +171,7 @@ class ModernFinGPTGUI(ctk.CTk):
         self.setup_rl_studio_tab()
         self.setup_journal_tab()
         self.setup_news_tab()
+        self.setup_backtest_tab()
         self.setup_terminal_tab()
         self.setup_config_tab()
         self.setup_faq_tab()
@@ -369,6 +371,7 @@ class ModernFinGPTGUI(ctk.CTk):
         self.charts_sub_tabs.add("🔲 Multi-View")
         self.charts_sub_tabs.add("🔎 Pattern Scanner")
         self.charts_sub_tabs.add("🔬 Advanced Analysis")
+        self.charts_sub_tabs.add("🏦 SMC Scanner")
         
         # --- 1. Sub-Tab: Multi-View (Existing 2x3 Grid) ---
         multi_tab = self.charts_sub_tabs.tab("🔲 Multi-View")
@@ -451,6 +454,31 @@ class ModernFinGPTGUI(ctk.CTk):
         
         ctk.CTkLabel(self.adv_chart_container, text="Wähle ein Asset und klicke auf 'Chart Analysieren'", text_color="gray50", font=ctk.CTkFont(size=14)).pack(expand=True)
         
+        # --- 4. Sub-Tab: SMC Scanner ---
+        smc_tab = self.charts_sub_tabs.tab("🏦 SMC Scanner")
+        smc_tab.grid_columnconfigure(0, weight=1)
+        smc_tab.grid_rowconfigure(1, weight=1)
+        
+        smc_controls = ctk.CTkFrame(smc_tab, fg_color="transparent")
+        smc_controls.grid(row=0, column=0, sticky="ew", padx=10, pady=10)
+        
+        self.smc_tf_var = ctk.StringVar(value="H1 (1 Std)")
+        ctk.CTkComboBox(smc_controls, values=["M5 (5 Min)", "M15 (15 Min)", "M30 (30 Min)", "H1 (1 Std)", "H4 (4 Std)", "D1 (Täglich)"], variable=self.smc_tf_var, width=150).pack(side="left", padx=5)
+        
+        ctk.CTkButton(smc_controls, text="🏦 SMC Scannen", command=self.run_smc_scanner, fg_color="#3498DB", hover_color="#2980B9").pack(side="left", padx=5)
+        self.smc_status_lbl = ctk.CTkLabel(smc_controls, text="Klicke auf SMC Scannen...", text_color="gray50")
+        self.smc_status_lbl.pack(side="left", padx=15)
+        
+        self.smc_list_frame = ctk.CTkScrollableFrame(smc_tab, corner_radius=15, fg_color=("gray90", "gray13"))
+        self.smc_list_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
+        
+        smc_ph_row = ctk.CTkFrame(self.smc_list_frame, fg_color="transparent", height=30)
+        smc_ph_row.pack(fill="x", pady=(0, 5))
+        smc_ph_row.grid_columnconfigure((0,1,2,3), weight=1, uniform="col")
+        for i, col_name in enumerate(["Symbol", "Timeframe", "Gefundenes SMC Muster", "Aktion"]):
+            ctk.CTkLabel(smc_ph_row, text=col_name, font=ctk.CTkFont(weight="bold", size=12), text_color="gray50").grid(row=0, column=i, sticky="w", padx=10)
+        ctk.CTkFrame(self.smc_list_frame, height=1, fg_color=("gray70", "gray30")).pack(fill="x", pady=(0, 5))
+
         # Delay the initial load slightly so the GUI can render first
         self.after(1000, self.load_forex_charts)
 
@@ -685,6 +713,195 @@ class ModernFinGPTGUI(ctk.CTk):
                 ax.annotate(f"\u25bc {pattern}", xy=(len(df) - 1.5, ax.get_ylim()[1]),
                             xycoords=('data', 'data'), ha='center', va='top',
                             color='yellow', fontsize=9, fontweight='bold')
+                
+                fig.tight_layout()
+                self.after(0, lambda: _embed_chart(fig))
+            except Exception as e:
+                err = str(e)
+                self.after(0, lambda msg=err: status.configure(text=f"Fehler: {msg}"))
+        
+        def _embed_chart(fig):
+            status.destroy()
+            canvas = FigureCanvasTkAgg(fig, master=popup)
+            canvas.draw()
+            canvas.get_tk_widget().pack(fill="both", expand=True, padx=10, pady=10)
+        
+        threading.Thread(target=fetch_chart, daemon=True).start()
+
+    def run_smc_scanner(self):
+        tf_str = self.smc_tf_var.get()
+        self.smc_status_lbl.configure(text=f"Scanne Major Pairs auf {tf_str.split(' ')[0]}...", text_color="#F1C40F")
+        self.write_terminal(f">> Starte SMC Scanner ({tf_str})...\n")
+        
+        # Clear old results (keep header)
+        children = self.smc_list_frame.winfo_children()
+        for widget in children[2:]:
+            if hasattr(widget, 'destroy'):
+                widget.destroy()
+                
+        if len(self.smc_list_frame.winfo_children()) < 2:
+            ctk.CTkFrame(self.smc_list_frame, height=1, fg_color=("gray70", "gray30")).pack(fill="x", pady=(0, 5))
+
+        def scan_logic():
+            try:
+                if not mt5.initialize():
+                    raise Exception("MT5 init fehlgeschlagen")
+                
+                # Parse Timeframe
+                if "M1 " in tf_str: tf = mt5.TIMEFRAME_M1
+                elif "M5" in tf_str: tf = mt5.TIMEFRAME_M5
+                elif "M15" in tf_str: tf = mt5.TIMEFRAME_M15
+                elif "M30" in tf_str: tf = mt5.TIMEFRAME_M30
+                elif "H1" in tf_str: tf = mt5.TIMEFRAME_H1
+                elif "H4" in tf_str: tf = mt5.TIMEFRAME_H4
+                else: tf = mt5.TIMEFRAME_D1
+                tf_label = tf_str.split(' ')[0]
+                    
+                pairs = ["EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD", "USDCAD"]
+                found_patterns = []
+                
+                for symbol in pairs:
+                    # Look at the last 25 candles
+                    rates = mt5.copy_rates_from_pos(symbol, tf, 0, 25)
+                    if rates is None or len(rates) < 3:
+                        continue
+                        
+                    # Check the most recent 10 candles for FVGs and OBs
+                    for i in range(len(rates) - 10, len(rates) - 1):
+                        c0, c1, c2 = rates[i-2], rates[i-1], rates[i]
+                        
+                        # FVG Detection
+                        # Bullish FVG: c0 high < c2 low
+                        if c0['high'] < c2['low'] and c1['close'] > c1['open']:
+                            gap_size = c2['low'] - c0['high']
+                            if gap_size > ((c1['high'] - c1['low']) * 0.1) and gap_size > 0.0001: 
+                                found_patterns.append((symbol, tf_label, "Bullish FVG", "green", tf_str, int(c1['time'])))
+                        
+                        # Bearish FVG: c0 low > c2 high
+                        if c0['low'] > c2['high'] and c1['close'] < c1['open']:
+                            gap_size = c0['low'] - c2['high']
+                            if gap_size > ((c1['high'] - c1['low']) * 0.1) and gap_size > 0.0001:
+                                found_patterns.append((symbol, tf_label, "Bearish FVG", "red", tf_str, int(c1['time'])))
+                                
+                        # Order Block Detection
+                        # Bullish OB: Last down candle before a strong up move
+                        if c0['close'] < c0['open'] and c1['close'] > c1['open'] and c2['close'] > c2['open']:
+                            if (c1['close'] - c1['open']) > (c0['open'] - c0['close']) * 1.5:
+                                found_patterns.append((symbol, tf_label, "Bullish Order Block", "green", tf_str, int(c0['time']))) 
+                        
+                        # Bearish OB: Last up candle before a strong down move
+                        if c0['close'] > c0['open'] and c1['close'] < c1['open'] and c2['close'] < c2['open']:
+                            if (c1['open'] - c1['close']) > (c0['close'] - c0['open']) * 1.5:
+                                found_patterns.append((symbol, tf_label, "Bearish Order Block", "red", tf_str, int(c0['time'])))
+
+                # Check for Break of Structure (BOS)
+                for symbol in pairs:
+                    rates = mt5.copy_rates_from_pos(symbol, tf, 0, 20)
+                    if rates is None or len(rates) < 15: continue
+                    past_15 = rates[:-2]
+                    current = rates[-2]
+                    
+                    highest_high = max([r['high'] for r in past_15])
+                    lowest_low = min([r['low'] for r in past_15])
+                    
+                    if current['close'] > highest_high:
+                        found_patterns.append((symbol, tf_label, "Bullish BOS", "green", tf_str, int(current['time'])))
+                    elif current['close'] < lowest_low:
+                        found_patterns.append((symbol, tf_label, "Bearish BOS", "red", tf_str, int(current['time'])))
+
+                found_patterns.reverse()
+                self.after(0, lambda: self._render_smc_results(found_patterns[:20])) # Top 20
+            except Exception as e:
+                error_msg = str(e)
+                self.after(0, lambda msg=error_msg: self.smc_status_lbl.configure(text=f"Fehler: {msg}", text_color="#E74C3C"))
+
+        threading.Thread(target=scan_logic, daemon=True).start()
+
+    def _render_smc_results(self, patterns):
+        if not patterns:
+            ctk.CTkLabel(self.smc_list_frame, text="Keine SMC-Muster gefunden.", text_color="gray50").pack(pady=20)
+        else:
+            for sym, tf, pat, color_name, tf_str, timestamp in patterns:
+                row = ctk.CTkFrame(self.smc_list_frame, fg_color="transparent")
+                row.pack(fill="x", pady=5)
+                row.grid_columnconfigure((0,1,2,3), weight=1, uniform="col")
+                
+                color = "#5EBA7D" if color_name == "green" else "#E74C3C"
+                
+                ctk.CTkLabel(row, text=sym, font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, sticky="w", padx=10)
+                ctk.CTkLabel(row, text=tf, text_color="gray70").grid(row=0, column=1, sticky="w", padx=10)
+                ctk.CTkLabel(row, text=pat, text_color=color, font=ctk.CTkFont(weight="bold")).grid(row=0, column=2, sticky="w", padx=10)
+                ctk.CTkButton(row, text="🏦 Chart", width=80, height=26,
+                              fg_color="#3498DB", hover_color="#2980B9",
+                              command=lambda s=sym, t=tf_str, p=pat, ts=timestamp: self._show_smc_chart(s, t, p, ts)
+                             ).grid(row=0, column=3, sticky="w", padx=10)
+                
+        self.smc_status_lbl.configure(text=f"Scan abgeschlossen. {len(patterns)} Treffer.", text_color="#5EBA7D")
+
+    def _show_smc_chart(self, symbol, tf_str, pattern, timestamp):
+        """Open a Toplevel popup with the price chart and the SMC pattern highlighted."""
+        popup = ctk.CTkToplevel(self)
+        popup.title(f"{symbol} - {pattern}")
+        popup.geometry("900x550")
+        popup.configure(fg_color="#1E1E1E")
+        popup.grab_set()
+        
+        status = ctk.CTkLabel(popup, text=f"Lade Chart für {symbol}...", font=ctk.CTkFont(size=14))
+        status.pack(expand=True)
+        
+        mc = mpf.make_marketcolors(up='#5EBA7D', down='#E74C3C', edge='i', wick='i')
+        s = mpf.make_mpf_style(marketcolors=mc, facecolor='#1E1E1E', edgecolor='gray',
+                               figcolor='#1E1E1E', gridcolor='#333333', gridstyle=':')
+        
+        def fetch_chart():
+            try:
+                if not mt5.initialize():
+                    raise Exception("MT5 nicht verbunden")
+                    
+                if "M1 " in tf_str: tf = mt5.TIMEFRAME_M1
+                elif "M5" in tf_str: tf = mt5.TIMEFRAME_M5
+                elif "M15" in tf_str: tf = mt5.TIMEFRAME_M15
+                elif "M30" in tf_str: tf = mt5.TIMEFRAME_M30
+                elif "H1" in tf_str: tf = mt5.TIMEFRAME_H1
+                elif "H4" in tf_str: tf = mt5.TIMEFRAME_H4
+                else: tf = mt5.TIMEFRAME_D1
+                
+                # Fetch 60 candles hoping the timestamp is within it
+                rates = mt5.copy_rates_from_pos(symbol, tf, 0, 60)
+                if rates is None or len(rates) < 5:
+                    raise Exception("Nicht genügend Daten")
+                    
+                df = pd.DataFrame(rates)
+                df['time_sec'] = df['time'] # Keep unix time
+                df['time'] = pd.to_datetime(df['time'], unit='s')
+                df.set_index('time', inplace=True)
+                
+                # Find index of timestamp
+                idx_matches = df.index[df['time_sec'] == timestamp].tolist()
+                target_idx = -1
+                if len(idx_matches) > 0:
+                    target_idx = df.index.get_loc(idx_matches[0])
+                
+                fig = Figure(figsize=(9, 4.5), facecolor='#1E1E1E')
+                ax = fig.add_subplot(111)
+                ax.set_facecolor('#1E1E1E')
+                ax.tick_params(colors='white')
+                ax.set_title(f"{symbol}  |  {pattern}  |  {tf_str.split(' ')[0]}", color='white', fontsize=12)
+                ax.spines['bottom'].set_color('gray')
+                ax.spines['left'].set_color('gray')
+                
+                mpf.plot(df, type='candle', ax=ax, style=s, show_nontrading=False, warn_too_much_data=1000)
+                
+                if target_idx != -1:
+                    color = 'yellow'
+                    if "Bullish" in pattern: color = 'green'
+                    elif "Bearish" in pattern: color = 'red'
+                    
+                    # Target index relative highlighting
+                    ax.axvspan(target_idx - 0.5, target_idx + 0.5, color=color, alpha=0.3, zorder=0)
+                    ax.annotate(f"{pattern}", xy=(target_idx, ax.get_ylim()[1]),
+                                xycoords=('data', 'data'), ha='center', va='top',
+                                color=color, fontsize=10, fontweight='bold')
                 
                 fig.tight_layout()
                 self.after(0, lambda: _embed_chart(fig))
@@ -1459,15 +1676,26 @@ class ModernFinGPTGUI(ctk.CTk):
     def setup_news_tab(self):
         tab = self.tabview.tab("📰 News")
         tab.grid_columnconfigure(0, weight=1)
-        tab.grid_rowconfigure(1, weight=1)
+        tab.grid_rowconfigure(0, weight=1)
 
         # State
         self._news_items        = []   # list of dicts
         self._news_analyzing    = False
         self._news_filter_pair  = "Alle"
+        self._cal_items         = []   # economic calendar events
 
-        # ── Control bar ─────────────────────────────────────
-        ctrl = ctk.CTkFrame(tab, fg_color="transparent")
+        # ── Sub-Tabview ──────────────────────────────────────
+        news_sub = ctk.CTkTabview(tab, corner_radius=12)
+        news_sub.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
+        news_sub.add("📡 News Feed")
+        news_sub.add("📅 Wirtschaftskalender")
+
+        # ═══════════════════ NEWS FEED SUB-TAB ═══════════════════
+        nf_tab = news_sub.tab("📡 News Feed")
+        nf_tab.grid_columnconfigure(0, weight=1)
+        nf_tab.grid_rowconfigure(1, weight=1)
+
+        ctrl = ctk.CTkFrame(nf_tab, fg_color="transparent")
         ctrl.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 0))
 
         self._news_refresh_btn = ctk.CTkButton(
@@ -1482,7 +1710,6 @@ class ModernFinGPTGUI(ctk.CTk):
             command=self._analyze_all_news_threaded)
         self._news_analyze_btn.pack(side="left", padx=(0, 14))
 
-        # Currency pair filter chips
         ctk.CTkLabel(ctrl, text="Filter:", text_color="gray60").pack(side="left", padx=(0, 4))
         self._news_filter_btns = {}
         for pair in ["Alle", "EUR", "GBP", "USD", "JPY", "CHF", "AUD", "CAD", "NZD"]:
@@ -1493,26 +1720,60 @@ class ModernFinGPTGUI(ctk.CTk):
             btn.pack(side="left", padx=2)
             self._news_filter_btns[pair] = btn
 
-        # Status right-side
         self._news_status_lbl = ctk.CTkLabel(ctrl, text="● Bereit", text_color="gray50",
                                               font=ctk.CTkFont(size=11))
         self._news_status_lbl.pack(side="right", padx=15)
 
-        # ── News feed (scrollable) ───────────────────────────
-        self._news_scroll = ctk.CTkScrollableFrame(tab, fg_color=("gray88", "gray12"),
-                                                    corner_radius=12)
+        self._news_scroll = ctk.CTkScrollableFrame(nf_tab, fg_color=("gray88", "gray12"), corner_radius=12)
         self._news_scroll.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
         self._news_scroll.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(self._news_scroll,
+                     text="🔄  Klicke 'News Laden' um aktuelle Forex-Nachrichten zu laden.",
+                     font=ctk.CTkFont(size=13), text_color="gray50").pack(pady=40)
 
-        # Placeholder
-        self._news_placeholder = ctk.CTkLabel(
-            self._news_scroll,
-            text="🔄  Klicke 'News Laden' um aktuelle Forex-Nachrichten zu laden.",
-            font=ctk.CTkFont(size=13), text_color="gray50")
-        self._news_placeholder.pack(pady=40)
+        # ═══════════════ WIRTSCHAFTSKALENDER SUB-TAB ═════════════
+        cal_tab = news_sub.tab("📅 Wirtschaftskalender")
+        cal_tab.grid_columnconfigure(0, weight=1)
+        cal_tab.grid_rowconfigure(1, weight=1)
 
-        # Auto-load on tab open
+        cal_ctrl = ctk.CTkFrame(cal_tab, fg_color="transparent")
+        cal_ctrl.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 4))
+
+        ctk.CTkButton(cal_ctrl, text="🔄 Kalender Laden", width=150,
+                      fg_color="#2E86AB", hover_color="#21618C",
+                      command=self._fetch_calendar_threaded).pack(side="left", padx=(0, 8))
+
+        # Impact filter
+        ctk.CTkLabel(cal_ctrl, text="Impact:", text_color="gray60").pack(side="left", padx=(0, 4))
+        self._cal_impact_var = ctk.StringVar(value="Alle")
+        for impact in ["Alle", "Hoch", "Mittel", "Niedrig"]:
+            ctk.CTkButton(cal_ctrl, text=impact, width=60, height=26,
+                          fg_color=("gray75", "gray25"), hover_color="#21618C",
+                          command=lambda iv=impact: self._cal_filter(iv)).pack(side="left", padx=2)
+
+        self._cal_status_lbl = ctk.CTkLabel(cal_ctrl, text="● Bereit", text_color="gray50",
+                                             font=ctk.CTkFont(size=11))
+        self._cal_status_lbl.pack(side="right", padx=15)
+
+        # Table header
+        cal_hdr = ctk.CTkFrame(cal_tab, fg_color=("gray80", "gray18"), corner_radius=8, height=32)
+        cal_hdr.grid(row=0, column=0, sticky="ew", padx=10, pady=(52, 0))
+        cal_hdr.grid_columnconfigure((0,1,2,3,4,5), weight=1, uniform="ch")
+        cal_hdr.grid_propagate(False)
+        for ci, ch in enumerate(["Zeit", "Währung", "Impact", "Event", "Prognose / Vorh.", "KI Analyse"]):
+            ctk.CTkLabel(cal_hdr, text=ch, font=ctk.CTkFont(size=11, weight="bold"),
+                         text_color="gray50").grid(row=0, column=ci, sticky="w", padx=8, pady=6)
+
+        self._cal_scroll = ctk.CTkScrollableFrame(cal_tab, fg_color=("gray88", "gray12"), corner_radius=12)
+        self._cal_scroll.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0,10))
+        self._cal_scroll.grid_columnconfigure((0,1,2,3,4,5), weight=1, uniform="ch")
+        ctk.CTkLabel(self._cal_scroll,
+                     text="📅  Klicke 'Kalender Laden' um die Events dieser Woche zu laden.",
+                     font=ctk.CTkFont(size=13), text_color="gray50").grid(row=0, column=0, columnspan=6, pady=40)
+
+        # Auto-load both
         self.after(800, self._fetch_news_threaded)
+        self.after(1200, self._fetch_calendar_threaded)
 
     # ── News fetching ────────────────────────────────────────────────────────
     def _fetch_news_threaded(self):
@@ -1743,6 +2004,614 @@ class ModernFinGPTGUI(ctk.CTk):
             # Bottom separator
             ctk.CTkFrame(card, height=1, fg_color="gray30").grid(
                 row=3, column=0, columnspan=2, sticky="ew", padx=12, pady=(4, 0))
+
+    # ══════════════════════════════════════════════════════
+    # WIRTSCHAFTSKALENDER LOGIK
+    # ══════════════════════════════════════════════════════
+    def _fetch_calendar_threaded(self):
+        self._cal_status_lbl.configure(text="● Lade Kalender...", text_color="#E67E22")
+        threading.Thread(target=self._fetch_calendar_bg, daemon=True).start()
+
+    def _fetch_calendar_bg(self):
+        """Fetch this week's economic events – retries on 429, uses local cache as fallback."""
+        import xml.etree.ElementTree as ET
+        import json as _json
+
+        url        = "https://nfs.faireconomy.media/ff_calendar_thisweek.xml"
+        cache_path = os.path.join(os.path.dirname(__file__), "..", "storage", "calendar_cache.json")
+        IMPACT_MAP = {"High": "Hoch", "Medium": "Mittel", "Low": "Niedrig"}
+
+        # ── try live feed with up to 3 retries ─────────────────────────────
+        raw_xml = None
+        for attempt in range(3):
+            try:
+                resp = requests.get(url, timeout=14,
+                                    headers={"User-Agent": "Mozilla/5.0 FinGPT-Calendar/1.0"})
+                if resp.status_code == 429:
+                    wait = 5 * (attempt + 1)   # 5s, 10s, 15s
+                    self.after(0, lambda w=wait: self._cal_status_lbl.configure(
+                        text=f"● Rate-Limit – warte {w}s…", text_color="#E67E22"))
+                    time.sleep(wait)
+                    continue
+                resp.raise_for_status()
+                raw_xml = resp.content
+                # Save to cache on success
+                try:
+                    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+                    with open(cache_path, "wb") as f:
+                        f.write(raw_xml)
+                except Exception:
+                    pass
+                break
+            except Exception as e:
+                if attempt == 2:
+                    raw_xml = None   # fall through to cache/demo
+
+        # ── try local cache if live failed ─────────────────────────────────
+        if raw_xml is None:
+            try:
+                with open(cache_path, "rb") as f:
+                    raw_xml = f.read()
+                self.after(0, lambda: self._cal_status_lbl.configure(
+                    text="● Live-Feed gesperrt — zeige Cache", text_color="#E67E22"))
+            except Exception:
+                pass
+
+        # ── parse XML ──────────────────────────────────────────────────────
+        events = []
+        if raw_xml:
+            try:
+                root = ET.fromstring(raw_xml)
+                for ev in root.findall("event"):
+                    def gt(tag, _ev=ev):
+                        el = _ev.find(tag)
+                        return (el.text or "").strip() if el is not None else ""
+                    title = gt("title")
+                    if not title:
+                        continue
+                    events.append({
+                        "title":    title,
+                        "currency": gt("country"),
+                        "date":     gt("date"),
+                        "time":     gt("time"),
+                        "impact":   IMPACT_MAP.get(gt("impact"), gt("impact")),
+                        "forecast": gt("forecast"),
+                        "previous": gt("previous"),
+                        "actual":   gt("actual"),
+                        "ai":       None,
+                    })
+            except Exception:
+                events = []
+
+        # ── fallback demo events if still empty ────────────────────────────
+        if not events:
+            today = datetime.now().strftime("%m-%d-%Y")
+            events = [
+                {"title": "Non-Farm Payrolls",         "currency": "USD", "date": today, "time": "1:30pm", "impact": "Hoch",    "forecast": "200K", "previous": "185K", "actual": "", "ai": None},
+                {"title": "ECB Interest Rate Decision", "currency": "EUR", "date": today, "time": "12:15pm","impact": "Hoch",    "forecast": "4.50%","previous": "4.50%","actual": "", "ai": None},
+                {"title": "CPI m/m",                   "currency": "GBP", "date": today, "time": "7:00am", "impact": "Hoch",    "forecast": "0.3%", "previous": "0.2%", "actual": "", "ai": None},
+                {"title": "Retail Sales m/m",           "currency": "USD", "date": today, "time": "1:30pm", "impact": "Mittel",  "forecast": "0.4%", "previous": "0.6%", "actual": "", "ai": None},
+                {"title": "German ifo Business Climate","currency": "EUR", "date": today, "time": "9:00am", "impact": "Mittel",  "forecast": "88.5", "previous": "87.6", "actual": "", "ai": None},
+                {"title": "BOJ Rate Statement",         "currency": "JPY", "date": today, "time": "3:00am", "impact": "Hoch",    "forecast": "0.1%", "previous": "0.1%", "actual": "", "ai": None},
+                {"title": "Trade Balance",              "currency": "AUD", "date": today, "time": "1:30am", "impact": "Niedrig", "forecast": "5.8B", "previous": "5.5B", "actual": "", "ai": None},
+            ]
+            self.after(0, lambda: self._cal_status_lbl.configure(
+                text="● Demo-Daten (Live-Feed nicht erreichbar)", text_color="#E67E22"))
+
+        self._cal_items = events
+        self.after(0, lambda: self._render_calendar_rows(events))
+        if events and "Demo" not in self._cal_status_lbl.cget("text"):
+            count = len(events)
+            self.after(0, lambda c=count: self._cal_status_lbl.configure(
+                text=f"● {c} Events geladen", text_color="#5EBA7D"))
+
+    def _cal_filter(self, impact_filter: str):
+        """Re-render calendar filtered by impact level."""
+        self._cal_impact_var.set(impact_filter)
+        if impact_filter == "Alle":
+            self._render_calendar_rows(self._cal_items)
+        else:
+            filtered = [e for e in self._cal_items if e["impact"] == impact_filter]
+            self._render_calendar_rows(filtered)
+
+    def _render_calendar_rows(self, events):
+        """Render event rows into the scrollable calendar frame."""
+        for w in self._cal_scroll.winfo_children():
+            w.destroy()
+
+        if not events:
+            ctk.CTkLabel(self._cal_scroll,
+                         text="Keine Events gefunden.",
+                         text_color="gray50").grid(row=0, column=0, columnspan=6, pady=30)
+            return
+
+        IMPACT_COLOR = {"Hoch": "#E74C3C", "Mittel": "#E67E22", "Niedrig": "#5EBA7D", "Holiday": "#7F8C8D"}
+
+        for row_idx, ev in enumerate(events):
+            bg = ("gray85", "gray16") if row_idx % 2 == 0 else ("gray82", "gray13")
+            imp_color = IMPACT_COLOR.get(ev["impact"], "gray50")
+
+            # Time + Date
+            time_display = ev.get("time") or "Ganztags"
+            date_display = ev.get("date", "")[:10]
+            ctk.CTkLabel(self._cal_scroll, text=f"{date_display}\n{time_display}",
+                         font=ctk.CTkFont(size=10), text_color="gray60",
+                         fg_color=bg, corner_radius=0, anchor="w"
+                         ).grid(row=row_idx, column=0, sticky="ew", padx=6, pady=2)
+
+            # Currency
+            ctk.CTkLabel(self._cal_scroll, text=ev["currency"],
+                         font=ctk.CTkFont(size=12, weight="bold"),
+                         fg_color=bg, corner_radius=0
+                         ).grid(row=row_idx, column=1, sticky="ew", padx=6, pady=2)
+
+            # Impact badge
+            ctk.CTkLabel(self._cal_scroll, text=ev["impact"],
+                         font=ctk.CTkFont(size=10, weight="bold"),
+                         text_color=imp_color,
+                         fg_color=bg, corner_radius=0
+                         ).grid(row=row_idx, column=2, sticky="ew", padx=6, pady=2)
+
+            # Event title
+            ctk.CTkLabel(self._cal_scroll, text=ev["title"],
+                         font=ctk.CTkFont(size=11), anchor="w",
+                         fg_color=bg, corner_radius=0
+                         ).grid(row=row_idx, column=3, sticky="ew", padx=6, pady=2)
+
+            # Forecast / Previous
+            fp_text = ""
+            if ev["actual"]:
+                fp_text = f"Ist: {ev['actual']}  Prog: {ev['forecast']}"
+            elif ev["forecast"]:
+                fp_text = f"Prog: {ev['forecast']}  Vorh: {ev['previous']}"
+            ctk.CTkLabel(self._cal_scroll, text=fp_text or "–",
+                         font=ctk.CTkFont(size=10), text_color="gray60",
+                         fg_color=bg, corner_radius=0
+                         ).grid(row=row_idx, column=4, sticky="ew", padx=6, pady=2)
+
+            # AI Analyse — compact badge + hover tooltip
+            ai_result = ev.get("ai")
+            if ai_result:
+                ai_color = "#5EBA7D" if "BULLISH" in ai_result.upper() else \
+                           "#E74C3C" if "BEARISH" in ai_result.upper() else "#E67E22"
+
+                # Short truncated label shown in the cell
+                short_text = ai_result[:28] + "…" if len(ai_result) > 28 else ai_result
+                ai_lbl = ctk.CTkLabel(
+                    self._cal_scroll, text=short_text,
+                    text_color=ai_color,
+                    font=ctk.CTkFont(size=10, weight="bold"),
+                    fg_color=bg, corner_radius=4, anchor="w"
+                )
+                ai_lbl.grid(row=row_idx, column=5, sticky="ew", padx=6, pady=2)
+
+                # ── Tooltip Popup auf Hover ──────────────────────
+                _tip = [None]  # holds the Toplevel reference
+
+                def _show_tip(event, full=ai_result, color=ai_color):
+                    if _tip[0] is not None:
+                        return
+                    tip = tk.Toplevel()
+                    tip.overrideredirect(True)     # no title bar
+                    tip.attributes("-topmost", True)
+                    tip.configure(bg="#1e1e1e")
+                    # border frame
+                    border = tk.Frame(tip, bg=color, padx=1, pady=1)
+                    border.pack(fill="both", expand=True)
+                    inner = tk.Frame(border, bg="#252525")
+                    inner.pack(fill="both", expand=True)
+                    tk.Label(
+                        inner, text=full,
+                        fg=color, bg="#252525",
+                        font=("Segoe UI", 10),
+                        wraplength=380,
+                        justify="left",
+                        padx=10, pady=8
+                    ).pack()
+                    # Position near the mouse cursor
+                    x = event.x_root + 12
+                    y = event.y_root + 4
+                    tip.geometry(f"+{x}+{y}")
+                    _tip[0] = tip
+
+                def _hide_tip(event):
+                    if _tip[0] is not None:
+                        try:
+                            _tip[0].destroy()
+                        except Exception:
+                            pass
+                        _tip[0] = None
+
+                ai_lbl.bind("<Enter>", _show_tip)
+                ai_lbl.bind("<Leave>", _hide_tip)
+            else:
+                ctk.CTkButton(self._cal_scroll, text="🤖 KI", width=54, height=22,
+                              fg_color="#8E44AD", hover_color="#6C3483",
+                              command=lambda e=ev, r=row_idx: self._analyze_cal_event(e, r)
+                              ).grid(row=row_idx, column=5, padx=6, pady=2)
+
+    def _analyze_cal_event(self, event: dict, row_idx: int):
+        """Ask Ollama for a hawkish/dovish/neutral verdict on a single calendar event."""
+        def run():
+            try:
+                url   = self.url_entry.get().strip()
+                model = self.model_combo.get()
+                if not url or "Verbindung" in model or "Lade" in model:
+                    event["ai"] = "Ollama offline"
+                    self.after(0, lambda: self._render_calendar_rows(self._cal_items))
+                    return
+
+                prompt = (
+                    f"Du bist ein erfahrener Forex-Makroanalyst.\n"
+                    f"Event: {event['title']} ({event['currency']})\n"
+                    f"Impact: {event['impact']}\n"
+                    f"Prognose: {event['forecast']}  Vorherig: {event['previous']}  Aktuell: {event['actual']}\n\n"
+                    f"Bewerte dieses Event in 1 Satz als BULLISH, BEARISH oder NEUTRAL für {event['currency']} "
+                    f"und erkläre kurz warum. Beginne mit dem Wort BULLISH, BEARISH oder NEUTRAL."
+                )
+                payload = {"model": model, "prompt": prompt, "stream": False,
+                           "options": {"temperature": 0.2, "num_predict": 80}}
+                resp = requests.post(f"{url}/api/generate", json=payload, timeout=25)
+                raw  = resp.json().get("response", "").strip()
+                event["ai"] = raw[:120] + ("…" if len(raw) > 120 else "")
+            except Exception as e:
+                event["ai"] = f"Fehler: {str(e)[:50]}"
+            self.after(0, lambda: self._render_calendar_rows(
+                self._cal_items if self._cal_impact_var.get() == "Alle"
+                else [e for e in self._cal_items if e["impact"] == self._cal_impact_var.get()]))
+
+        threading.Thread(target=run, daemon=True).start()
+
+    # ══════════════════════════════════════════════════════════════
+    # BACKTESTING TAB
+    # ══════════════════════════════════════════════════════════════
+    def setup_backtest_tab(self):
+        tab = self.tabview.tab("📉 Backtest")
+        tab.grid_columnconfigure(0, weight=1)
+        tab.grid_rowconfigure(2, weight=1)
+
+        # ── Control Bar ───────────────────────────────────────────
+        ctrl = ctk.CTkFrame(tab, fg_color="transparent")
+        ctrl.grid(row=0, column=0, sticky="ew", padx=12, pady=(12, 4))
+
+        ctk.CTkLabel(ctrl, text="Symbol:").pack(side="left", padx=(0, 4))
+        self._bt_symbol = ctk.CTkComboBox(ctrl, values=["EURUSD","GBPUSD","USDJPY","USDCHF","AUDUSD","USDCAD"], width=110)
+        self._bt_symbol.set("EURUSD")
+        self._bt_symbol.pack(side="left", padx=(0, 10))
+
+        ctk.CTkLabel(ctrl, text="Timeframe:").pack(side="left", padx=(0, 4))
+        self._bt_tf = ctk.CTkComboBox(ctrl, values=["M15 (15 Min)","M30 (30 Min)","H1 (1 Std)","H4 (4 Std)","D1 (Täglich)"], width=130)
+        self._bt_tf.set("H1 (1 Std)")
+        self._bt_tf.pack(side="left", padx=(0, 10))
+
+        ctk.CTkLabel(ctrl, text="Bars:").pack(side="left", padx=(0, 4))
+        self._bt_bars = ctk.CTkComboBox(ctrl, values=["200","500","1000","2000","5000"], width=80)
+        self._bt_bars.set("500")
+        self._bt_bars.pack(side="left", padx=(0, 10))
+
+        ctk.CTkLabel(ctrl, text="Strategie:").pack(side="left", padx=(0, 4))
+        self._bt_strategy = ctk.CTkComboBox(ctrl, values=[
+            "SMC Fair Value Gap", "SMC Order Block",
+            "Bullish Engulfing", "EMA 20/50 Crossover"], width=180)
+        self._bt_strategy.set("SMC Fair Value Gap")
+        self._bt_strategy.pack(side="left", padx=(0, 10))
+
+        self._bt_run_btn = ctk.CTkButton(ctrl, text="▶ Backtest Starten",
+                                          fg_color="#5EBA7D", hover_color="#4CAF50", width=160,
+                                          command=self._run_backtest_threaded)
+        self._bt_run_btn.pack(side="left", padx=(6, 0))
+
+        self._bt_status = ctk.CTkLabel(ctrl, text="Bereit.", text_color="gray50",
+                                        font=ctk.CTkFont(size=12))
+        self._bt_status.pack(side="right", padx=10)
+
+        # ── Progress bar ──────────────────────────────────────────
+        self._bt_progress = ctk.CTkProgressBar(tab, mode="indeterminate", progress_color="#5EBA7D")
+        self._bt_progress.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 4))
+        self._bt_progress.set(0)
+
+        # ── Main Area: Stats + Chart + Trade List ─────────────────
+        main = ctk.CTkFrame(tab, fg_color="transparent")
+        main.grid(row=2, column=0, sticky="nsew", padx=12, pady=(0, 12))
+        main.grid_columnconfigure(0, weight=2)  # chart
+        main.grid_columnconfigure(1, weight=1)  # stats + trades
+        main.grid_rowconfigure(0, weight=1)
+
+        # Left: Equity Curve canvas
+        chart_frame = ctk.CTkFrame(main, corner_radius=12, fg_color=("gray90","gray13"))
+        chart_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+        chart_frame.grid_rowconfigure(1, weight=1)
+        chart_frame.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(chart_frame, text="📈 Equity-Kurve",
+                     font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=0, sticky="w", padx=14, pady=10)
+        self._bt_eq_canvas_frame = ctk.CTkFrame(chart_frame, fg_color="transparent")
+        self._bt_eq_canvas_frame.grid(row=1, column=0, sticky="nsew", padx=8, pady=(0,8))
+        self._bt_eq_canvas_frame.grid_columnconfigure(0, weight=1)
+        self._bt_eq_canvas_frame.grid_rowconfigure(0, weight=1)
+        ctk.CTkLabel(self._bt_eq_canvas_frame,
+                     text="Starte einen Backtest um die Equity-Kurve zu sehen.",
+                     text_color="gray50", font=ctk.CTkFont(size=13)).grid(row=0, column=0)
+
+        # Right panel: stats + trade list
+        right = ctk.CTkFrame(main, fg_color="transparent")
+        right.grid(row=0, column=1, sticky="nsew")
+        right.grid_columnconfigure(0, weight=1)
+        right.grid_rowconfigure(1, weight=1)
+
+        # Stats cards (2x3 grid)
+        stats_frame = ctk.CTkFrame(right, corner_radius=12, fg_color=("gray90","gray13"))
+        stats_frame.grid(row=0, column=0, sticky="ew", pady=(0, 6))
+        stats_frame.grid_columnconfigure((0,1), weight=1)
+
+        self._bt_stats = {}
+        for i, (lbl, key) in enumerate([
+            ("Trades Gesamt", "total"), ("Winrate", "winrate"),
+            ("Profit Factor", "pf"),    ("Max Drawdown", "maxdd"),
+            ("Netto P&L (Pips)", "pnl"),("Sharpe Ratio", "sharpe")
+        ]):
+            r, c = divmod(i, 2)
+            card = ctk.CTkFrame(stats_frame, fg_color=("gray82","gray17"), corner_radius=10)
+            card.grid(row=r, column=c, padx=6, pady=6, sticky="ew")
+            ctk.CTkLabel(card, text=lbl, font=ctk.CTkFont(size=10), text_color="gray50").pack(anchor="w", padx=8, pady=(6,0))
+            val_lbl = ctk.CTkLabel(card, text="–", font=ctk.CTkFont(size=18, weight="bold"), text_color="#2E86AB")
+            val_lbl.pack(anchor="w", padx=8, pady=(0,6))
+            self._bt_stats[key] = val_lbl
+
+        # Trade list
+        trades_frame = ctk.CTkFrame(right, corner_radius=12, fg_color=("gray90","gray13"))
+        trades_frame.grid(row=1, column=0, sticky="nsew")
+        trades_frame.grid_rowconfigure(1, weight=1)
+        trades_frame.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(trades_frame, text="📋 Trade-Liste",
+                     font=ctk.CTkFont(size=13, weight="bold")).grid(row=0, column=0, sticky="w", padx=14, pady=8)
+        self._bt_trade_scroll = ctk.CTkScrollableFrame(trades_frame, fg_color="transparent")
+        self._bt_trade_scroll.grid(row=1, column=0, sticky="nsew", padx=6, pady=(0,6))
+        self._bt_trade_scroll.grid_columnconfigure((0,1,2,3), weight=1, uniform="tc")
+
+    def _run_backtest_threaded(self):
+        self._bt_run_btn.configure(state="disabled", text="⏳ Läuft…")
+        self._bt_status.configure(text="Lade Daten…", text_color="#E67E22")
+        self._bt_progress.start()
+        threading.Thread(target=self._run_backtest_bg, daemon=True).start()
+
+    def _run_backtest_bg(self):
+        """Core backtesting engine – runs in a background thread."""
+        import math
+
+        symbol   = self._bt_symbol.get()
+        tf_str   = self._bt_tf.get()
+        bars     = int(self._bt_bars.get())
+        strategy = self._bt_strategy.get()
+
+        # Map timeframe string → MT5 constant
+        if "M15" in tf_str:   tf = mt5.TIMEFRAME_M15
+        elif "M30" in tf_str: tf = mt5.TIMEFRAME_M30
+        elif "H4"  in tf_str: tf = mt5.TIMEFRAME_H4
+        elif "D1"  in tf_str: tf = mt5.TIMEFRAME_D1
+        else:                 tf = mt5.TIMEFRAME_H1
+
+        try:
+            if not mt5.initialize():
+                raise RuntimeError("MT5 nicht verbunden")
+
+            rates = mt5.copy_rates_from_pos(symbol, tf, 0, bars)
+            if rates is None or len(rates) < 50:
+                raise RuntimeError(f"Zu wenig Daten für {symbol}")
+
+            df = pd.DataFrame(rates)
+
+            # ── Signal Generation ──────────────────────────────────
+            signals = []   # list of (index, direction) where direction = 1 (buy) / -1 (sell)
+
+            if strategy == "SMC Fair Value Gap":
+                for i in range(2, len(df) - 1):
+                    c0, c1, c2 = df.iloc[i-2], df.iloc[i-1], df.iloc[i]
+                    if c0['high'] < c2['low'] and c1['close'] > c1['open']:
+                        gap = c2['low'] - c0['high']
+                        if gap > (c1['high'] - c1['low']) * 0.1:
+                            signals.append((i, 1))
+                    if c0['low'] > c2['high'] and c1['close'] < c1['open']:
+                        gap = c0['low'] - c2['high']
+                        if gap > (c1['high'] - c1['low']) * 0.1:
+                            signals.append((i, -1))
+
+            elif strategy == "SMC Order Block":
+                for i in range(2, len(df) - 1):
+                    c0, c1, c2 = df.iloc[i-2], df.iloc[i-1], df.iloc[i]
+                    if c0['close'] < c0['open'] and c1['close'] > c1['open'] and c2['close'] > c2['open']:
+                        if (c1['close']-c1['open']) > (c0['open']-c0['close']) * 1.5:
+                            signals.append((i, 1))
+                    if c0['close'] > c0['open'] and c1['close'] < c1['open'] and c2['close'] < c2['open']:
+                        if (c1['open']-c1['close']) > (c0['close']-c0['open']) * 1.5:
+                            signals.append((i, -1))
+
+            elif strategy == "Bullish Engulfing":
+                for i in range(1, len(df) - 1):
+                    prev, curr = df.iloc[i-1], df.iloc[i]
+                    if prev['close'] < prev['open'] and curr['close'] > curr['open']:
+                        if curr['close'] >= prev['open'] and curr['open'] <= prev['close']:
+                            signals.append((i, 1))
+                    if prev['close'] > prev['open'] and curr['close'] < curr['open']:
+                        if curr['close'] <= prev['open'] and curr['open'] >= prev['close']:
+                            signals.append((i, -1))
+
+            elif strategy == "EMA 20/50 Crossover":
+                df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
+                df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
+                for i in range(51, len(df) - 1):
+                    prev_cross = df['ema20'].iloc[i-1] - df['ema50'].iloc[i-1]
+                    curr_cross = df['ema20'].iloc[i]   - df['ema50'].iloc[i]
+                    if prev_cross <= 0 < curr_cross:
+                        signals.append((i, 1))
+                    elif prev_cross >= 0 > curr_cross:
+                        signals.append((i, -1))
+
+            # ── Trade Simulation (ATR-based SL / 1.5R TP) ──────────
+            ATR_PERIOD = 14
+            df['atr'] = (df['high'] - df['low']).rolling(ATR_PERIOD).mean()
+
+            trades   = []
+            equity   = [0.0]
+            last_exit = -1
+
+            for sig_idx, direction in signals:
+                if sig_idx <= last_exit:
+                    continue   # skip overlapping trades
+                if sig_idx + 1 >= len(df):
+                    continue
+
+                entry_bar = df.iloc[sig_idx + 1]
+                entry     = entry_bar['open']
+                atr       = df['atr'].iloc[sig_idx]
+                if atr == 0 or math.isnan(atr):
+                    continue
+
+                sl_dist = atr * 1.0
+                tp_dist = atr * 1.5
+                sl = entry - direction * sl_dist
+                tp = entry + direction * tp_dist
+
+                # Scan forward for TP/SL hit
+                result_pips = None
+                for j in range(sig_idx + 2, min(sig_idx + 50, len(df))):
+                    bar = df.iloc[j]
+                    if direction == 1:
+                        if bar['low']  <= sl:
+                            result_pips = -sl_dist / 0.0001
+                            last_exit   = j
+                            break
+                        if bar['high'] >= tp:
+                            result_pips = tp_dist / 0.0001
+                            last_exit   = j
+                            break
+                    else:
+                        if bar['high'] >= sl:
+                            result_pips = -sl_dist / 0.0001
+                            last_exit   = j
+                            break
+                        if bar['low']  <= tp:
+                            result_pips = tp_dist / 0.0001
+                            last_exit   = j
+                            break
+
+                if result_pips is None:
+                    continue   # trade still open at end of data
+
+                trades.append({
+                    "entry_time": str(pd.to_datetime(entry_bar['time'], unit='s'))[:16],
+                    "dir":   "BUY" if direction == 1 else "SELL",
+                    "entry": round(entry, 5),
+                    "result": round(result_pips, 1),
+                    "win":   result_pips > 0,
+                })
+                equity.append(equity[-1] + result_pips)
+
+            # ── Calculate Stats ────────────────────────────────────
+            if not trades:
+                self.after(0, lambda: (
+                    self._bt_status.configure(text="Keine Trades gefunden.", text_color="#E67E22"),
+                    self._bt_progress.stop(),
+                    self._bt_run_btn.configure(state="normal", text="▶ Backtest Starten")
+                ))
+                return
+
+            total   = len(trades)
+            wins    = sum(1 for t in trades if t['win'])
+            winrate = wins / total * 100
+            gross_p = sum(t['result'] for t in trades if t['result'] > 0)
+            gross_l = abs(sum(t['result'] for t in trades if t['result'] < 0))
+            pf      = gross_p / gross_l if gross_l > 0 else float('inf')
+            pnl     = sum(t['result'] for t in trades)
+
+            # Max drawdown
+            peak, maxdd = 0.0, 0.0
+            for e in equity:
+                if e > peak: peak = e
+                dd = peak - e
+                if dd > maxdd: maxdd = dd
+
+            # Sharpe (simplified)
+            if len(equity) > 2:
+                rets  = [equity[i] - equity[i-1] for i in range(1, len(equity))]
+                mean_r = sum(rets) / len(rets)
+                std_r  = (sum((r - mean_r)**2 for r in rets) / len(rets)) ** 0.5
+                sharpe = (mean_r / std_r * (252 ** 0.5)) if std_r > 0 else 0.0
+            else:
+                sharpe = 0.0
+
+            self.after(0, lambda: self._bt_show_results(trades, equity, total, winrate, pf, maxdd, pnl, sharpe))
+
+        except Exception as e:
+            err = str(e)
+            self.after(0, lambda msg=err: (
+                self._bt_status.configure(text=f"Fehler: {msg[:70]}", text_color="#E74C3C"),
+                self._bt_progress.stop(),
+                self._bt_run_btn.configure(state="normal", text="▶ Backtest Starten")
+            ))
+
+    def _bt_show_results(self, trades, equity, total, winrate, pf, maxdd, pnl, sharpe):
+        """Render results on the main thread."""
+        self._bt_progress.stop()
+        self._bt_run_btn.configure(state="normal", text="▶ Backtest Starten")
+        self._bt_status.configure(text=f"✅ Fertig – {total} Trades simuliert", text_color="#5EBA7D")
+
+        # Update stat cards
+        wr_color = "#5EBA7D" if winrate >= 50 else "#E74C3C"
+        pnl_color = "#5EBA7D" if pnl >= 0 else "#E74C3C"
+        self._bt_stats["total"].configure(text=str(total))
+        self._bt_stats["winrate"].configure(text=f"{winrate:.1f}%", text_color=wr_color)
+        self._bt_stats["pf"].configure(text=f"{min(pf,99):.2f}")
+        self._bt_stats["maxdd"].configure(text=f"{maxdd:.0f} pips", text_color="#E74C3C")
+        self._bt_stats["pnl"].configure(text=f"{pnl:+.0f}", text_color=pnl_color)
+        self._bt_stats["sharpe"].configure(text=f"{sharpe:.2f}")
+
+        # ── Equity Curve ────────────────────────────────────────
+        for w in self._bt_eq_canvas_frame.winfo_children():
+            w.destroy()
+
+        fig = Figure(figsize=(6, 3), facecolor="#1a1a1a")
+        ax  = fig.add_subplot(111)
+        ax.set_facecolor("#1a1a1a")
+        ax.tick_params(colors="gray")
+        for spine in ax.spines.values():
+            spine.set_edgecolor("#333")
+
+        color = "#5EBA7D" if equity[-1] >= 0 else "#E74C3C"
+        ax.plot(equity, color=color, linewidth=1.5)
+        ax.fill_between(range(len(equity)), equity, alpha=0.15, color=color)
+        ax.axhline(0, color="gray", linewidth=0.5, linestyle="--")
+        ax.set_xlabel("Trades", color="gray", fontsize=9)
+        ax.set_ylabel("Pips", color="gray", fontsize=9)
+        ax.set_title(f"{self._bt_symbol.get()} – {self._bt_strategy.get()}", color="white", fontsize=10)
+        fig.tight_layout(pad=1.0)
+
+        canvas = FigureCanvasTkAgg(fig, master=self._bt_eq_canvas_frame)
+        canvas.draw()
+        canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
+
+        # ── Trade List ───────────────────────────────────────────
+        for w in self._bt_trade_scroll.winfo_children():
+            w.destroy()
+
+        # Header
+        hdr = ctk.CTkFrame(self._bt_trade_scroll, fg_color=("gray80","gray20"), corner_radius=6)
+        hdr.pack(fill="x", pady=(0, 4))
+        hdr.grid_columnconfigure((0,1,2,3), weight=1, uniform="tc")
+        for ci, h in enumerate(["Zeit", "Dir", "Entry", "Ergebnis"]):
+            ctk.CTkLabel(hdr, text=h, font=ctk.CTkFont(size=10, weight="bold"),
+                         text_color="gray50").grid(row=0, column=ci, padx=6, pady=4, sticky="w")
+
+        for t in trades[-50:]:  # show last 50
+            row_bg = ("gray85","gray17") if t['win'] else ("gray82","gray15")
+            rc = ctk.CTkFrame(self._bt_trade_scroll, fg_color=row_bg, corner_radius=6)
+            rc.pack(fill="x", pady=2)
+            rc.grid_columnconfigure((0,1,2,3), weight=1, uniform="tc")
+            pip_color = "#5EBA7D" if t['win'] else "#E74C3C"
+            dir_color = "#2E86AB" if t['dir'] == "BUY" else "#A23B72"
+            ctk.CTkLabel(rc, text=t['entry_time'], font=ctk.CTkFont(size=9), text_color="gray60").grid(row=0, column=0, padx=6, pady=3, sticky="w")
+            ctk.CTkLabel(rc, text=t['dir'],  font=ctk.CTkFont(size=10, weight="bold"), text_color=dir_color).grid(row=0, column=1, padx=6, sticky="w")
+            ctk.CTkLabel(rc, text=str(t['entry']), font=ctk.CTkFont(size=9), text_color="gray70").grid(row=0, column=2, padx=6, sticky="w")
+            ctk.CTkLabel(rc, text=f"{t['result']:+.1f}p", font=ctk.CTkFont(size=10, weight="bold"), text_color=pip_color).grid(row=0, column=3, padx=6, sticky="w")
 
     def setup_terminal_tab(self):
 
@@ -2582,6 +3451,9 @@ class ModernFinGPTGUI(ctk.CTk):
             # Startup Sweep Effect
             self._play_startup_sweep()
             
+            # Start Background AI Speech Bubble Worker
+            threading.Thread(target=self._ai_analysis_worker, daemon=True).start()
+            
             self.write_terminal(">> MT5 Live-Stream gestartet. Empfange Ticks...\n")
             self.start_live_stream_thread()
 
@@ -2629,6 +3501,54 @@ class ModernFinGPTGUI(ctk.CTk):
                  
         for i, card in enumerate(cards):
             self.after(i * 150, lambda c=card: fade_card(c))
+
+    def _ai_analysis_worker(self):
+        """Runs in background, randomly generating a 1-sentence analysis from Ollama to display as floating speech bubbles"""
+        import time, random, requests
+        
+        while self.is_live_running:
+            # Wait between analyses (e.g. 8-15 seconds)
+            time.sleep(random.randint(8, 15))
+            if not self.is_live_running: break
+            
+            if not hasattr(self, 'dashboard_symbols') or len(self.dashboard_symbols) == 0:
+                continue
+                
+            symbol = random.choice(self.dashboard_symbols)[1]
+            url = self.url_entry.get().strip()
+            model = self.model_var.get()
+            
+            prompt = f"Du bist ein FinGPT Agent. Schreibe eine extrem kurze (max 6 Worte) und spannende Feststellung zum {symbol} Chart. Zum Beispiel 'RSI stark überverkauft bei {symbol}' oder 'Volatilitäts-Spike bei {symbol} registriert.'. Antworte nur mit diesem einen Satz, keine Einleitung."
+            
+            try:
+                resp = requests.post(f"{url}/api/generate", json={
+                    "model": model,
+                    "prompt": prompt,
+                    "stream": False
+                }, timeout=10)
+                
+                if resp.status_code == 200:
+                    text = resp.json().get("response", "").strip().replace('"', '')
+                    if text:
+                        if not hasattr(self, 'ai_bubbles'):
+                            self.ai_bubbles = []
+                            
+                        # Pick random start location (avoid center orb)
+                        cw = getattr(self, 'sonar_width', 300)
+                        ch = getattr(self, 'sonar_height', 120)
+                        sx = random.choice([random.randint(20, int(cw/2)-60), random.randint(int(cw/2)+60, cw-20)])
+                        sy = random.randint(50, ch-20)
+                        
+                        self.ai_bubbles.append({
+                            "text": text,
+                            "x": sx,
+                            "y": sy,
+                            "age": 0,
+                            "max_age": 150 # 5 seconds at 30fps
+                        })
+            except Exception:
+                pass
+
 
     def animate_status_dot(self):
         if not self.is_live_running:
@@ -2715,6 +3635,48 @@ class ModernFinGPTGUI(ctk.CTk):
                 outline=color, width=w
             )
             self.sonar_circles.append(c)
+            
+        # ---------------------------------------------
+        # Animate AI Speech Bubbles
+        if not hasattr(self, 'ai_bubbles'):
+            self.ai_bubbles = []
+        if not hasattr(self, '_bubble_canvas_items'):
+            self._bubble_canvas_items = []
+            
+        # Clean previous frame texts
+        for item in self._bubble_canvas_items:
+            self.sonar_canvas.delete(item)
+        self._bubble_canvas_items.clear()
+        
+        surviving_bubbles = []
+        for b in self.ai_bubbles:
+            b["age"] += 1
+            if b["age"] >= b["max_age"]:
+                continue
+                
+            # Float up
+            b["y"] -= 0.3
+            
+            # Fade out from bright green (#5EBA7D) to background (#2b2b2b)
+            life_pct = b["age"] / b["max_age"]
+            r = int(0x5E + (0x2b - 0x5E) * life_pct)
+            g = int(0xBA + (0x2b - 0xBA) * life_pct)
+            bl= int(0x7D + (0x2b - 0x7D) * life_pct)
+            color = f"#{r:02x}{g:02x}{bl:02x}"
+            
+            item = self.sonar_canvas.create_text(
+                b["x"], b["y"],
+                text=b["text"],
+                fill=color,
+                font=("Arial", 10, "bold"),
+                width=120,
+                justify="center"
+            )
+            self._bubble_canvas_items.append(item)
+            surviving_bubbles.append(b)
+            
+        self.ai_bubbles = surviving_bubbles
+        # ---------------------------------------------
         
         self.ai_animation_idx += 1
         self.after(33, self._animate_sonar) # ~30fps smooth update
