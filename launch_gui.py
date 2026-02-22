@@ -58,7 +58,7 @@ def main():
     # GUI starten
     try:
         print("Starte moderne FinGPT GUI...")
-        from modern_fingpt_gui import main as gui_main
+        from gui.modern_fingpt_gui import main as gui_main
         gui_main()
     except KeyboardInterrupt:
         print("\nProgramm durch Benutzer beendet")
@@ -66,7 +66,7 @@ def main():
         print(f"Fehler beim Starten: {e}")
         print("Versuche Fallback zur klassischen GUI...")
         try:
-            from fingpt_config_gui import main as fallback_gui_main
+            from gui.fingpt_config_gui import main as fallback_gui_main
             print("Starte klassische Konfigurations-GUI...")
             fallback_gui_main()
         except Exception as fallback_e:

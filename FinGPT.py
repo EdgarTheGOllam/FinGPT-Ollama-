@@ -2,7 +2,6 @@
 """
 FinGPT mit Ollama + MetaTrader 5 Integration
 Vollautomatisches Trading mit KI und Partial Close + RSI
-Enhanced Version mit robustem Error Handling und Performance Optimization
 """
 
 import logging
@@ -21,24 +20,6 @@ import signal
 import queue
 warnings.filterwarnings("ignore")
 
-# Enhanced Modules Import
-try:
-    from input_validator import SafeInput, InputValidator, ValidationResult
-    from exception_handler import (
-        FinGPTError, MT5ConnectionError, OllamaConnectionError, TradingError,
-        RiskManagementError, ValidationError, ConfigurationError, DataError,
-        ErrorHandler, ErrorSeverity, safe_execute, retry_on_exception, CircuitBreaker,
-        global_error_handler, safe_execute_with_default
-    )
-    from performance_optimizer import (
-        PerformanceMetrics, PerformanceMonitor, performance_monitor, cached,
-        rate_limited, ResourceLimiter, global_metrics, global_monitor
-    )
-    ENHANCED_MODULES_AVAILABLE = True
-except ImportError as e:
-    print(f"⚠️ Enhanced modules nicht verfügbar: {e}")
-    ENHANCED_MODULES_AVAILABLE = False
-
 # MetaTrader 5 Import
 try:
     import MetaTrader5 as mt5
@@ -49,14 +30,14 @@ except ImportError:
     print("MetaTrader5 nicht installiert")
 
 # Risk Manager Import
-from risk_manager import RiskManager
+from trading.risk_manager import RiskManager
 
 # In Ihrer FinGPT.py Datei hinzufügen:
-from advanced_indicators import AdvancedIndicators, IndicatorIntegration
+from trading.advanced_indicators import AdvancedIndicators, IndicatorIntegration
 
 class MT5FinGPT:
     def __init__(self):
-        """Initialisiert das FinGPT System mit korrekter Reihenfolge und Enhanced Features"""
+        """Initialisiert das FinGPT System mit korrekter Reihenfolge"""
     
         # GRUNDLEGENDE EINSTELLUNGEN ZUERST
         self.ollama_url = "http://localhost:11434"
@@ -69,42 +50,26 @@ class MT5FinGPT:
         self.auto_trading = False
         self.auto_trade_symbols = ["EURUSD"]
         self.analysis_interval = 300
-        
-        # ENHANCED FEATURES INITIALIZATION
-        self.enhanced_mode = ENHANCED_MODULES_AVAILABLE
-        if self.enhanced_mode:
-            self.error_handler = ErrorHandler(self.logger if hasattr(self, 'logger') else None)
-            self.resource_limiter = ResourceLimiter(max_concurrent=5, rate_limit=2.0)
-            self.performance_metrics = global_metrics
-            self.log("INFO", "✅ Enhanced Features aktiviert", "SYSTEM")
-        else:
-            self.error_handler = None
-            self.resource_limiter = None
-            self.performance_metrics = None
-            self.log("INFO", "⚠️ Enhanced Features nicht verfügbar", "SYSTEM")
     
         # LOGGING SETUP - MUSS ZUERST KOMMEN!
         self.setup_logging()
-        self.log("INFO", "FinGPT Enhanced System wird initialisiert...")
+        self.log("INFO", "FinGPT System wird initialisiert...")
     
         # RISK MANAGER - NACH LOGGING!
         try:
-            from risk_manager import RiskManager
+            from trading.risk_manager import RiskManager
             self.risk_manager = RiskManager(logger=self.logger)
             self.log("INFO", "Risk Manager erfolgreich initialisiert", "RISK")
         except ImportError as e:
             self.log("ERROR", f"Risk Manager Import Fehler: {e}", "RISK")
             self.risk_manager = None
         except Exception as e:
-            error_msg = f"Risk Manager Initialisierung Fehler: {e}"
-            self.log("ERROR", error_msg, "RISK")
-            if self.enhanced_mode and self.error_handler:
-                self.error_handler.handle_exception(e, "risk_manager_init", ErrorSeverity.HIGH)
+            self.log("ERROR", f"Risk Manager Initialisierung Fehler: {e}", "RISK")
             self.risk_manager = None
     
         # ERWEITERTE INDIKATOREN - NACH LOGGING!
         try:
-            from advanced_indicators import AdvancedIndicators, IndicatorIntegration
+            from trading.advanced_indicators import AdvancedIndicators, IndicatorIntegration
             self.advanced_indicators = AdvancedIndicators(logger=self.logger)
             self.integration = IndicatorIntegration(self)
             self.log("INFO", "✅ Erweiterte Indikatoren erfolgreich initialisiert", "INDICATORS")
@@ -241,7 +206,7 @@ class MT5FinGPT:
 
         # RL INTEGRATION - NACH LOGGING!
         try:
-            from rl_trading_agent import RLTradingManager
+            from trading.rl_trading_agent import RLTradingManager
             self.rl_manager = RLTradingManager(self)
             self.rl_enabled = True
             self.log("INFO", "✅ RL Manager erfolgreich initialisiert", "RL")
@@ -370,15 +335,11 @@ class MT5FinGPT:
         """Debug-Logging für Menü-Aufrufe"""
         self.log("DEBUG", f"Menü Option '{choice}' -> {function_called}", "MENU")
 
-    def print_header(self, title, width=65):
-        """Verbesserte Header-Darstellung mit besserer Formatierung"""
-        border = "═" * width
-        title_line = f"║ {title.upper()} ║"
-        title_centered = title_line.center(width + 2, " ")
-        
-        print(f"\n╔{border}╗")
-        print(f"║{title_centered}║")
-        print(f"╚{border}╝")
+    def print_header(self, title, width=55):
+        """Schöne Header-Darstellung"""
+        print("\n" + "═" * width)
+        print(f"{title:^{width}}")
+        print("═" * width)
     
     def print_status_bar_extended(self):
         """Erweiterte Status-Leiste mit allen Features"""
@@ -513,7 +474,7 @@ class MT5FinGPT:
             return False
     
     def interactive_menu(self):
-        """Neu strukturiertes interaktives Menü mit klareren Gruppierungen"""
+        """Korrigierte interaktive Benutzeroberfläche - Vollständige Menü-Anzeige"""
     
         # Companion automatisch starten (leise)
         if self.auto_start_companion and not self.companion_enabled:
@@ -541,62 +502,58 @@ class MT5FinGPT:
             # Status-Leiste
             self.print_status_bar()
     
-            # MENÜ-GRUPPIERUNG MIT KLAREN KATEGORIEN
-            print("\n📋 HAUPTMENÜ - ÜBERSICHTLICH GRUPPIERT")
-            print("─" * 50)
-    
-            # DATEN & ANALYSE
-            print("\n📂 DATEN & ANALYSE:")
+            # VOLLSTÄNDIGES HAUPTMENÜ
+            print("\n📋 HAUPTMENÜ:")
             print("─" * 25)
-            print(" 1. 📊 Live-Daten anzeigen")
-            print(" 2. 🤖 KI-Analyse")
-            print(" 3. 📈 Offene Positionen")
     
-            # TRADING & AUSFÜHRUNG
-            print("\n💱 TRADING & AUSFÜHRUNG:")
-            print("─" * 25)
-            print(" 4. 💰 Trade ausführen")
-            print(" 5. 🔓 Trading aktivieren/deaktivieren")
-            print(" 6. 🔄 Auto-Trading")
-            print(" 7. ⚙️ Position Management")
-            print(" 8. 🎯 Partial Close Einstellungen")
+            # ALLE BASIS-OPTIONEN (1-19)
+            menu_items = [
+                ("1", "📊", "Live-Daten anzeigen"),
+                ("2", "🤖", "KI-Analyse"),
+                ("3", "💰", "Trade ausführen"),
+                ("4", "📈", "Offene Positionen"),
+                ("5", "🔓", "Trading aktivieren/deaktivieren"),
+                ("6", "🔄", "Auto-Trading"),
+                ("7", "⚙️", "Position Management"),
+                ("8", "🎯", "Partial Close Einstellungen"),
+                ("9", "📉", "RSI Einstellungen"),
+                ("10", "📊", "Support/Resistance Einstellungen"),
+                ("11", "🔧", "Trading Companion"),
+                ("12", "🔗", "MT5 Verbindung"),
+                ("13", "📊", "MACD Einstellungen"),
+                ("14", "🎯", "Trailing Stop Einstellungen"),
+                ("15", "📈", "Multi-Timeframe Einstellungen"),
+                ("16", "🛡️", "Risk Management"),
+                ("17", "💱", "Währungspaar Management"),
+                ("18", "🤖", "Reinforcement Learning"),
+                ("19", "❌", "Beenden")  # Standard-Beenden ohne erweiterte Features
+            ]
     
-            # EINSTELLUNGEN & KONFIGURATION
-            print("\n⚙️ EINSTELLUNGEN & KONFIGURATION:")
-            print("─" * 35)
-            print(" 9. 📉 RSI Einstellungen")
-            print("10. 📊 Support/Resistance Einstellungen")
-            print("11. 📊 MACD Einstellungen")
-            print("12. 🎯 Trailing Stop Einstellungen")
-            print("13. 📈 Multi-Timeframe Einstellungen")
-            print("14. 🔗 MT5 Verbindung")
-            print("15. 🛡️ Risk Management")
-            print("16. 💱 Währungspaar Management")
-            print("17. 🔧 Trading Companion")
-            print("18. 🤖 Reinforcement Learning")
+            # Zeige alle Basis-Optionen
+            for num, icon, desc in menu_items:
+                print(f" {num:>2}. {icon} {desc}")
     
             # ERWEITERTE INDIKATOREN SEKTION (nur wenn verfügbar)
             if getattr(self, 'has_extended_indicators', False):
-                print("\n🔬 ERWEITERTE INDIKATOREN & ANALYSE:")
-                print("─" * 40)
-                print("20. 🔍 Einzelne erweiterte Indikatoren")
-                print("21. 📊 Vollständige technische Analyse")
-                print("22. 🎯 Signal-Generator (Alle Indikatoren)")
-                print("23. ⚙️ Erweiterte Indikator-Einstellungen")
-                print("24. 🤖 KI-Analyse (mit allen Indikatoren)")
-                print("25. 📈 Multi-Indikator Scanner")
-                print("26. 📊 Indikator-Vergleich & Benchmark")
-                print("27. 🧪 Indikator-Test & Parameter-Optimierung")
+                print("\n📊 ERWEITERTE INDIKATOREN:")
+                print("─" * 35)
             
-            # PROGRAMM ENDE
-            print("\n🚪 PROGRAMM:")
-            print("─" * 15)
-            if getattr(self, 'has_extended_indicators', False):
-                print("28. ❌ Beenden")
-                max_option = 28
-            else:
-                print("19. ❌ Beenden")
-                max_option = 19
+                advanced_items = [
+                    ("20", "🔬", "Einzelne erweiterte Indikatoren"),
+                    ("21", "📊", "Vollständige technische Analyse"),
+                    ("22", "🎯", "Signal-Generator (Alle Indikatoren)"),
+                    ("23", "⚙️", "Erweiterte Indikator-Einstellungen"),
+                    ("24", "🤖", "KI-Analyse (mit allen Indikatoren)"),
+                    ("25", "📈", "Multi-Indikator Scanner"),
+                    ("26", "📋", "Indikator-Vergleich"),
+                    ("27", "🧪", "Indikator-Test & Optimierung"),
+                ]
+            
+                for num, icon, desc in advanced_items:
+                    print(f" {num:>2}. {icon} {desc}")
+            
+                # Erweiterte Beenden-Option
+                print(f"\n 28. ❌ Beenden")
         
             print("─" * 50)
         
@@ -608,15 +565,14 @@ class MT5FinGPT:
                 ]
                 print(f"📊 Verfügbare erweiterte Indikatoren: {len(available_indicators)}")
                 print(f"🎯 Basis + Erweitert = {3 + len(available_indicators)} Indikatoren total")
-                print("✨ Alle erweiterten Funktionen aktiviert")
             else:
                 print("📊 Basis-Indikatoren: RSI, MACD, Support/Resistance")
                 print("💡 Tipp: Installieren Sie advanced_indicators.py für mehr Features!")
-                print("🚀 Upgrade auf erweiterte Version möglich")
-
+    
             print("─" * 50)
     
             # EINGABE MIT THREAD-SCHUTZ
+            max_option = 28 if getattr(self, 'has_extended_indicators', False) else 19
             choice = ""
             try:
                 choice = input(f"🎯 Ihre Wahl (1-{max_option}): ").strip()
@@ -628,7 +584,7 @@ class MT5FinGPT:
                 break
     
     def print_status_bar(self):
-        """Verbesserte Status-Leiste mit besserer Lesbarkeit und Übersichtlichkeit"""
+        """Status-Leiste - Funktioniert mit und ohne erweiterte Features"""
         try:
             with self.ui_lock:
                 # Risk Manager Status prüfen
@@ -676,34 +632,17 @@ class MT5FinGPT:
                 status_items.append(f"🔧 Companion: {'✅' if self.companion_enabled else '❌'}")
 
                 # Dynamische Breite basierend auf Anzahl der Items
-                total_width = max(85, len(' | '.join(status_items)) + 4)
+                total_width = max(75, len(' | '.join(status_items)) + 4)
         
-                # Verbesserte visuelle Darstellung
-                print(f"\n┌{'─' * (total_width - 2)}┐")
-                print(f"│ {'STATUS ÜBERSICHT':^{total_width - 4}} │")
-                print(f"├{'─' * (total_width - 2)}┤")
-                
-                # Status-Items in zwei Reihen anordnen für bessere Lesbarkeit
-                mid_point = len(status_items) // 2
-                row1_items = status_items[:mid_point]
-                row2_items = status_items[mid_point:]
-                
-                # Erste Reihe
-                row1_str = ' │ '.join(row1_items)
-                print(f"│ {row1_str:<{total_width - 4}} │")
-                
-                # Zweite Reihe
-                row2_str = ' │ '.join(row2_items)
-                print(f"│ {row2_str:<{total_width - 4}} │")
-                
-                print(f"└{'─' * (total_width - 2)}┘")
+                print("\n┌" + "─" * total_width + "┐")
+                print(f"│ {' | '.join(status_items):<{total_width-2}} │")
+                print("└" + "─" * total_width + "┘")
             
         except Exception as e:
-            # Fallback bei Fehlern mit verbessertem Design
-            error_msg = f"Status-Bar Fehler: {str(e)[:50]}"
-            print(f"\n┌{'─' * 65}┐")
-            print(f"│ {error_msg:<63} │")
-            print(f"└{'─' * 65}┘")
+            # Fallback bei Fehlern
+            print("\n┌─────────────────────────────────────────────────────────────────┐")
+            print(f"│ Status-Bar Fehler: {str(e)[:50]:<50} │")
+            print("└─────────────────────────────────────────────────────────────────┘")
 
     def print_status_bar_basic(self):
         """Basis Status-Leiste (Fallback)"""
@@ -779,10 +718,7 @@ class MT5FinGPT:
         if choice == "1":
             self.log("INFO", "Live-Daten Abfrage gestartet", "USER")
             self.print_header("LIVE MARKTDATEN")
-            if self.enhanced_mode:
-                symbol = SafeInput.get_symbol("Symbol eingeben: ")
-            else:
-                symbol = input("Symbol eingeben: ").upper()
+            symbol = input("Symbol eingeben: ").upper()
             if symbol:
                 self.log("INFO", f"Marktdaten abgerufen für {symbol}", "MT5")
                 data = self.get_mt5_live_data(symbol)
@@ -793,10 +729,7 @@ class MT5FinGPT:
         elif choice == "2":
             self.log("INFO", "KI-Analyse gestartet", "USER")
             self.print_header("KI-ANALYSE")
-            if self.enhanced_mode:
-                symbol = SafeInput.get_symbol("Symbol für Analyse: ")
-            else:
-                symbol = input("Symbol für Analyse: ").upper()
+            symbol = input("Symbol für Analyse: ").upper()
             if symbol:
                 print(f"\n🔄 Analysiere {symbol}...")
                 print("─" * 50)
@@ -852,12 +785,8 @@ class MT5FinGPT:
                 self.log("WARNING", "Trade abgelehnt - Trading nicht aktiviert", "TRADE")
                 print("Trading nicht aktiviert!")
             else:
-                if self.enhanced_mode:
-                    symbol = SafeInput.get_symbol("Symbol: ")
-                    action = SafeInput.get_action("Aktion (BUY/SELL): ")
-                else:
-                    symbol = input("Symbol: ").upper()
-                    action = input("Aktion (BUY/SELL): ").upper()
+                symbol = input("Symbol: ").upper()
+                action = input("Aktion (BUY/SELL): ").upper()
                 if symbol and action in ["BUY", "SELL"]:
                     self.log("INFO", f"Trade wird ausgeführt: {action} {symbol}", "TRADE")
                     result = self.execute_trade(symbol, action)
@@ -5082,16 +5011,7 @@ class MT5FinGPT:
                 print("Keine Account-Info")
                 return False
             
-            # AutoTrading Status prüfen
-            terminal_info = mt5.terminal_info()
-            if terminal_info and not terminal_info.trade_allowed:
-                print("❌ AutoTrading in MetaTrader 5 deaktiviert!")
-                print("   Bitte in MT5 den AutoTrading Knopf aktivieren (Ctrl+E)")
-                return False
-            
             print(f"MT5 verbunden: {account_info.company}")
-            if terminal_info:
-                print(f"✅ AutoTrading Status: {'Aktiv' if terminal_info.trade_allowed else 'Inaktiv'}")
             self.mt5_connected = True
             return True
             
@@ -5735,7 +5655,7 @@ Antworte auf Deutsch und konkret."""
             return "KI-Analyse durchgeführt"
 
     def display_formatted_analysis(self, symbol, ai_response, live_data):
-        """Zeigt die KI-Analyse übersichtlich und mit Emojis formatiert an"""
+        """Zeigt die KI-Analyse schön formatiert an"""
     
         print("\n" + "═" * 60)
         print(f"🤖 KI-ANALYSE FÜR {symbol}")
@@ -5752,8 +5672,8 @@ Antworte auf Deutsch und konkret."""
         except:
             pass
     
-        # KI-Antwort strukturiert aufbereiten mit mehr Emojis
-        formatted_response = self.format_ai_response_improved(ai_response)
+        # KI-Antwort strukturiert aufbereiten
+        formatted_response = self.format_ai_response(ai_response)
         print(formatted_response)
     
         print("═" * 60)
@@ -5807,97 +5727,8 @@ Antworte auf Deutsch und konkret."""
         except Exception as e:
             return f"🤖 {response}"  # Fallback bei Formatierungsfehlern
 
-    def format_ai_response_improved(self, response):
-        """Verbesserte Formatierung der KI-Antwort mit mehr Emojis und besserer Übersichtlichkeit"""
-        try:
-            # Entferne doppelte Leerzeilen und überflüssige Zeichen
-            lines = [line.strip() for line in response.split('\n') if line.strip()]
-        
-            formatted = []
-            current_section = ""
-            section_number = 1
-        
-            # Überschrift für die verbesserte Formatierung
-            formatted.append("✨ VERBESSERTE KI-ANALYSE")
-            formatted.append("─" * 40)
-        
-            for line in lines:
-                # Erkenne Überschriften (mit ** oder Doppelpunkt)
-                if ('**' in line or 
-                    line.endswith(':') or 
-                    any(keyword in line.upper() for keyword in ['EMPFEHLUNG', 'ANALYSE', 'BEGRÜNDUNG', 'SIGNAL', 'EINSTIEG', 'STOP', 'TAKE'])):
-                
-                    if current_section:
-                        formatted.append("")  # Leerzeile vor neuer Sektion
-                
-                    # Formatiere Überschrift mit Nummerierung
-                    clean_line = line.replace('**', '').strip(':').strip()
-                    section_icons = {
-                        'HAUPTSIGNAL': '🎯',
-                        'EMPFEHLUNG': '💡',
-                        'EINSTIEG': '💰',
-                        'ENTRY': '💰',
-                        'STOP': '🛑',
-                        'TAKE': '🎯',
-                        'TP': '🎯',
-                        'PROFIT': '🎯',
-                        'BEGRÜNDUNG': '📝',
-                        'ANALYSE': '🔍',
-                        'SIGNAL': '📡'
-                    }
-                
-                    # Wähle passendes Emoji für die Sektion
-                    icon = '📌'
-                    for keyword, emoji in section_icons.items():
-                        if keyword in clean_line.upper():
-                            icon = emoji
-                            break
-                
-                    formatted.append(f"{icon} {section_number}. {clean_line.upper()}")
-                    formatted.append("─" * 30)
-                    current_section = clean_line
-                    section_number += 1
-                
-                else:
-                    # Normaler Text mit Icons und bessere Formatierung
-                    if any(keyword in line.upper() for keyword in ['BUY', 'KAUFEN']):
-                        formatted.append(f"🚀 {line}")
-                    elif any(keyword in line.upper() for keyword in ['SELL', 'VERKAUFEN']):
-                        formatted.append(f"🔻 {line}")
-                    elif any(keyword in line.upper() for keyword in ['WARTEN', 'HOLD', 'NEUTRAL']):
-                        formatted.append(f"⏸️ {line}")
-                    elif any(keyword in line.upper() for keyword in ['STOP', 'SL']):
-                        formatted.append(f"🛑 {line}")
-                    elif any(keyword in line.upper() for keyword in ['TAKE', 'TP', 'PROFIT']):
-                        formatted.append(f"🎯 {line}")
-                    elif any(keyword in line.upper() for keyword in ['ENTRY', 'PREIS', 'PRICE']):
-                        formatted.append(f"💰 {line}")
-                    elif any(keyword in line.upper() for keyword in ['RSI']):
-                        formatted.append(f"📊 {line}")
-                    elif any(keyword in line.upper() for keyword in ['MACD']):
-                        formatted.append(f"📈 {line}")
-                    elif any(keyword in line.upper() for keyword in ['SUPPORT', 'RESISTANCE', 'S/R']):
-                        formatted.append(f"📍 {line}")
-                    elif any(keyword in line.upper() for keyword in ['TREND']):
-                        formatted.append(f"🧭 {line}")
-                    else:
-                        # Füge Emojis für wichtige Schlüsselwörter hinzu
-                        if 'WICHTIG' in line.upper() or 'KRITISCH' in line.upper():
-                            formatted.append(f"❗ {line}")
-                        elif 'VORSICHT' in line.upper() or 'RISIKO' in line.upper():
-                            formatted.append(f"⚠️ {line}")
-                        elif 'GUT' in line.upper() or 'STARK' in line.upper():
-                            formatted.append(f"✅ {line}")
-                        else:
-                            formatted.append(f"💬 {line}")
-        
-            return '\n'.join(formatted)
-        
-        except Exception as e:
-            return f"🤖 Fehler bei Formatierung: {e}\n\nOriginal:\n{response}"  # Fallback bei Formatierungsfehlern
-
     def display_technical_summary(self, symbol):
-        """Zeigt eine übersichtliche technische Zusammenfassung mit Emojis"""
+        """Zeigt eine kompakte technische Zusammenfassung"""
         try:
             print("\n📊 TECHNISCHE INDIKATOREN ZUSAMMENFASSUNG:")
             print("─" * 50)
@@ -5906,15 +5737,15 @@ Antworte auf Deutsch und konkret."""
             rsi_value = self.calculate_rsi(symbol)
             if rsi_value:
                 rsi_signal, rsi_desc = self.get_rsi_signal(rsi_value)
-                rsi_icon = "🚀" if rsi_signal == "BUY" else "🔻" if rsi_signal == "SELL" else "⏸️"
-                print(f"{rsi_icon} RSI ({self.rsi_period}): {rsi_value:.1f} - {rsi_desc}")
+                rsi_icon = "🟢" if rsi_signal == "BUY" else "🔴" if rsi_signal == "SELL" else "🟡"
+                print(f"{rsi_icon} RSI ({self.rsi_period}): {rsi_value} - {rsi_desc}")
         
             # MACD
             macd_data = self.calculate_macd(symbol)
             if macd_data:
                 macd_signal, macd_desc = self.get_macd_signal(macd_data)
-                macd_icon = "📈" if macd_signal == "BUY" else "📉" if macd_signal == "SELL" else "⏸️"
-                print(f"{macd_icon} MACD: {macd_data['macd']:.6f} - {macd_desc[:40]}...")
+                macd_icon = "🟢" if macd_signal == "BUY" else "🔴" if macd_signal == "SELL" else "🟡"
+                print(f"{macd_icon} MACD: {macd_data['macd']:.6f} - {macd_desc[:50]}...")
         
             # Support/Resistance
             sr_data = self.calculate_support_resistance(symbol)
@@ -5924,69 +5755,22 @@ Antworte auf Deutsch und konkret."""
                 if sr_data['nearest_support']:
                     sup_level, sup_strength = sr_data['nearest_support']
                     distance = abs(current_price - sup_level) / current_price * 10000
-                    strength_icon = "💪" if sup_strength > 0.7 else "👍" if sup_strength > 0.4 else "⚠️"
-                    print(f"🛡️ Nächster Support: {sup_level:.5f} ({distance:.1f} Pips) {strength_icon}")
+                    print(f"🔵 Nächster Support: {sup_level:.5f} ({distance:.1f} Pips, Stärke: {sup_strength})")
             
                 if sr_data['nearest_resistance']:
                     res_level, res_strength = sr_data['nearest_resistance']
                     distance = abs(current_price - res_level) / current_price * 10000
-                    strength_icon = "💪" if res_strength > 0.7 else "👍" if res_strength > 0.4 else "⚠️"
-                    print(f"🏔️ Nächste Resistance: {res_level:.5f} ({distance:.1f} Pips) {strength_icon}")
+                    print(f"🔴 Nächste Resistance: {res_level:.5f} ({distance:.1f} Pips, Stärke: {res_strength})")
         
             # Multi-Timeframe Trend (falls aktiviert)
             if self.mtf_enabled:
                 trend_data = self.get_higher_timeframe_trend(symbol)
                 if trend_data:
-                    trend_icon = "🚀" if "BULLISH" in trend_data['direction'] else "🔻" if "BEARISH" in trend_data['direction'] else "⏸️"
+                    trend_icon = "🟢" if "BULLISH" in trend_data['direction'] else "🔴" if "BEARISH" in trend_data['direction'] else "🟡"
                     tf_name = self.timeframe_names.get(self.trend_timeframe, "H1")
                     print(f"{trend_icon} {tf_name} Trend: {trend_data['direction']} ({trend_data['quality']})")
         
-            # Zusammenfassung
             print("─" * 50)
-            print("📋 GESAMT-ZUSAMMENFASSUNG:")
-            print("─" * 30)
-            
-            # Zähle BUY/SELL-Signale
-            buy_signals = 0
-            sell_signals = 0
-            
-            # RSI-Signal zählen
-            if rsi_value:
-                if rsi_signal == "BUY":
-                    buy_signals += 1
-                elif rsi_signal == "SELL":
-                    sell_signals += 1
-            
-            # MACD-Signal zählen
-            if macd_data:
-                if macd_signal == "BUY":
-                    buy_signals += 1
-                elif macd_signal == "SELL":
-                    sell_signals += 1
-            
-            # Trend-Signal zählen (falls aktiviert)
-            trend_signal = None
-            if self.mtf_enabled and trend_data:
-                if "BULLISH" in trend_data['direction']:
-                    buy_signals += 1
-                    trend_signal = "BULLISH"
-                elif "BEARISH" in trend_data['direction']:
-                    sell_signals += 1
-                    trend_signal = "BEARISH"
-            
-            # Gesamtaussage
-            if buy_signals > sell_signals:
-                overall_icon = "🚀"
-                overall_signal = "STARKE KAUFEMPFEHLUNG"
-            elif sell_signals > buy_signals:
-                overall_icon = "🔻"
-                overall_signal = "STARKE VERKAUFEMPFEHLUNG"
-            else:
-                overall_icon = "⏸️"
-                overall_signal = "NEUTRALE MARKTLAGE"
-            
-            print(f"{overall_icon} {overall_signal}")
-            print(f"📈 Kaufsignale: {buy_signals} | 📉 Verkaufsignale: {sell_signals}")
         
         except Exception as e:
             print(f"⚠️ Technische Zusammenfassung Fehler: {e}")
@@ -6686,6 +6470,13 @@ def main():
         print("\n🎯 SYSTEM BEREIT")
         print("=" * 65)
         
+        # Kurze Bedienungsanleitung
+        print("\n💡 SCHNELLSTART:")
+        print("1️⃣ Option 5: Trading aktivieren")
+        print("2️⃣ Option 16: Risk Management konfigurieren") 
+        print("3️⃣ Option 2: KI-Analyse testen")
+        print("4️⃣ Option 3: Manueller Trade (mit Risk Checks)")
+        print("5️⃣ Option 6: Auto-Trading (Vorsicht!)")
 
         # Signal Handler registrieren
         signal.signal(signal.SIGINT, signal_handler)
