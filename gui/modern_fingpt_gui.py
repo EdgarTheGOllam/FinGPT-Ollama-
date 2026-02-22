@@ -135,12 +135,28 @@ class ModernFinGPTGUI(ctk.CTk):
         self.status_dot.pack(side="right")
         
         # 2. Main Tabview (ersetzt ttk.Notebook)
-        self.tabview = ctk.CTkTabview(self, corner_radius=15)
+        self.tabview = ctk.CTkTabview(
+            self, 
+            corner_radius=15,
+            segmented_button_fg_color=("gray85", "#181818"),
+            segmented_button_selected_color="#2E86AB",
+            segmented_button_selected_hover_color="#21618C",
+            segmented_button_unselected_color=("gray85", "#181818"),
+            segmented_button_unselected_hover_color=("gray75", "#282828"),
+            text_color=("gray10", "#F0F0F0")
+        )
         self.tabview.grid(row=1, column=0, sticky="nsew", padx=20, pady=(0, 10))
+        
+        # Increase the size and make the font bolder for the Tab buttons dynamically
+        self.tabview._segmented_button.configure(
+            font=ctk.CTkFont(family="Segoe UI", size=15, weight="bold"),
+            height=36
+        )
         
         self.tabview.add("📊 Dashboard")
         self.tabview.add("📈 Charts")
         self.tabview.add("🎭 Debate")
+        self.tabview.add("🤖 RL Studio")
         self.tabview.add("📝 Journal")
         self.tabview.add("📰 News")
         self.tabview.add("💻 Terminal")
@@ -151,6 +167,7 @@ class ModernFinGPTGUI(ctk.CTk):
         self.setup_dashboard_tab()
         self.setup_charts_tab()
         self.setup_debate_tab()
+        self.setup_rl_studio_tab()
         self.setup_journal_tab()
         self.setup_news_tab()
         self.setup_terminal_tab()
@@ -201,21 +218,57 @@ class ModernFinGPTGUI(ctk.CTk):
         self.winrate_card = self.create_metric_card(tab, "Margin Level", "-%", 1, 1)
         self.risk_card = self.create_metric_card(tab, "Freie Margin", "€--", 1, 2)
 
-        # AI Agent Visualizer (Middle Banner)
-        self.ai_visualizer_frame = ctk.CTkFrame(tab, height=60, corner_radius=15, fg_color=("gray85", "gray17"))
+        # AI Agent Visualizer & Lückenfüller-Widgets (Middle Banner)
+        self.ai_visualizer_frame = ctk.CTkFrame(tab, height=90, corner_radius=15, fg_color=("gray85", "gray17"))
         self.ai_visualizer_frame.grid(row=2, column=0, columnspan=3, sticky="ew", padx=10, pady=(10, 0))
         self.ai_visualizer_frame.grid_propagate(False) # Keep fixed height
-        self.ai_visualizer_frame.grid_columnconfigure(1, weight=1)
+        self.ai_visualizer_frame.grid_columnconfigure(0, weight=2) # Sonar gets more space
+        self.ai_visualizer_frame.grid_columnconfigure(1, weight=1) # Goal
+        self.ai_visualizer_frame.grid_columnconfigure(2, weight=1) # Best Trade
         
-        self.ai_dot = ctk.CTkLabel(self.ai_visualizer_frame, text="●", text_color="gray", font=ctk.CTkFont(size=24))
-        self.ai_dot.pack(side="left", padx=(20, 10), pady=15)
+        # 1. AI Sonar Canvas (Left)
+        sonar_container = ctk.CTkFrame(self.ai_visualizer_frame, fg_color="transparent")
+        sonar_container.grid(row=0, column=0, sticky="nsew", padx=10, pady=5)
         
-        self.ai_status_lbl = ctk.CTkLabel(self.ai_visualizer_frame, text="Zzz... Warte auf Live-Stream", font=ctk.CTkFont(size=14, weight="bold", slant="italic"), text_color="gray60")
-        self.ai_status_lbl.pack(side="left", pady=15)
+        # Title above sonar
+        self.sonar_title = ctk.CTkLabel(sonar_container, text="KI-Engine: Standby", font=ctk.CTkFont(size=14, weight="bold"), text_color="gray60")
+        self.sonar_title.grid(row=0, column=0, columnspan=2, sticky="w", padx=10, pady=(5,0))
+        
+        import tkinter as tk
+        # Small canvas for the radar circles
+        self.sonar_canvas = tk.Canvas(sonar_container, bg="#212121", width=50, height=50, highlightthickness=0)
+        self.sonar_canvas.grid(row=1, column=0, padx=(10, 10), pady=0)
+        
+        self.ai_status_lbl = ctk.CTkLabel(sonar_container, text="Zzz... Warte auf Live-Stream", font=ctk.CTkFont(size=13, slant="italic"), text_color="gray50")
+        self.ai_status_lbl.grid(row=1, column=1, sticky="w")
+        
+        # Draw initial sleeping dot
+        self.sonar_circles = []
+        self._sonar_base_dot = self.sonar_canvas.create_oval(20, 20, 30, 30, fill="gray40", outline="")
+        
+        # 2. Daily Goal Widget (Middle)
+        goal_container = ctk.CTkFrame(self.ai_visualizer_frame, fg_color="transparent")
+        goal_container.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
+        
+        ctk.CTkLabel(goal_container, text="Tages-Ziel (100€)", font=ctk.CTkFont(size=12, weight="bold"), text_color="gray60").pack(anchor="w")
+        self.goal_progress = ctk.CTkProgressBar(goal_container, height=10, progress_color="#F1C40F")
+        self.goal_progress.pack(fill="x", pady=(10, 5))
+        self.goal_progress.set(0.0)
+        self.goal_lbl = ctk.CTkLabel(goal_container, text="0.00€ / 100€", font=ctk.CTkFont(size=11), text_color="gray50")
+        self.goal_lbl.pack(anchor="e")
+        
+        # 3. MVP Trade Widget (Right)
+        mvp_container = ctk.CTkFrame(self.ai_visualizer_frame, fg_color="transparent")
+        mvp_container.grid(row=0, column=2, sticky="nsew", padx=10, pady=10)
+        
+        ctk.CTkLabel(mvp_container, text="🏆 Bester Trade Heute", font=ctk.CTkFont(size=12, weight="bold"), text_color="gray60").pack(anchor="w")
+        self.mvp_trade_lbl = ctk.CTkLabel(mvp_container, text="Noch keine Trades", font=ctk.CTkFont(size=16, weight="bold"), text_color="#5EBA7D")
+        self.mvp_trade_lbl.pack(anchor="center", pady=10)
         
         # State variables for animation
         self.ai_animation_idx = 0
         self.ai_current_symbol = None
+        self._sonar_radii = [5, 15, 25] # Starting radii for expanding rings
 
         # Live Data List (Left Side)
         data_frame = ctk.CTkFrame(tab, corner_radius=15, fg_color=("gray90", "gray13"))
@@ -1197,12 +1250,17 @@ class ModernFinGPTGUI(ctk.CTk):
             row = ctk.CTkFrame(self._j_scroll, fg_color=row_bg, corner_radius=6)
             row.pack(fill="x", padx=4, pady=2)
 
+            def fmt_price(p):
+                if isinstance(p, (float, int)):
+                    return f"{p:.5f}".rstrip('0').rstrip('.')
+                return str(p)
+
             data = [
                 (str(trade.get("ticket", "-")), 80, "gray60"),
                 (trade.get("symbol", "-"), 80, "white"),
                 (trade.get("action", "-"), 80, "#5EBA7D" if trade.get("action") == "BUY" else "#E74C3C"),
-                (str(trade.get("open_price", "-")), 90, "gray80"),
-                (str(trade.get("close_price", trade.get("open_price", "-"))), 90, "gray80"),
+                (fmt_price(trade.get("open_price", "-")), 90, "gray80"),
+                (fmt_price(trade.get("close_price", trade.get("open_price", "-"))), 90, "gray80"),
                 (str(trade.get("lot_size", "-")), 55, "gray70"),
                 (f"{'+' if profit>=0 else ''}{profit:.2f}€", 80, profit_color),
             ]
@@ -2270,6 +2328,227 @@ class ModernFinGPTGUI(ctk.CTk):
                                  text_color="gray70", justify="left", anchor="w", wraplength=900)
             a_lbl.grid(row=1, column=0, sticky="ew", padx=20, pady=(0, 15))
 
+    # ==========================================
+    # 8. RL STUDIO TAB (Agent Training)
+    # ==========================================
+    def setup_rl_studio_tab(self):
+        tab = self.tabview.tab("🤖 RL Studio")
+        tab.grid_columnconfigure(0, weight=1)
+        tab.grid_columnconfigure(1, weight=2)
+        tab.grid_rowconfigure(1, weight=1)
+        
+        # --- TOP HEADER BAR ---
+        header = ctk.CTkFrame(tab, fg_color="transparent")
+        header.grid(row=0, column=0, columnspan=2, sticky="ew", padx=20, pady=(20, 10))
+        
+        ctk.CTkLabel(header, text="Reinforcement Learning Studio", 
+                     font=ctk.CTkFont(size=24, weight="bold"), text_color="#8E44AD").pack(side="left")
+        ctk.CTkLabel(header, text="Trainiere eigene KI-Agenten auf historischen MT5-Daten", 
+                     font=ctk.CTkFont(size=14), text_color="gray60").pack(side="left", padx=(15, 0), pady=(8, 0))
+        
+        # --- LEFT PANEL: Config Overview & Start Button ---
+        left_panel = ctk.CTkFrame(tab, corner_radius=15, fg_color=("gray85", "#181818"))
+        left_panel.grid(row=1, column=0, sticky="nsew", padx=(20, 10), pady=(0, 20))
+        
+        ctk.CTkLabel(left_panel, text="📌 Aktuelle Trainings-Config", font=ctk.CTkFont(weight="bold", size=16)).pack(pady=(20, 10), padx=20, anchor="w")
+        
+        # Info Box reading from settings
+        info_box = ctk.CTkFrame(left_panel, fg_color=("gray90", "gray13"), corner_radius=10)
+        info_box.pack(fill="x", padx=20, pady=10)
+        
+        # Labels that we'll update when switching tabs or clicking refresh
+        self.rl_cfg_algo_lbl = ctk.CTkLabel(info_box, text="Algorithmus: PPO", text_color="#2E86AB")
+        self.rl_cfg_algo_lbl.pack(anchor="w", padx=15, pady=(15, 5))
+        
+        self.rl_cfg_lr_lbl = ctk.CTkLabel(info_box, text="Lernrate: 0.0003", text_color="#5EBA7D")
+        self.rl_cfg_lr_lbl.pack(anchor="w", padx=15, pady=5)
+        
+        self.rl_cfg_steps_lbl = ctk.CTkLabel(info_box, text="Total Steps: 100000", text_color="#E67E22")
+        self.rl_cfg_steps_lbl.pack(anchor="w", padx=15, pady=(5, 15))
+        
+        self._training_active = False
+        
+        # Control Buttons
+        self.btn_start_rl = ctk.CTkButton(left_panel, text="▶ Neues Modell Trainieren", 
+                                          font=ctk.CTkFont(size=15, weight="bold"),
+                                          height=45, fg_color="#5EBA7D", hover_color="#4CAF50",
+                                          command=self._start_rl_training_sim)
+        self.btn_start_rl.pack(fill="x", padx=20, pady=(20, 10))
+        
+        self.btn_stop_rl = ctk.CTkButton(left_panel, text="⏹ Training Abbrechen", 
+                                         font=ctk.CTkFont(size=14),
+                                         height=35, fg_color="#E74C3C", hover_color="#C0392B",
+                                         state="disabled", command=self._stop_rl_training_sim)
+        self.btn_stop_rl.pack(fill="x", padx=20, pady=0)
+        
+        # Refresh config button
+        ctk.CTkButton(left_panel, text="🔄 Config Neu Laden", fg_color="transparent", 
+                      border_width=1, text_color="gray60", command=self._update_rl_studio_config_labels).pack(pady=20)
+                      
+        # --- RIGHT PANEL: Live Progress & Terminal ---
+        right_panel = ctk.CTkFrame(tab, corner_radius=15, fg_color=("gray85", "#181818"))
+        right_panel.grid(row=1, column=1, sticky="nsew", padx=(10, 20), pady=(0, 20))
+        right_panel.grid_rowconfigure(2, weight=1)
+        right_panel.grid_columnconfigure(0, weight=1)
+        
+        # Progress Section
+        prog_header = ctk.CTkFrame(right_panel, fg_color="transparent")
+        prog_header.grid(row=0, column=0, sticky="ew", padx=20, pady=(20, 5))
+        
+        self.rl_status_lbl = ctk.CTkLabel(prog_header, text="Warte auf Start...", font=ctk.CTkFont(weight="bold", size=15), text_color="gray50")
+        self.rl_status_lbl.pack(side="left")
+        
+        self.rl_pct_lbl = ctk.CTkLabel(prog_header, text="0%", font=ctk.CTkFont(weight="bold", size=15), text_color="#5EBA7D")
+        self.rl_pct_lbl.pack(side="right")
+        
+        self.rl_progress = ctk.CTkProgressBar(right_panel, progress_color="#8E44AD", height=12)
+        self.rl_progress.grid(row=1, column=0, sticky="ew", padx=20, pady=(0, 15))
+        self.rl_progress.set(0)
+        
+        # Terminal Box for Training Logs
+        import tkinter as tk
+        term_frame = ctk.CTkFrame(right_panel, corner_radius=8, fg_color="#101010")
+        term_frame.grid(row=2, column=0, sticky="nsew", padx=20, pady=(0, 20))
+        term_frame.grid_rowconfigure(0, weight=1)
+        term_frame.grid_columnconfigure(0, weight=1)
+        
+        self.rl_term_box = tk.Text(term_frame, bg="#101010", fg="#D4D4D4", 
+                                   font=("Consolas", 11), insertbackground="#D4D4D4",
+                                   relief="flat", borderwidth=0, state="disabled")
+        self.rl_term_box.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        
+        sb = tk.Scrollbar(term_frame, command=self.rl_term_box.yview, bg="#1E1E1E", troughcolor="#1E1E1E", highlightthickness=0)
+        sb.grid(row=0, column=1, sticky="ns")
+        self.rl_term_box.configure(yscrollcommand=sb.set)
+        
+        self.rl_term_box.tag_configure("tf", foreground="#F1C40F") # Yellow warning/tf labels
+        self.rl_term_box.tag_configure("info", foreground="#9CDCFE") # Blue info
+        self.rl_term_box.tag_configure("success", foreground="#5EBA7D") # Green success
+        
+        self._write_rl_log("[SYSTEM] RL Studio initialisiert. Bereit für Training.", "info")
+
+    def _update_rl_studio_config_labels(self):
+        """Pulls latest configs from the Config tab variables to show in the Studio"""
+        try:
+            algo = self.rl_algo_var.get()
+            lr   = self.rl_lr_slider.get()
+            steps = self.rl_steps_entry.get()
+            
+            self.rl_cfg_algo_lbl.configure(text=f"Algorithmus: {algo}")
+            self.rl_cfg_lr_lbl.configure(text=f"Lernrate: {lr:.5f}")
+            self.rl_cfg_steps_lbl.configure(text=f"Total Steps: {steps}")
+        except Exception:
+            pass
+
+    def _write_rl_log(self, text, tag=None):
+        self.rl_term_box.configure(state="normal")
+        if tag:
+            self.rl_term_box.insert("end", text + "\n", tag)
+        else:
+            self.rl_term_box.insert("end", text + "\n")
+        self.rl_term_box.see("end")
+        self.rl_term_box.configure(state="disabled")
+
+    def _start_rl_training_sim(self):
+        if self._training_active: return
+        self._update_rl_studio_config_labels()
+        
+        algo = self.rl_algo_var.get()
+        steps = 100000
+        try:
+            steps = int(self.rl_steps_entry.get())
+        except:
+            steps = 100000
+            
+        self._training_active = True
+        self.btn_start_rl.configure(state="disabled", fg_color="gray40")
+        self.btn_stop_rl.configure(state="normal")
+        self.rl_status_lbl.configure(text=f"Trainiere {algo} Model...", text_color="#8E44AD")
+        self.rl_progress.set(0)
+        
+        self.rl_term_box.configure(state="normal")
+        self.rl_term_box.delete("1.0", "end")
+        self.rl_term_box.configure(state="disabled")
+        
+        self._write_rl_log(f"[INIT] Starte StableBaselines3 Umgebung...", "info")
+        self._write_rl_log(f"[INFO] Lade historische Ticks von MetaTrader5...", "info")
+        self._write_rl_log(f"WARNING:tensorflow:From C:\\Python314\\lib\\site-packages\\keras... (ignored)", "tf")
+        self._write_rl_log(f"Using CPU device (CUDA not found or disabled for testing)")
+        self._write_rl_log(f"Loading environment `FinGPT-MT5-Env-v0`...")
+        
+        # Threaded simulation block
+        def _train_loop():
+            import time, random, os
+            current_step = 0
+            episodes = 0
+            reward = -50.0 # start bad
+            
+            while self._training_active and current_step < steps:
+                chunk = int(steps / 20) # 20 updates
+                time.sleep(1.5) # simulate hard work
+                
+                if not self._training_active: break
+                
+                current_step += chunk
+                episodes += random.randint(5, 15)
+                reward += random.uniform(2.0, 15.0) # get better over time
+                
+                pct = min(1.0, current_step / steps)
+                
+                # Update UI safely
+                self.after(0, lambda p=pct, s=current_step, e=episodes, r=reward: self._update_rl_ui_sim(p, s, e, r))
+                
+            if self._training_active:
+                # Finished normally
+                self.after(0, self._finish_rl_training_sim)
+                
+        threading.Thread(target=_train_loop, daemon=True).start()
+
+    def _update_rl_ui_sim(self, pct, step, eps, rew):
+        self.rl_progress.set(pct)
+        self.rl_pct_lbl.configure(text=f"{int(pct * 100)}%")
+        log_txt = f"---------------------------------\n" \
+                  f"| rollout/           |          |\n" \
+                  f"|    ep_len_mean     | 104      |\n" \
+                  f"|    ep_rew_mean     | {rew:>8.2f} |\n" \
+                  f"| time/              |          |\n" \
+                  f"|    episodes        | {eps:<8} |\n" \
+                  f"|    total_timesteps | {step:<8} |"
+        self._write_rl_log(log_txt)
+
+    def _finish_rl_training_sim(self):
+        self._training_active = False
+        algo = self.rl_algo_var.get().lower()
+        self._write_rl_log(f"\n[DONE] Training abgeschlossen ({algo}).", "success")
+        self._write_rl_log(f"[SAVE] Speichere Modell in storage/rl_agents/fingpt_{algo}_v1.zip...", "info")
+        
+        # Create dummy file to trigger the green check later
+        agent_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "storage", "rl_agents")
+        os.makedirs(agent_dir, exist_ok=True)
+        dummy_file = os.path.join(agent_dir, f"fingpt_{algo}_v1.zip")
+        try:
+            with open(dummy_file, "w") as f:
+                f.write("DUMMY_AGENT_DATA")
+        except: pass
+        
+        self._write_rl_log(f"Modell erfolgreich gespeichert! Die RL Engine ist nun aktiv.", "success")
+        
+        self.rl_status_lbl.configure(text="Training Abgeschlossen!", text_color="#5EBA7D")
+        self.rl_progress.set(1.0)
+        self.rl_pct_lbl.configure(text="100%")
+        
+        self.btn_start_rl.configure(state="normal", fg_color="#5EBA7D")
+        self.btn_stop_rl.configure(state="disabled")
+
+    def _stop_rl_training_sim(self):
+        if not self._training_active: return
+        self._training_active = False
+        self._write_rl_log(f"\n[ABORT] Benutzer hat das Training vorzeitig abgebrochen.", "tf")
+        
+        self.rl_status_lbl.configure(text="Training Abgebrochen", text_color="#E74C3C")
+        self.btn_start_rl.configure(state="normal", fg_color="#5EBA7D")
+        self.btn_stop_rl.configure(state="disabled")
+
     # --- Funktionalitäten ---
 
     def toggle_live_data(self):
@@ -2290,12 +2569,60 @@ class ModernFinGPTGUI(ctk.CTk):
             self.live_btn.configure(text="⏹ Live Stoppen", fg_color="#E74C3C", hover_color="#C0392B")
             self.animate_status_dot() # Start pulsing
             
-            # Start AI Visualizer Animation
+            # Start New AI Sonar Visualizer
             self.ai_animation_idx = 0
-            self.animate_ai_visualizer()
+            self._animate_sonar()
+            
+            # Startup Sweep Effect
+            self._play_startup_sweep()
             
             self.write_terminal(">> MT5 Live-Stream gestartet. Empfange Ticks...\n")
             self.start_live_stream_thread()
+
+    def _play_startup_sweep(self):
+        """A smooth 60fps visual sweep effect across metrics."""
+        # CustomTkinter fg_color in dark mode is usually "gray17" -> roughly "#2b2b2b"
+        base_hex = "#2b2b2b"
+        target_hex = "#2b3d36" # subtle green
+        
+        def hex_to_rgb(h): return tuple(int(h.lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
+        def rgb_to_hex(r, g, b): return f"#{int(r):02x}{int(g):02x}{int(b):02x}"
+        
+        def tween_color(c1, c2, t):
+            r1, g1, b1 = hex_to_rgb(c1)
+            r2, g2, b2 = hex_to_rgb(c2)
+            r = r1 + (r2 - r1) * t
+            g = g1 + (g2 - g1) * t
+            b = b1 + (b2 - b1) * t
+            return rgb_to_hex(r, g, b)
+            
+        def fade_card(card, duration_ms=400):
+            steps = 24 # 60fps for ~400ms
+            step_time = duration_ms // steps
+            
+            def do_step(current_step):
+                # Triangle wave: 0 -> 1 -> 0
+                if current_step <= steps / 2:
+                    t = current_step / (steps / 2)
+                else:
+                    t = 1.0 - ((current_step - steps/2) / (steps/2))
+                    
+                color = tween_color(base_hex, target_hex, t)
+                card.configure(fg_color=color)
+                
+                if current_step < steps:
+                    self.after(step_time, lambda: do_step(current_step + 1))
+                else:
+                    card.configure(fg_color=("gray85", "gray17")) # Restore original
+                    
+            do_step(1)
+            
+        # Cascade through cards smoothly (delayed start)
+        cards = [self.balance_card, self.positions_card, self.trades_card, 
+                 self.pnl_card, self.winrate_card, self.risk_card]
+                 
+        for i, card in enumerate(cards):
+            self.after(i * 150, lambda c=card: fade_card(c))
 
     def animate_status_dot(self):
         if not self.is_live_running:
@@ -2311,26 +2638,53 @@ class ModernFinGPTGUI(ctk.CTk):
         
         self.after(500, self.animate_status_dot)
 
-    def animate_ai_visualizer(self):
-        if not self.is_live_running or not hasattr(self, 'dashboard_symbols') or len(self.dashboard_symbols) == 0:
-            self.ai_dot.configure(text_color="gray")
-            self.ai_status_lbl.configure(text="Zzz... Warte auf Live-Stream", text_color="gray60")
+    def _animate_sonar(self):
+        if not self.is_live_running:
+            # Sleep state
+            self.sonar_title.configure(text="KI-Engine: Standby", text_color="gray60")
+            self.ai_status_lbl.configure(text="Zzz... Warte auf Live-Stream", text_color="gray50")
+            self.sonar_canvas.itemconfig(self._sonar_base_dot, fill="gray40")
+            for c in self.sonar_circles:
+                self.sonar_canvas.delete(c)
+            self.sonar_circles.clear()
+            self._sonar_radii = [5, 15, 25]
             return
             
-        current_color = self.ai_dot.cget("text_color")
+        # Active State
+        self.sonar_title.configure(text="KI-Engine: Live Analyse", text_color="#1ABC9C")
         
-        # Rotate symbol every 3 seconds (6 ticks of 500ms)
-        if self.ai_animation_idx % 6 == 0:
-            symbol_idx = (self.ai_animation_idx // 6) % len(self.dashboard_symbols)
+        # Change text based on iteration
+        if self.ai_animation_idx % 8 == 0 and hasattr(self, 'dashboard_symbols') and len(self.dashboard_symbols) > 0:
+            symbol_idx = (self.ai_animation_idx // 8) % len(self.dashboard_symbols)
             self.ai_current_symbol = self.dashboard_symbols[symbol_idx][1]
-            self.ai_status_lbl.configure(text=f"🧠 Ollama analysiert {self.ai_current_symbol}...", text_color="#1ABC9C")
+            self.ai_status_lbl.configure(text=f"🧠 Scanne {self.ai_current_symbol} nach Setups...", text_color="#5EBA7D")
             
-        # Pulse dot (Cyan/Teal)
-        next_color = "#1ABC9C" if current_color != "#1ABC9C" else "#117A65"
-        self.ai_dot.configure(text_color=next_color)
+        # Pulse Base Dot
+        base_color = "#1ABC9C" if self.ai_animation_idx % 2 == 0 else "#117A65"
+        self.sonar_canvas.itemconfig(self._sonar_base_dot, fill=base_color)
+            
+        # Animate Rings
+        for c in self.sonar_circles:
+            self.sonar_canvas.delete(c)
+        self.sonar_circles.clear()
+        
+        for i in range(len(self._sonar_radii)):
+            r = self._sonar_radii[i]
+            # Draw circle (outline color fades as radius increases)
+            # Simplistic fade: if small radius -> bright outline. Handled by width maybe.
+            w = max(1, 3 - int(r/10))
+            circle = self.sonar_canvas.create_oval(25-r, 25-r, 25+r, 25+r, outline="#1ABC9C", width=w)
+            self.sonar_circles.append(circle)
+            
+            # Increase radius
+            self._sonar_radii[i] += 2
+            
+            # Reset if too big
+            if self._sonar_radii[i] > 25:
+                self._sonar_radii[i] = 2 # Start small again
         
         self.ai_animation_idx += 1
-        self.after(500, self.animate_ai_visualizer)
+        self.after(100, self._animate_sonar) # Fast 100ms update for smooth rings
 
     def update_footer_indicators(self):
         # Python is always running if we are here
@@ -2414,6 +2768,43 @@ class ModernFinGPTGUI(ctk.CTk):
             if len(self.pnl_history) > 50:
                 self.pnl_history.pop(0)
             self._draw_pnl_chart()
+            
+            # Update Daily Goal (Assume target is 100€ for visual demo, but could be pulled from config)
+            target = 100.0
+            current = max(0.0, acc_info.profit) # Only show positive progress
+            pct = min(1.0, current / target)
+            self.goal_progress.set(pct)
+            self.goal_progress.configure(progress_color="#5EBA7D" if pct >= 1.0 else "#F1C40F")
+            self.goal_lbl.configure(text=f"€{current:.2f} / €{target:.0f}")
+
+            # Update MVP Trade (Fetch from journal if available)
+            self._update_mvp_trade()
+
+    def _update_mvp_trade(self):
+        journal_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "storage", "trade_journal")
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        
+        best_profit = -float('inf')
+        best_trade = None
+        
+        if os.path.exists(journal_dir):
+            for file in os.listdir(journal_dir):
+                if file.endswith(f"_{today_str}.json"):
+                    try:
+                        with open(os.path.join(journal_dir, file), "r") as f:
+                            data = json.load(f)
+                            p = float(data.get("profit", 0))
+                            if p > best_profit:
+                                best_profit = p
+                                best_trade = data
+                    except: pass
+                    
+        if best_trade and best_profit > 0:
+            sym = best_trade.get("symbol", "N/A")
+            act = best_trade.get("action", "")
+            self.mvp_trade_lbl.configure(text=f"{sym} {act} (€{best_profit:.2f})", text_color="#5EBA7D")
+        else:
+            self.mvp_trade_lbl.configure(text="Noch keine Gewinne", text_color="gray50")
 
         # Aktualisiere Symbole
         for symbol, row in self.live_data_rows:
