@@ -49,8 +49,8 @@ class MetricCard(ctk.CTkFrame):
         self.value_label.configure(text=new_value)
 
 class LiveDataRow(ctk.CTkFrame):
-    """Eine Zeile für die Scrollbare Live-Daten Ansicht"""
-    def __init__(self, master, symbol, price, change, volume, signal, **kwargs):
+    """Eine Zeile für die Scrollbare Live-Daten Ansicht mit MTF Trend Ampel"""
+    def __init__(self, master, symbol, price, change, signal, **kwargs):
         super().__init__(master, fg_color="transparent", **kwargs)
         
         # Grid Setup for consistent column widths
@@ -66,8 +66,16 @@ class LiveDataRow(ctk.CTkFrame):
         self.change_lbl = ctk.CTkLabel(self, text=change, text_color=change_color, font=ctk.CTkFont(size=13, weight="bold"))
         self.change_lbl.grid(row=0, column=2, sticky="w", padx=10, pady=5)
         
-        self.vol_lbl = ctk.CTkLabel(self, text=volume, font=ctk.CTkFont(size=13))
-        self.vol_lbl.grid(row=0, column=3, sticky="w", padx=10, pady=5)
+        # MTF Trend Ampel Frame
+        self.trend_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.trend_frame.grid(row=0, column=3, sticky="w", padx=10, pady=5)
+        
+        self.trend_m15 = ctk.CTkLabel(self.trend_frame, text="●", text_color="gray", font=ctk.CTkFont(size=16))
+        self.trend_m15.pack(side="left", padx=3)
+        self.trend_h1 = ctk.CTkLabel(self.trend_frame, text="●", text_color="gray", font=ctk.CTkFont(size=16))
+        self.trend_h1.pack(side="left", padx=3)
+        self.trend_h4 = ctk.CTkLabel(self.trend_frame, text="●", text_color="gray", font=ctk.CTkFont(size=16))
+        self.trend_h4.pack(side="left", padx=3)
 
         sig_color = "#2E86AB" if signal == "BUY" else "#A23B72" if signal == "SELL" else "gray"
         self.signal_btn = ctk.CTkButton(self, text=signal, width=60, height=24, fg_color=sig_color, hover_color=sig_color, corner_radius=12)
@@ -78,6 +86,12 @@ class LiveDataRow(ctk.CTkFrame):
         self.change_lbl.configure(text=change)
         change_color = "#5EBA7D" if "+" in change else "#E74C3C" if "-" in change else "gray"
         self.change_lbl.configure(text_color=change_color)
+
+    def update_trend(self, m15_color, h1_color, h4_color):
+        """Update the 3 timeframe dots with the given hex colors."""
+        self.trend_m15.configure(text_color=m15_color)
+        self.trend_h1.configure(text_color=h1_color)
+        self.trend_h4.configure(text_color=h4_color)
 
 
 class ModernFinGPTGUI(ctk.CTk):
@@ -214,7 +228,7 @@ class ModernFinGPTGUI(ctk.CTk):
         header_row.pack(fill="x", pady=(0, 5))
         header_row.grid_columnconfigure((0,1,2,3,4), weight=1, uniform="col")
         
-        for i, col_name in enumerate(["Symbol", "Preis", "Änderung", "Volume", "Signal"]):
+        for i, col_name in enumerate(["Symbol", "Preis", "Änderung", "Trend (M15|H1|H4)", "Signal"]):
             lbl = ctk.CTkLabel(header_row, text=col_name, font=ctk.CTkFont(weight="bold", size=12), text_color="gray50")
             lbl.grid(row=0, column=i, sticky="w", padx=10)
 
@@ -257,7 +271,7 @@ class ModernFinGPTGUI(ctk.CTk):
             self.live_data_rows = []
 
         for display_name, symbol in self.dashboard_symbols:
-            row = LiveDataRow(self.scroll_list, display_name, "---", "0.00%", "---", "HOLD")
+            row = LiveDataRow(self.scroll_list, display_name, "---", "0.00%", "HOLD")
             row.pack(fill="x", pady=2)
             self.live_data_rows.append((symbol, row))
 
@@ -827,8 +841,10 @@ class ModernFinGPTGUI(ctk.CTk):
     def setup_journal_tab(self):
         tab = self.tabview.tab("📝 Journal")
 
-        tab.grid_columnconfigure(0, weight=1)
-        tab.grid_rowconfigure(1, weight=1)  # trade list expands
+        # Side-by-side Layout: Calendar Links, Trade List Rechts
+        tab.grid_columnconfigure(0, weight=0)  # Calendar is fixed width
+        tab.grid_columnconfigure(1, weight=1)  # Trade list expands
+        tab.grid_rowconfigure(1, weight=1)     # Expand both vertically
 
         # ── State ──────────────────────────────────────────
         self._journal_year  = datetime.now().year
@@ -842,7 +858,7 @@ class ModernFinGPTGUI(ctk.CTk):
 
         # ── Top bar: calendar controls + stats ─────────────
         top = ctk.CTkFrame(tab, fg_color="transparent")
-        top.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 0))
+        top.grid(row=0, column=0, columnspan=2, sticky="ew", padx=10, pady=(10, 0))
         top.grid_columnconfigure(2, weight=1)
 
         ctk.CTkButton(top, text="◀", width=36, command=self._journal_prev_month).grid(row=0, column=0, padx=(0, 4))
@@ -862,18 +878,23 @@ class ModernFinGPTGUI(ctk.CTk):
         ctk.CTkButton(stats_frame, text="📥 CSV Export", width=110, command=self._export_journal_csv,
                       fg_color="transparent", border_width=1).pack(side="left", padx=(16, 0))
 
-        # ── Calendar grid ──────────────────────────────────
+        # ── Left: Calendar grid ──────────────────────────────────
         self._cal_frame = ctk.CTkFrame(tab, fg_color=("gray90", "gray13"), corner_radius=12)
-        self._cal_frame.grid(row=1, column=0, sticky="new", padx=10, pady=8)
+        self._cal_frame.grid(row=1, column=0, sticky="n", padx=10, pady=8)
 
-        # ── Trade list (scrollable) ─────────────────────────
-        list_container = ctk.CTkFrame(tab, corner_radius=12, fg_color=("gray90", "gray13"))
-        list_container.grid(row=2, column=0, sticky="nsew", padx=10, pady=(0, 4))
+        # ── Right: Trade list and AI reasoning ────────────────────
+        right_panel = ctk.CTkFrame(tab, fg_color="transparent")
+        right_panel.grid(row=1, column=1, sticky="nsew", padx=(0, 10), pady=8)
+        right_panel.grid_columnconfigure(0, weight=1)
+        right_panel.grid_rowconfigure(0, weight=1)
+
+        # Trade list (scrollable)
+        list_container = ctk.CTkFrame(right_panel, corner_radius=12, fg_color=("gray90", "gray13"))
+        list_container.grid(row=0, column=0, sticky="nsew", pady=(0, 8))
         list_container.grid_columnconfigure(0, weight=1)
-        list_container.grid_rowconfigure(1, weight=1)
-        tab.grid_rowconfigure(2, weight=2)
+        list_container.grid_rowconfigure(2, weight=1)
 
-        self._j_list_title = ctk.CTkLabel(list_container, text="← Klicke einen Tag um Trades zu sehen",
+        self._j_list_title = ctk.CTkLabel(list_container, text="← Klicke einen Tag im Kalender, um Trades zu sehen",
                                            font=ctk.CTkFont(size=13, weight="bold"), text_color="gray60")
         self._j_list_title.grid(row=0, column=0, sticky="w", padx=15, pady=8)
 
@@ -888,12 +909,10 @@ class ModernFinGPTGUI(ctk.CTk):
 
         self._j_scroll = ctk.CTkScrollableFrame(list_container, fg_color="transparent", corner_radius=0)
         self._j_scroll.grid(row=2, column=0, sticky="nsew", padx=0, pady=0)
-        list_container.grid_rowconfigure(2, weight=1)
 
-        # ── AI Reasoning Panel (collapsible) ───────────────
-        self._ai_panel = ctk.CTkFrame(tab, corner_radius=12, fg_color=("gray85", "gray15"))
-        self._ai_panel.grid(row=3, column=0, sticky="ew", padx=10, pady=(0, 8))
-        tab.grid_rowconfigure(3, weight=0)
+        # AI Reasoning Panel (collapsible)
+        self._ai_panel = ctk.CTkFrame(right_panel, corner_radius=12, fg_color=("gray85", "gray15"))
+        self._ai_panel.grid(row=1, column=0, sticky="ew", pady=(0, 0))
         self._ai_panel.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(self._ai_panel, text="🤖", font=ctk.CTkFont(size=20)).grid(row=0, column=0, padx=(15, 8), pady=10)
@@ -1646,6 +1665,20 @@ class ModernFinGPTGUI(ctk.CTk):
         self._log_tail_running = False
         self._start_log_tail()
 
+    def _trigger_autosave(self, *args):
+        """Debounced auto-save. Waits 1 second after the last change to save."""
+        if hasattr(self, '_autosave_timer') and self._autosave_timer is not None:
+            self.after_cancel(self._autosave_timer)
+        self._autosave_timer = self.after(1000, self._do_autosave)
+
+    def _do_autosave(self):
+        """Silently saves config and updates dependent UI (like symbol rows)."""
+        self.save_settings(silent=True)
+        # Pairs — delegate to shared helper so dashboard updates instantly
+        raw_pairs = self.pairs_entry.get().strip()
+        if raw_pairs:
+            self._rebuild_symbol_rows(raw_pairs)
+
     def setup_config_tab(self):
         tab = self.tabview.tab("⚙️ Konfiguration")
         tab.grid_columnconfigure(0, weight=1)
@@ -1734,32 +1767,40 @@ class ModernFinGPTGUI(ctk.CTk):
         ctk.CTkLabel(rl_tab, text="🧠 Reinforcement Learning Einstellungen", font=ctk.CTkFont(size=16, weight="bold"), text_color="#8E44AD").grid(row=0, column=0, columnspan=3, sticky="w", padx=20, pady=(15, 10))
         ctk.CTkLabel(rl_tab, text="RL Algorithmus:").grid(row=1, column=0, sticky="w", padx=20, pady=10)
         self.rl_algo_var = ctk.StringVar(value="PPO")
-        ctk.CTkComboBox(rl_tab, values=["PPO", "DQN", "A2C", "SAC"], variable=self.rl_algo_var, width=180).grid(row=1, column=1, sticky="w", padx=20, pady=10)
+        ctk.CTkComboBox(rl_tab, values=["PPO", "DQN", "A2C", "SAC"], variable=self.rl_algo_var, width=180, command=self._trigger_autosave).grid(row=1, column=1, sticky="w", padx=20, pady=10)
         ctk.CTkLabel(rl_tab, text="Lernrate:").grid(row=2, column=0, sticky="w", padx=20, pady=10)
         self.rl_lr_slider = ctk.CTkSlider(rl_tab, from_=0.0001, to=0.01, number_of_steps=99)
         self.rl_lr_slider.set(0.0003)
         self.rl_lr_slider.grid(row=2, column=1, sticky="ew", padx=20, pady=10)
         self.rl_lr_lbl = ctk.CTkLabel(rl_tab, text="0.0003")
         self.rl_lr_lbl.grid(row=2, column=2, padx=(0, 20))
-        self.rl_lr_slider.configure(command=lambda val: self.rl_lr_lbl.configure(text=f"{val:.4f}"))
+        def _on_lr_change(val):
+            self.rl_lr_lbl.configure(text=f"{val:.4f}")
+            self._trigger_autosave()
+        self.rl_lr_slider.configure(command=_on_lr_change)
         ctk.CTkLabel(rl_tab, text="Gamma (Discount):").grid(row=3, column=0, sticky="w", padx=20, pady=10)
         self.rl_gamma_slider = ctk.CTkSlider(rl_tab, from_=0.8, to=1.0, number_of_steps=20)
         self.rl_gamma_slider.set(0.99)
         self.rl_gamma_slider.grid(row=3, column=1, sticky="ew", padx=20, pady=10)
         self.rl_gamma_lbl = ctk.CTkLabel(rl_tab, text="0.99")
         self.rl_gamma_lbl.grid(row=3, column=2, padx=(0, 20))
-        self.rl_gamma_slider.configure(command=lambda val: self.rl_gamma_lbl.configure(text=f"{val:.2f}"))
+        def _on_gamma_change(val):
+            self.rl_gamma_lbl.configure(text=f"{val:.2f}")
+            self._trigger_autosave()
+        self.rl_gamma_slider.configure(command=_on_gamma_change)
         ctk.CTkLabel(rl_tab, text="Training Steps:").grid(row=4, column=0, sticky="w", padx=20, pady=10)
         self.rl_steps_entry = ctk.CTkEntry(rl_tab, width=120)
         self.rl_steps_entry.insert(0, "100000")
+        self.rl_steps_entry.bind("<KeyRelease>", self._trigger_autosave)
         self.rl_steps_entry.grid(row=4, column=1, sticky="w", padx=20, pady=10)
         ctk.CTkLabel(rl_tab, text="Belohnungsfunktion:").grid(row=5, column=0, sticky="w", padx=20, pady=10)
         self.rl_reward_var = ctk.StringVar(value="Profit + Sharpe Ratio")
-        ctk.CTkComboBox(rl_tab, values=["Profit + Sharpe Ratio", "Reiner Profit", "Sortino Ratio", "Custom"], variable=self.rl_reward_var, width=250).grid(row=5, column=1, sticky="w", padx=20, pady=10)
+        ctk.CTkComboBox(rl_tab, values=["Profit + Sharpe Ratio", "Reiner Profit", "Sortino Ratio", "Custom"], variable=self.rl_reward_var, width=250, command=self._trigger_autosave).grid(row=5, column=1, sticky="w", padx=20, pady=10)
         ctk.CTkLabel(rl_tab, text="Checkpoint Pfad:").grid(row=6, column=0, sticky="w", padx=20, pady=10)
         self.rl_checkpoint_entry = ctk.CTkEntry(rl_tab, placeholder_text="storage/rl_agents/model.zip", width=300)
+        self.rl_checkpoint_entry.bind("<KeyRelease>", self._trigger_autosave)
         self.rl_checkpoint_entry.grid(row=6, column=1, sticky="ew", padx=20, pady=10)
-        self.rl_live_switch = ctk.CTkSwitch(rl_tab, text="RL Agent für Live-Trading aktivieren (Experimentell)", progress_color="#8E44AD")
+        self.rl_live_switch = ctk.CTkSwitch(rl_tab, text="RL Agent für Live-Trading aktivieren (Experimentell)", progress_color="#8E44AD", command=self._trigger_autosave)
         self.rl_live_switch.grid(row=7, column=0, columnspan=3, sticky="w", padx=20, pady=15)
 
         # ── TAB 4: MT5 & System ──────────────
@@ -1803,25 +1844,28 @@ class ModernFinGPTGUI(ctk.CTk):
         ctk.CTkLabel(mt5_tab, text="Aktive Paare (editierbar):").grid(row=3, column=0, sticky="w", padx=20, pady=(2, 10))
         self.pairs_entry = ctk.CTkEntry(mt5_tab, width=350)
         self.pairs_entry.insert(0, self._pair_presets["🏆 Majors (6 Paare)"])
+        self.pairs_entry.bind("<KeyRelease>", self._trigger_autosave)
         self.pairs_entry.grid(row=3, column=1, sticky="ew", padx=20, pady=(2, 10))
         ctk.CTkLabel(mt5_tab, text="Konto Typ:").grid(row=4, column=0, sticky="w", padx=20, pady=10)
         self.account_type_var = ctk.StringVar(value="Demo")
-        ctk.CTkComboBox(mt5_tab, values=["Demo", "Live", "Cent"], variable=self.account_type_var, width=150).grid(row=4, column=1, sticky="w", padx=20, pady=10)
+        ctk.CTkComboBox(mt5_tab, values=["Demo", "Live", "Cent"], variable=self.account_type_var, width=150, command=self._trigger_autosave).grid(row=4, column=1, sticky="w", padx=20, pady=10)
         ctk.CTkLabel(mt5_tab, text="Magic Number:").grid(row=5, column=0, sticky="w", padx=20, pady=10)
         self.magic_number_entry = ctk.CTkEntry(mt5_tab, width=120)
         self.magic_number_entry.insert(0, "42069")
+        self.magic_number_entry.bind("<KeyRelease>", self._trigger_autosave)
         self.magic_number_entry.grid(row=5, column=1, sticky="w", padx=20, pady=10)
         ctk.CTkLabel(mt5_tab, text="Logging Level:").grid(row=6, column=0, sticky="w", padx=20, pady=10)
         self.log_level_var = ctk.StringVar(value="INFO")
-        ctk.CTkComboBox(mt5_tab, values=["DEBUG", "INFO", "WARNING", "ERROR"], variable=self.log_level_var, width=150).grid(row=6, column=1, sticky="w", padx=20, pady=10)
-        self.debug_mode_switch = ctk.CTkSwitch(mt5_tab, text="Debug-Modus (mehr Terminal-Output)", progress_color="#E74C3C")
+        ctk.CTkComboBox(mt5_tab, values=["DEBUG", "INFO", "WARNING", "ERROR"], variable=self.log_level_var, width=150, command=self._trigger_autosave).grid(row=6, column=1, sticky="w", padx=20, pady=10)
+        self.debug_mode_switch = ctk.CTkSwitch(mt5_tab, text="Debug-Modus (mehr Terminal-Output)", progress_color="#E74C3C", command=self._trigger_autosave)
         self.debug_mode_switch.grid(row=7, column=0, columnspan=2, sticky="w", padx=20, pady=15)
 
-        # Save Button (below all sub-tabs)
+        # Removed explicit Save Button since auto-save handles it now
         tab.grid_rowconfigure(1, weight=0)
-        save_btn = ctk.CTkButton(tab, text="💾 Alle Einstellungen Speichern", command=self.save_config,
-                      font=ctk.CTkFont(weight="bold", size=14), height=45, fg_color="#2E86AB", hover_color="#21618C")
-        save_btn.grid(row=1, column=0, sticky="e", padx=20, pady=(10, 15))
+        
+        # Auto-saved hint
+        self.autosave_hint = ctk.CTkLabel(tab, text="✅ Alle Änderungen werden automatisch gespeichert.", text_color="gray50", font=ctk.CTkFont(size=11, slant="italic"))
+        self.autosave_hint.grid(row=1, column=0, sticky="e", padx=20, pady=(10, 15))
 
         self.after(500, self.fetch_ollama_models_silently)
 
@@ -1831,6 +1875,7 @@ class ModernFinGPTGUI(ctk.CTk):
         self.pairs_entry.delete(0, "end")
         if pairs:
             self.pairs_entry.insert(0, pairs)
+            self._trigger_autosave()
         # If "Custom" → entry stays empty and user types freely
 
     def fetch_ollama_models_silently(self):
@@ -1919,7 +1964,7 @@ class ModernFinGPTGUI(ctk.CTk):
         os.makedirs(config_dir, exist_ok=True)
         return os.path.join(config_dir, "config.json")
 
-    def save_settings(self):
+    def save_settings(self, silent: bool = False):
         """Save all GUI settings to a JSON file for persistence across restarts."""
         import json
         cfg = {
@@ -1958,9 +2003,11 @@ class ModernFinGPTGUI(ctk.CTk):
         try:
             with open(self._config_path(), 'w', encoding='utf-8') as f:
                 json.dump(cfg, f, indent=2, ensure_ascii=False)
-            self.write_terminal(f">> [SETTINGS] Gespeichert in: {self._config_path()}\n")
+            if not silent:
+                self.write_terminal(f">> [SETTINGS] Gespeichert in: {self._config_path()}\n")
         except Exception as e:
-            self.write_terminal(f">> [SETTINGS ERROR] Speichern fehlgeschlagen: {e}\n")
+            if not silent:
+                self.write_terminal(f">> [SETTINGS ERROR] Speichern fehlgeschlagen: {e}\n")
 
     def load_settings(self):
         """Load saved GUI settings from JSON and apply to all widgets."""
@@ -2191,7 +2238,23 @@ class ModernFinGPTGUI(ctk.CTk):
                 else:
                     change_str = "0.00%"
                     
+                # MTF Trend Logic (M15, H1, H4)
+                trend_colors = []
+                for tf in [mt5.TIMEFRAME_M15, mt5.TIMEFRAME_H1, mt5.TIMEFRAME_H4]:
+                    tf_rates = mt5.copy_rates_from_pos(symbol, tf, 0, 5)
+                    if tf_rates is not None and len(tf_rates) >= 5:
+                        # Simple trend: current close vs close 4 periods ago
+                        if tf_rates[-1]['close'] > tf_rates[0]['close']:
+                            trend_colors.append("#5EBA7D") # Green / Bull
+                        elif tf_rates[-1]['close'] < tf_rates[0]['close']:
+                            trend_colors.append("#E74C3C") # Red / Bear
+                        else:
+                            trend_colors.append("gray")    # Neutral
+                    else:
+                        trend_colors.append("gray")
+                        
                 row.update_data(f"{tick.bid:.5f}", change_str)
+                row.update_trend(*trend_colors)
 
     def start_simulated_data(self):
         def bg_simulator():
