@@ -12,12 +12,13 @@ def check_dependencies():
     """Prüft ob alle Abhängigkeiten vorhanden sind"""
     try:
         import tkinter as tk
+        import customtkinter
         import requests
         import json
         return True
     except ImportError as e:
         print(f"Fehlende Abhängigkeit: {e}")
-        print("Bitte installieren Sie die requirements.txt:")
+        print("Bitte installieren Sie fehlende Pakete (z.B. pip install customtkinter):")
         print("pip install -r requirements.txt")
         return False
 

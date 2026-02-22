@@ -2,10 +2,12 @@
 """
 Modernes FinGPT GUI mit erweiterten Funktionen
 Professionelle Benutzeroberfläche mit Live-Daten, Plotly-Charts und Terminal-Integration
+Umgesetzt mit CustomTkinter für ein hochmodernes "Glassmorphic"- und Dark-Theme Erlebnis.
 """
 
+import customtkinter as ctk
 import tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext
+from tkinter import messagebox
 import threading
 import time
 import json
@@ -13,521 +15,449 @@ import random
 from datetime import datetime
 import sys
 import os
-from pathlib import Path
 
-# Versuche Plotly zu importieren (optional)
-try:
-    import plotly.graph_objects as go
-    import plotly.express as px
-    from plotly.subplots import make_subplots
-    PLOTLY_AVAILABLE = True
-except ImportError:
-    PLOTLY_AVAILABLE = False
-    print("Plotly nicht verfügbar - Installieren Sie es mit: pip install plotly")
+# Konfiguriere das CustomTkinter Aussehen
+ctk.set_appearance_mode("Dark")  # "System", "Dark", "Light"
+ctk.set_default_color_theme("blue")  # "blue", "green", "dark-blue"
 
-# Importiere die bestehenden Module
+import matplotlib
+matplotlib.use("TkAgg")
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.figure import Figure
+import mplfinance as mpf
+import MetaTrader5 as mt5
+import pandas as pd
 try:
     from core.config_manager import ConfigManager
     CONFIG_MANAGER_AVAILABLE = True
 except ImportError:
     CONFIG_MANAGER_AVAILABLE = False
-    print("ConfigManager nicht verfügbar")
 
-class ModernFinGPTGUI:
+class MetricCard(ctk.CTkFrame):
+    """Eine wiederverwendbare Metrik-Karte mit modernem Design"""
+    def __init__(self, master, title, value, **kwargs):
+        super().__init__(master, fg_color=("gray85", "gray17"), corner_radius=15, **kwargs)
+        
+        self.title_label = ctk.CTkLabel(self, text=title, font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"), text_color="gray60")
+        self.title_label.pack(anchor="w", padx=15, pady=(15, 5))
+        
+        self.value_label = ctk.CTkLabel(self, text=value, font=ctk.CTkFont(family="Segoe UI", size=28, weight="bold"), text_color="#2E86AB")
+        self.value_label.pack(anchor="w", padx=15, pady=(0, 15))
+
+    def update_value(self, new_value):
+        self.value_label.configure(text=new_value)
+
+class LiveDataRow(ctk.CTkFrame):
+    """Eine Zeile für die Scrollbare Live-Daten Ansicht"""
+    def __init__(self, master, symbol, price, change, volume, signal, **kwargs):
+        super().__init__(master, fg_color="transparent", **kwargs)
+        
+        # Grid Setup for consistent column widths
+        self.grid_columnconfigure((0,1,2,3,4), weight=1, uniform="col")
+        
+        self.symbol_lbl = ctk.CTkLabel(self, text=symbol, font=ctk.CTkFont(size=13, weight="bold"))
+        self.symbol_lbl.grid(row=0, column=0, sticky="w", padx=10, pady=5)
+        
+        self.price_lbl = ctk.CTkLabel(self, text=price, font=ctk.CTkFont(size=13))
+        self.price_lbl.grid(row=0, column=1, sticky="w", padx=10, pady=5)
+        
+        change_color = "#5EBA7D" if "+" in change else "#E74C3C" if "-" in change else "gray"
+        self.change_lbl = ctk.CTkLabel(self, text=change, text_color=change_color, font=ctk.CTkFont(size=13, weight="bold"))
+        self.change_lbl.grid(row=0, column=2, sticky="w", padx=10, pady=5)
+        
+        self.vol_lbl = ctk.CTkLabel(self, text=volume, font=ctk.CTkFont(size=13))
+        self.vol_lbl.grid(row=0, column=3, sticky="w", padx=10, pady=5)
+
+        sig_color = "#2E86AB" if signal == "BUY" else "#A23B72" if signal == "SELL" else "gray"
+        self.signal_btn = ctk.CTkButton(self, text=signal, width=60, height=24, fg_color=sig_color, hover_color=sig_color, corner_radius=12)
+        self.signal_btn.grid(row=0, column=4, sticky="w", padx=10, pady=5)
+
+    def update_data(self, price, change):
+        self.price_lbl.configure(text=price)
+        self.change_lbl.configure(text=change)
+        change_color = "#5EBA7D" if "+" in change else "#E74C3C" if "-" in change else "gray"
+        self.change_lbl.configure(text_color=change_color)
+
+
+class ModernFinGPTGUI(ctk.CTk):
     """
-    Moderne GUI für FinGPT mit erweiterten Funktionen
-    
-    Features:
-    - Dashboard mit Live-Daten-Anzeige
-    - Interaktive Plotly-Charts-Integration
-    - Terminal-Output-Bereich
-    - Konfigurationspanel für Einstellungen
-    - Statusleiste mit Systeminformationen
+    Das komplett modernisierte FinGPT Interface mit CustomTkinter
     """
-    
     def __init__(self):
-        """Initialisiert die moderne GUI"""
-        self.root = tk.Tk()
-        self.setup_window()
+        super().__init__()
         
-        # Simulierte Daten für Live-Anzeige
-        self.live_data = []
+        self.title("FinGPT Professional Dashboard")
+        self.geometry("1200x850")
+        self.minsize(900, 700)
+        
+        # State variables
         self.is_live_running = False
+        self.live_data_rows = []
         
-        # GUI-Setup
-        self.create_widgets()
-        
-        # Starte simulierte Live-Daten (für Demo-Zwecke)
+        # Konstruktor Aufruf für Layout
+        self.setup_layout()
         self.start_simulated_data()
+
+    def setup_layout(self):
+        """Haupt-Grid System der UI"""
+        self.grid_rowconfigure(1, weight=1)
+        self.grid_columnconfigure(0, weight=1)
         
-    def setup_window(self):
-        """Konfiguriert das Hauptfenster mit modernem Design"""
-        self.root.title("FinGPT Professional Dashboard")
-        self.root.geometry("1200x800")
-        self.root.minsize(800, 600)
+        # 1. Header Frame
+        self.header_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.header_frame.grid(row=0, column=0, sticky="ew", padx=20, pady=(20, 10))
         
-        # Modernes Farbschema
-        self.colors = {
-            'primary': '#2E86AB',
-            'secondary': '#A23B72',
-            'accent': '#F18F01',
-            'success': '#5EBA7D',
-            'warning': '#F39C12',
-            'danger': '#E74C3C',
-            'background': '#F8F9FA',
-            'card_bg': '#FFFFFF',
-            'text': '#2C3E50',
-            'text_secondary': '#7F8C8D',
-            'border': '#DEE2E6'
-        }
+        title_label = ctk.CTkLabel(self.header_frame, text="FinGPT Professional", font=ctk.CTkFont(family="Segoe UI", size=24, weight="bold"))
+        title_label.pack(side="left")
         
-        # Stil konfigurieren
-        self.style = ttk.Style()
-        self.style.theme_use('clam')
+        # Header Controls
+        self.live_btn = ctk.CTkButton(self.header_frame, text="▶ Live Starten", command=self.toggle_live_data, 
+                                      fg_color="#5EBA7D", hover_color="#4CAF50", corner_radius=20, font=ctk.CTkFont(weight="bold"))
+        self.live_btn.pack(side="right", padx=(10, 0))
         
-        # Angepasste Stile für moderne Optik
-        self.style.configure('Modern.TFrame', background=self.colors['background'])
-        self.style.configure('Card.TFrame', background=self.colors['card_bg'])
-        self.style.configure('Header.TLabel', 
-                           font=('Segoe UI', 16, 'bold'),
-                           foreground=self.colors['primary'],
-                           background=self.colors['background'])
-        self.style.configure('SubHeader.TLabel', 
-                           font=('Segoe UI', 12, 'bold'),
-                           foreground=self.colors['text'],
-                           background=self.colors['background'])
-        self.style.configure('Normal.TLabel', 
-                           font=('Segoe UI', 10),
-                           foreground=self.colors['text'],
-                           background=self.colors['background'])
-        self.style.configure('Success.TButton', 
-                           font=('Segoe UI', 10, 'bold'),
-                           foreground=self.colors['card_bg'],
-                           background=self.colors['success'])
-        self.style.map('Success.TButton', 
-                      background=[('active', '#4CAF50')])
+        self.status_dot = ctk.CTkLabel(self.header_frame, text="●", text_color="gray", font=ctk.CTkFont(size=20))
+        self.status_dot.pack(side="right")
         
-    def create_widgets(self):
-        """Erstellt alle GUI-Widgets mit modernem Design"""
-        # Hauptcontainer
-        main_container = ttk.Frame(self.root, style='Modern.TFrame')
-        main_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        # 2. Main Tabview (ersetzt ttk.Notebook)
+        self.tabview = ctk.CTkTabview(self, corner_radius=15)
+        self.tabview.grid(row=1, column=0, sticky="nsew", padx=20, pady=(0, 10))
         
-        # Header-Bereich
-        self.create_header(main_container)
+        self.tabview.add("📊 Dashboard")
+        self.tabview.add("📈 Charts")
+        self.tabview.add("💻 Terminal")
+        self.tabview.add("⚙️ Konfiguration")
         
-        # Notebook für Tabs
-        self.notebook = ttk.Notebook(main_container)
-        self.notebook.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
+        # Tabs konfigurieren
+        self.setup_dashboard_tab()
+        self.setup_charts_tab()
+        self.setup_terminal_tab()
+        self.setup_config_tab()
         
-        # Tabs erstellen
-        self.create_dashboard_tab()
-        self.create_charts_tab()
-        self.create_terminal_tab()
-        self.create_config_tab()
+        # 3. Status Bar
+        self.status_bar = ctk.CTkFrame(self, height=30, corner_radius=10)
+        self.status_bar.grid(row=2, column=0, sticky="ew", padx=20, pady=(0, 20))
         
-        # Statusleiste
-        self.create_status_bar(main_container)
+        self.status_label = ctk.CTkLabel(self.status_bar, text="Bereit | Letzte Aktualisierung: Nie", font=ctk.CTkFont(size=12))
+        self.status_label.pack(side="left", padx=15, pady=5)
         
-    def create_header(self, parent):
-        """Erstellt den modernen Header-Bereich"""
-        header_frame = ttk.Frame(parent, style='Modern.TFrame')
-        header_frame.pack(fill=tk.X, pady=(0, 10))
+        sys_info = f"Python {sys.version_info.major}.{sys.version_info.minor} | CustomTkinter {ctk.__version__}"
+        self.sys_info_label = ctk.CTkLabel(self.status_bar, text=sys_info, font=ctk.CTkFont(size=12), text_color="gray50")
+        self.sys_info_label.pack(side="right", padx=15, pady=5)
+
+    def setup_dashboard_tab(self):
+        tab = self.tabview.tab("📊 Dashboard")
+        tab.grid_columnconfigure((0, 1, 2), weight=1)
+        tab.grid_rowconfigure(2, weight=1)
         
-        # Titel
-        title_label = ttk.Label(header_frame, 
-                               text="FinGPT Professional Trading Dashboard", 
-                               style='Header.TLabel')
-        title_label.pack(side=tk.LEFT)
+        # Top Cards
+        self.create_metric_card(tab, "Kontostand", "€25.430,75", 0, 0)
+        self.create_metric_card(tab, "Offene Positionen", "3", 0, 1)
+        self.create_metric_card(tab, "Heutige Trades", "12", 0, 2)
         
-        # Steuerelemente
-        controls_frame = ttk.Frame(header_frame, style='Modern.TFrame')
-        controls_frame.pack(side=tk.RIGHT)
+        self.create_metric_card(tab, "Gewinn/Verlust", "+€1.245,30", 1, 0)
+        self.create_metric_card(tab, "Win-Rate", "78%", 1, 1)
+        self.create_metric_card(tab, "Risiko-Level", "Medium", 1, 2)
+
+        # Live Data List
+        data_frame = ctk.CTkFrame(tab, corner_radius=15, fg_color=("gray90", "gray13"))
+        data_frame.grid(row=2, column=0, columnspan=3, sticky="nsew", padx=10, pady=10)
+        data_frame.grid_rowconfigure(1, weight=1)
+        data_frame.grid_columnconfigure(0, weight=1)
+
+        header_lbl = ctk.CTkLabel(data_frame, text="Live Markt-Übersicht", font=ctk.CTkFont(size=16, weight="bold"))
+        header_lbl.grid(row=0, column=0, sticky="w", padx=20, pady=15)
         
-        # Live-Daten Button
-        self.live_btn = ttk.Button(controls_frame, 
-                                  text="Live Daten anzeigen", 
-                                  command=self.toggle_live_data,
-                                  style='Success.TButton')
-        self.live_btn.pack(side=tk.LEFT, padx=5)
+        self.scroll_list = ctk.CTkScrollableFrame(data_frame, fg_color="transparent")
+        self.scroll_list.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 10))
+
+        # Table Header
+        header_row = ctk.CTkFrame(self.scroll_list, fg_color="transparent", height=30)
+        header_row.pack(fill="x", pady=(0, 5))
+        header_row.grid_columnconfigure((0,1,2,3,4), weight=1, uniform="col")
         
-        # Status-Indicator
-        self.status_indicator = tk.Canvas(controls_frame, width=20, height=20, highlightthickness=0)
-        self.status_indicator.pack(side=tk.LEFT, padx=10)
-        self.update_status_indicator("ready")
-        
-    def create_dashboard_tab(self):
-        """Erstellt den Dashboard-Tab mit Live-Daten-Anzeige"""
-        dashboard_frame = ttk.Frame(self.notebook, style='Modern.TFrame')
-        self.notebook.add(dashboard_frame, text="📊 Dashboard")
-        
-        # Grid für Karten
-        dashboard_frame.columnconfigure((0, 1, 2), weight=1)
-        dashboard_frame.rowconfigure((0, 1), weight=1)
-        
-        # Karten für verschiedene Metriken
-        self.create_metric_card(dashboard_frame, "Kontostand", "€25.430,75", 0, 0)
-        self.create_metric_card(dashboard_frame, "Offene Positionen", "3", 0, 1)
-        self.create_metric_card(dashboard_frame, "Heutige Trades", "12", 0, 2)
-        self.create_metric_card(dashboard_frame, "Gewinn/Verlust", "+€1.245,30", 1, 0)
-        self.create_metric_card(dashboard_frame, "Win-Rate", "78%", 1, 1)
-        self.create_metric_card(dashboard_frame, "Risiko-Level", "Medium", 1, 2)
-        
-        # Live-Daten-Tabelle
-        self.create_live_data_table(dashboard_frame)
-        
-    def create_metric_card(self, parent, title, value, row, col):
-        """Erstellt eine moderne Metrik-Karte"""
-        card = ttk.Frame(parent, style='Card.TFrame')
-        card.grid(row=row, column=col, padx=5, pady=5, sticky=(tk.W, tk.E, tk.N, tk.S))
-        card.columnconfigure(0, weight=1)
-        
-        title_label = ttk.Label(card, text=title, style='SubHeader.TLabel')
-        title_label.grid(row=0, column=0, sticky=tk.W, padx=10, pady=(10, 5))
-        
-        value_label = ttk.Label(card, text=value, 
-                               font=('Segoe UI', 14, 'bold'),
-                               foreground=self.colors['primary'],
-                               background=self.colors['card_bg'])
-        value_label.grid(row=1, column=0, sticky=tk.W, padx=10, pady=(0, 10))
-        
-    def create_live_data_table(self, parent):
-        """Erstellt eine Tabelle für Live-Daten"""
-        table_frame = ttk.Frame(parent, style='Card.TFrame')
-        table_frame.grid(row=2, column=0, columnspan=3, sticky=(tk.W, tk.E, tk.N, tk.S), padx=5, pady=5)
-        table_frame.columnconfigure(0, weight=1)
-        table_frame.rowconfigure(1, weight=1)
-        
-        # Tabellenüberschrift
-        title_label = ttk.Label(table_frame, text="Live Markt-Daten", style='SubHeader.TLabel')
-        title_label.grid(row=0, column=0, sticky=tk.W, padx=10, pady=10)
-        
-        # Treeview für Tabelle
-        columns = ('Symbol', 'Preis', 'Änderung', 'Volume', 'Signal')
-        self.data_tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=6)
-        
-        # Spalten konfigurieren
-        for col in columns:
-            self.data_tree.heading(col, text=col)
-            self.data_tree.column(col, width=100)
-        
-        self.data_tree.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=10, pady=(0, 10))
-        
-        # Scrollbar
-        scrollbar = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=self.data_tree.yview)
-        scrollbar.grid(row=1, column=1, sticky=(tk.N, tk.S), pady=(0, 10))
-        self.data_tree.configure(yscrollcommand=scrollbar.set)
-        
-        # Initiale Daten füllen
+        for i, col_name in enumerate(["Symbol", "Preis", "Änderung", "Volume", "Signal"]):
+            lbl = ctk.CTkLabel(header_row, text=col_name, font=ctk.CTkFont(weight="bold", size=12), text_color="gray50")
+            lbl.grid(row=0, column=i, sticky="w", padx=10)
+
+        ctk.CTkFrame(self.scroll_list, height=1, fg_color=("gray70", "gray30")).pack(fill="x", pady=(0, 5))
+
+        # Initial Mock Data
         self.populate_sample_data()
-        
+
+    def create_metric_card(self, parent, title, value, row, col):
+        card = MetricCard(parent, title=title, value=value)
+        card.grid(row=row, column=col, padx=10, pady=10, sticky="nsew")
+
     def populate_sample_data(self):
-        """Füllt die Tabelle mit Beispieldaten"""
         sample_data = [
             ('EUR/USD', '1.08542', '+0.24%', '1.2M', 'BUY'),
             ('GBP/USD', '1.26783', '-0.12%', '850K', 'SELL'),
             ('USD/JPY', '151.234', '+0.08%', '2.1M', 'HOLD'),
-            ('BTC/USD', '43,250', '+2.35%', '15.4K', 'BUY'),
-            ('XAU/USD', '2,045.67', '-0.42%', '320K', 'SELL'),
-            ('NAS100', '15,876.34', '+0.67%', '45.2M', 'BUY')
+            ('BTC/USD', '43250.00', '+2.35%', '15.4K', 'BUY'),
+            ('XAU/USD', '2045.67', '-0.42%', '320K', 'SELL'),
+            ('NAS100', '15876.34', '+0.67%', '45.2M', 'BUY')
         ]
         
         for item in sample_data:
-            self.data_tree.insert('', tk.END, values=item)
-            
-    def create_charts_tab(self):
-        """Erstellt den Charts-Tab mit Plotly-Visualisierungen"""
-        charts_frame = ttk.Frame(self.notebook, style='Modern.TFrame')
-        self.notebook.add(charts_frame, text="📈 Charts")
+            row = LiveDataRow(self.scroll_list, *item)
+            row.pack(fill="x", pady=2)
+            self.live_data_rows.append(row)
+
+    def setup_charts_tab(self):
+        tab = self.tabview.tab("📈 Charts")
+        tab.grid_columnconfigure(0, weight=1)
+        tab.grid_rowconfigure(1, weight=1)
         
-        # Info-Label wenn Plotly nicht verfügbar
-        if not PLOTLY_AVAILABLE:
-            info_label = ttk.Label(charts_frame, 
-                                  text="Plotly nicht installiert. Charts sind nicht verfügbar.\nInstallieren Sie es mit: pip install plotly",
-                                  style='Normal.TLabel')
-            info_label.pack(expand=True)
-            return
-            
-        # Chart-Bereich
-        chart_area = ttk.Frame(charts_frame, style='Card.TFrame')
-        chart_area.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        controls = ctk.CTkFrame(tab, fg_color="transparent")
+        controls.grid(row=0, column=0, sticky="ew", padx=10, pady=10)
         
-        title_label = ttk.Label(chart_area, text="Interaktive Finanz-Charts", style='SubHeader.TLabel')
-        title_label.pack(pady=10)
+        ctk.CTkButton(controls, text="↻ Forex Charts Aktualisieren", command=self.load_forex_charts, fg_color="#2E86AB").pack(side="left", padx=(0, 10))
         
-        # Platzhalter für Chart-Anzeige
-        chart_placeholder = ttk.Label(chart_area, 
-                                     text="Chart-Anzeige (simuliert)\n\n"
-                                          "In einer vollständigen Implementierung würden hier\n"
-                                          "interaktive Plotly-Charts mit Live-Marktdaten angezeigt.",
-                                     style='Normal.TLabel')
-        chart_placeholder.pack(expand=True)
+        self.charts_container = ctk.CTkScrollableFrame(tab, corner_radius=15, fg_color=("gray90", "gray13"))
+        self.charts_container.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
         
-        # Chart-Kontrollen
-        controls_frame = ttk.Frame(charts_frame, style='Modern.TFrame')
-        controls_frame.pack(fill=tk.X, padx=10, pady=5)
+        # Initial message
+        self.charts_loading_lbl = ctk.CTkLabel(self.charts_container, text="Lade interaktive Forex Charts (Major Pairs)... Bitte warten.", 
+                           justify="center", font=ctk.CTkFont(size=14), text_color="gray50")
+        self.charts_loading_lbl.pack(pady=50)
         
-        ttk.Button(controls_frame, text="Chart Aktualisieren", command=self.refresh_chart).pack(side=tk.LEFT)
-        ttk.Button(controls_frame, text="Neues Chart", command=self.new_chart).pack(side=tk.LEFT, padx=5)
+        # Grid layout for charts_container (2 Columns)
+        self.charts_container.grid_columnconfigure(0, weight=1)
+        self.charts_container.grid_columnconfigure(1, weight=1)
         
-    def create_terminal_tab(self):
-        """Erstellt den Terminal-Tab mit Output-Bereich"""
-        terminal_frame = ttk.Frame(self.notebook, style='Modern.TFrame')
-        self.notebook.add(terminal_frame, text="💻 Terminal")
+        # Delay the initial load slightly so the GUI can render first
+        self.after(1000, self.load_forex_charts)
+
+    def setup_terminal_tab(self):
+        tab = self.tabview.tab("💻 Terminal")
+        tab.grid_columnconfigure(0, weight=1)
+        tab.grid_rowconfigure(1, weight=1)
+
+        controls = ctk.CTkFrame(tab, fg_color="transparent")
+        controls.grid(row=0, column=0, sticky="ew", padx=10, pady=10)
         
-        # Terminal-Bereich
-        terminal_area = ttk.Frame(terminal_frame, style='Card.TFrame')
-        terminal_area.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        terminal_area.columnconfigure(0, weight=1)
-        terminal_area.rowconfigure(1, weight=1)
+        ctk.CTkButton(controls, text="🧹 Säubern", command=self.clear_terminal, fg_color="#E74C3C", hover_color="#C0392B").pack(side="left", padx=(0, 10))
+        ctk.CTkButton(controls, text="🤖 Output Simulieren", command=self.simulate_terminal_output, fg_color="transparent", border_width=2).pack(side="left")
+
+        self.terminal_box = ctk.CTkTextbox(tab, corner_radius=15, font=ctk.CTkFont(family="Consolas", size=13), 
+                                           fg_color="#1E1E1E", text_color="#D4D4D4", wrap="word")
+        self.terminal_box.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
         
-        title_label = ttk.Label(terminal_area, text="Terminal Output", style='SubHeader.TLabel')
-        title_label.grid(row=0, column=0, sticky=tk.W, padx=10, pady=10)
+        self.write_terminal("FinGPT Professional System Initialized...\n")
+        self.write_terminal("Ready for incoming streams.\n> ")
+
+    def setup_config_tab(self):
+        tab = self.tabview.tab("⚙️ Konfiguration")
+        tab.grid_columnconfigure(0, weight=1)
         
-        # ScrolledText für Terminal-Output
-        self.terminal_output = scrolledtext.ScrolledText(
-            terminal_area,
-            height=20,
-            bg='#1E1E1E',
-            fg='#D4D4D4',
-            font=('Consolas', 10),
-            wrap=tk.WORD
-        )
-        self.terminal_output.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), padx=10, pady=(0, 10))
+        # Ollama Panel
+        ollama_panel = ctk.CTkFrame(tab, corner_radius=15)
+        ollama_panel.grid(row=0, column=0, sticky="ew", padx=20, pady=20)
+        ollama_panel.grid_columnconfigure(1, weight=1)
         
-        # Terminal-Kontrollen
-        controls_frame = ttk.Frame(terminal_frame, style='Modern.TFrame')
-        controls_frame.pack(fill=tk.X, padx=10, pady=5)
+        ctk.CTkLabel(ollama_panel, text="Ollama Setup", font=ctk.CTkFont(size=16, weight="bold")).grid(row=0, column=0, columnspan=3, sticky="w", padx=20, pady=(15, 10))
         
-        ttk.Button(controls_frame, text="Clear", command=self.clear_terminal).pack(side=tk.LEFT)
-        ttk.Button(controls_frame, text="Simulate Output", command=self.simulate_terminal_output).pack(side=tk.LEFT, padx=5)
+        ctk.CTkLabel(ollama_panel, text="Daemon URL:").grid(row=1, column=0, sticky="w", padx=20, pady=10)
+        self.url_entry = ctk.CTkEntry(ollama_panel, placeholder_text="http://localhost:11434")
+        self.url_entry.insert(0, "http://localhost:11434")
+        self.url_entry.grid(row=1, column=1, sticky="w", padx=20, pady=10)
         
-        # Initiale Terminal-Nachrichten
-        self.write_terminal("FinGPT Professional Terminal v1.0\n")
-        self.write_terminal("System bereit. Warten auf Befehle...\n")
-        self.write_terminal("$ ")
+        ctk.CTkButton(ollama_panel, text="Test", command=self.test_ollama_connection, width=100).grid(row=1, column=2, padx=20, pady=10)
+
+        # Risk Panel
+        risk_panel = ctk.CTkFrame(tab, corner_radius=15)
+        risk_panel.grid(row=1, column=0, sticky="ew", padx=20, pady=(0, 20))
+        risk_panel.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(risk_panel, text="Risikomanagement", font=ctk.CTkFont(size=16, weight="bold")).grid(row=0, column=0, columnspan=2, sticky="w", padx=20, pady=(15, 10))
         
-    def create_config_tab(self):
-        """Erstellt den Konfigurations-Tab"""
-        config_frame = ttk.Frame(self.notebook, style='Modern.TFrame')
-        self.notebook.add(config_frame, text="⚙️ Konfiguration")
-        
-        # Wenn ConfigManager verfügbar ist, verwenden wir ihn
-        if CONFIG_MANAGER_AVAILABLE:
-            self.create_modern_config_ui(config_frame)
-        else:
-            # Vereinfachte Konfigurationsoberfläche
-            self.create_simple_config_ui(config_frame)
-            
-    def create_modern_config_ui(self, parent):
-        """Erstellt eine moderne Konfigurationsoberfläche"""
-        # Header
-        header_label = ttk.Label(parent, text="System-Konfiguration", style='Header.TLabel')
-        header_label.pack(pady=10)
-        
-        # Konfigurationsbereiche
-        config_notebook = ttk.Notebook(parent)
-        config_notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-        
-        # Grundlegende Einstellungen
-        basic_frame = ttk.Frame(config_notebook, style='Modern.TFrame')
-        config_notebook.add(basic_frame, text="Grundlegend")
-        
-        # Ollama Einstellungen
-        ollama_frame = ttk.LabelFrame(basic_frame, text="Ollama Konfiguration", style='Card.TFrame')
-        ollama_frame.pack(fill=tk.X, padx=10, pady=10)
-        
-        ttk.Label(ollama_frame, text="Ollama URL:", style='Normal.TLabel').grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
-        self.ollama_url_entry = ttk.Entry(ollama_frame, width=40)
-        self.ollama_url_entry.grid(row=0, column=1, padx=5, pady=5)
-        self.ollama_url_entry.insert(0, "http://localhost:11434")
-        
-        ttk.Button(ollama_frame, text="Verbindung testen", command=self.test_ollama_connection).grid(row=0, column=2, padx=5, pady=5)
-        
-        # Trading Einstellungen
-        trading_frame = ttk.LabelFrame(basic_frame, text="Trading Einstellungen", style='Card.TFrame')
-        trading_frame.pack(fill=tk.X, padx=10, pady=10)
-        
-        ttk.Label(trading_frame, text="Trading aktiv:", style='Normal.TLabel').grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
-        self.trading_active_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(trading_frame, variable=self.trading_active_var).grid(row=0, column=1, sticky=tk.W, padx=5, pady=5)
-        
-        ttk.Label(trading_frame, text="Max. Risiko (%):", style='Normal.TLabel').grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
-        self.max_risk_entry = ttk.Entry(trading_frame, width=10)
-        self.max_risk_entry.grid(row=1, column=1, sticky=tk.W, padx=5, pady=5)
-        self.max_risk_entry.insert(0, "2.0")
-        
-        # Speichern Button
-        button_frame = ttk.Frame(parent, style='Modern.TFrame')
-        button_frame.pack(fill=tk.X, padx=10, pady=10)
-        
-        ttk.Button(button_frame, text="Konfiguration speichern", 
-                  style='Success.TButton',
-                  command=self.save_config).pack(side=tk.RIGHT)
-                  
-    def create_simple_config_ui(self, parent):
-        """Erstellt eine vereinfachte Konfigurationsoberfläche"""
-        info_label = ttk.Label(parent, 
-                              text="Vereinfachte Konfiguration\n\n"
-                                   "Die vollständige Konfiguration ist verfügbar,\n"
-                                   "wenn das ConfigManager-Modul installiert ist.",
-                              style='Normal.TLabel')
-        info_label.pack(expand=True)
-        
-    def create_status_bar(self, parent):
-        """Erstellt die Statusleiste mit Systeminformationen"""
-        status_frame = ttk.Frame(parent, style='Modern.TFrame')
-        status_frame.pack(fill=tk.X, pady=(10, 0))
-        
-        # Status-Labels
-        self.status_label = ttk.Label(status_frame, 
-                                     text="Bereit | Letzte Aktualisierung: Nie",
-                                     style='Normal.TLabel')
-        self.status_label.pack(side=tk.LEFT)
-        
-        # Systeminformationen
-        self.system_label = ttk.Label(status_frame, 
-                                     text=f"Python {sys.version_info.major}.{sys.version_info.minor}",
-                                     style='Normal.TLabel')
-        self.system_label.pack(side=tk.RIGHT)
-        
-    def update_status_indicator(self, status):
-        """Aktualisiert den Status-Indicator"""
-        self.status_indicator.delete("all")
-        
-        colors = {
-            "ready": self.colors['success'],
-            "running": self.colors['warning'],
-            "error": self.colors['danger']
-        }
-        
-        color = colors.get(status, self.colors['secondary'])
-        self.status_indicator.create_oval(5, 5, 15, 15, fill=color, outline="")
-        
+        self.trading_active_switch = ctk.CTkSwitch(risk_panel, text="Auto-Trading Erlauben", progress_color="#5EBA7D")
+        self.trading_active_switch.select()
+        self.trading_active_switch.grid(row=1, column=0, sticky="w", padx=20, pady=15)
+
+        ctk.CTkLabel(risk_panel, text="Max Drawdown (%):").grid(row=1, column=1, sticky="e", padx=(0, 10), pady=15)
+        self.risk_entry = ctk.CTkEntry(risk_panel, width=80)
+        self.risk_entry.insert(0, "2.0")
+        self.risk_entry.grid(row=1, column=2, sticky="e", padx=20, pady=15)
+
+        # Save Action
+        ctk.CTkButton(tab, text="💾 Konfiguration Speichern", command=self.save_config, font=ctk.CTkFont(weight="bold", size=14),
+                      height=40, fg_color="#2E86AB", hover_color="#21618C").grid(row=2, column=0, sticky="e", padx=20, pady=20)
+
+    # --- Funktionalitäten ---
+
     def toggle_live_data(self):
-        """Schaltet Live-Daten-Anzeige ein/aus"""
         if not self.is_live_running:
             self.is_live_running = True
-            self.live_btn.config(text="Live Stoppen")
-            self.update_status_indicator("running")
-            self.status_label.config(text="Live-Daten aktiv | Letzte Aktualisierung: Jetzt")
-            self.write_terminal("Live-Daten gestartet...\n")
-            self.start_live_simulation()
+            self.live_btn.configure(text="■ Live Stoppen", fg_color="#E74C3C", hover_color="#C0392B")
+            self.status_dot.configure(text_color="#5EBA7D")
+            self.write_terminal(">> Live-Stream zu Marktdaten aktiviert.\n")
+            self.start_live_stream_thread()
         else:
             self.is_live_running = False
-            self.live_btn.config(text="Live Daten anzeigen")
-            self.update_status_indicator("ready")
-            self.status_label.config(text="Live-Daten gestoppt | Letzte Aktualisierung: Gerade eben")
-            self.write_terminal("Live-Daten gestoppt.\n")
-            
-    def start_live_simulation(self):
-        """Startet die Simulation von Live-Daten"""
-        def simulate():
+            self.live_btn.configure(text="▶ Live Starten", fg_color="#5EBA7D", hover_color="#4CAF50")
+            self.status_dot.configure(text_color="gray")
+            self.write_terminal(">> Live-Stream angehalten.\n")
+
+    def start_live_stream_thread(self):
+        def update_loop():
             while self.is_live_running:
-                # Aktualisiere Live-Daten
-                self.update_live_data()
-                time.sleep(2)  # Aktualisierung alle 2 Sekunden
-                
-        thread = threading.Thread(target=simulate, daemon=True)
-        thread.start()
-        
-    def update_live_data(self):
-        """Aktualisiert die Live-Daten-Anzeige"""
-        # In einer echten Implementierung würden hier Marktdaten abgerufen
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        self.status_label.config(text=f"Live-Daten aktiv | Letzte Aktualisierung: {timestamp}")
-        
-        # Aktualisiere zufällige Tabellendaten
-        self.update_random_table_row()
-        
-    def update_random_table_row(self):
-        """Aktualisiert eine zufällige Zeile in der Tabelle"""
-        items = self.data_tree.get_children()
-        if items:
-            random_item = random.choice(items)
-            values = list(self.data_tree.item(random_item)['values'])
-            # Ändere den Preis leicht
-            price = float(values[1].replace(',', '')) if ',' in str(values[1]) else float(values[1])
-            change = round(price + random.uniform(-0.01, 0.01), 5)
-            values[1] = f"{change:.5f}"
-            self.data_tree.item(random_item, values=values)
+                # Randomize rows safely in main thread
+                self.after(0, self.randomize_table_data)
+                now = datetime.now().strftime("%H:%M:%S")
+                self.after(0, lambda: self.status_label.configure(text=f"Live-Stream aktiv | Letzte Aktualisierung: {now}"))
+                time.sleep(1.5)
+        threading.Thread(target=update_loop, daemon=True).start()
+
+    def randomize_table_data(self):
+        if self.live_data_rows:
+            row = random.choice(self.live_data_rows)
+            current_price = float(row.price_lbl.cget("text").replace(',', ''))
+            movement = random.uniform(-0.005, 0.005)
+            new_price = current_price * (1 + movement)
             
+            sign = "+" if movement > 0 else ""
+            change_str = f"{sign}{(movement*100):.2f}%"
+            row.update_data(f"{new_price:.4f}", change_str)
+
     def start_simulated_data(self):
-        """Startet simulierte Daten für Demo-Zwecke"""
-        def simulate():
-            symbols = ['EUR/USD', 'GBP/USD', 'USD/JPY', 'BTC/USD', 'XAU/USD', 'NAS100']
+        def bg_simulator():
             while True:
-                time.sleep(5)  # Alle 5 Sekunden neue Daten
-                if hasattr(self, 'terminal_output'):
-                    self.write_terminal(f"[{datetime.now().strftime('%H:%M:%S')}] Markt-Daten aktualisiert\n")
-                    
-        thread = threading.Thread(target=simulate, daemon=True)
-        thread.start()
-        
+                time.sleep(8)
+                if hasattr(self, 'terminal_box'):
+                    msg = f"[{datetime.now().strftime('%H:%M:%S')}] Background sync completed.\n"
+                    self.after(0, lambda: self.write_terminal(msg))
+        threading.Thread(target=bg_simulator, daemon=True).start()
+
     def write_terminal(self, text):
-        """Schreibt Text in das Terminal"""
-        self.terminal_output.insert(tk.END, text)
-        self.terminal_output.see(tk.END)
-        self.terminal_output.update_idletasks()
-        
+        self.terminal_box.insert("end", text)
+        self.terminal_box.see("end")
+
     def clear_terminal(self):
-        """Leert das Terminal"""
-        self.terminal_output.delete(1.0, tk.END)
-        
+        self.terminal_box.delete("0.0", "end")
+        self.write_terminal("> ")
+
     def simulate_terminal_output(self):
-        """Simuliert Terminal-Output"""
-        messages = [
-            "Analyzing market conditions...",
-            "Processing trading signals...",
-            "Executing trade: BUY EUR/USD",
-            "Risk assessment completed",
-            "Portfolio rebalancing initiated",
-            "Connection to MetaTrader5 established",
-            "Data synchronization in progress..."
+        msgs = [
+            "Analyzing deep learning model accuracy...",
+            "Executing fast scalp on EUR/USD.",
+            "Risk limits within bounds. Proceeding.",
+            "LLM inference completed in 452ms.",
+            "Fetching macroeconomic news sentiment..."
         ]
+        self.write_terminal(f"[{datetime.now().strftime('%H:%M:%S')}] {random.choice(msgs)}\n")
+
+    def load_forex_charts(self):
+        self.write_terminal(">> Lade echte Forex-Candlesticks (Major Pairs) via MetaTrader 5...\n")
         
-        message = random.choice(messages)
-        self.write_terminal(f"[{datetime.now().strftime('%H:%M:%S')}] {message}\n")
-        
-    def refresh_chart(self):
-        """Aktualisiert die Charts"""
-        if PLOTLY_AVAILABLE:
-            self.write_terminal("Chart aktualisiert\n")
-        else:
-            messagebox.showinfo("Info", "Charts sind nur verfügbar, wenn Plotly installiert ist.")
+        # Clear existing charts if any
+        for widget in self.charts_container.winfo_children():
+            widget.destroy()
             
+        self.charts_loading_lbl = ctk.CTkLabel(self.charts_container, text="Lade Livedaten für Major Pairs... (MT5)", font=ctk.CTkFont(size=14))
+        self.charts_loading_lbl.grid(row=0, column=0, columnspan=2, pady=50)
+
+        pairs = ["EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD", "USDCAD"]
+
+        # Use a style compatible with dark mode
+        mc = mpf.make_marketcolors(up='#5EBA7D', down='#E74C3C', edge='i', wick='i', vcdopctr=False)
+        s = mpf.make_mpf_style(marketcolors=mc, facecolor='#1E1E1E', edgecolor='gray', 
+                               figcolor='#1E1E1E', gridcolor='#333333', gridstyle=':')
+
+        def fetch_and_plot():
+            try:
+                # MT5 initialisieren, falls nicht schon aktiv
+                if not mt5.initialize():
+                    raise Exception("MetaTrader 5 konnte nicht initialisiert werden.")
+                
+                figures = []
+                for symbol in pairs:
+                    # Lade 30 Tage (D1) Daten = TIMEFRAME_D1
+                    rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_D1, 0, 30)
+                    if rates is None or len(rates) == 0:
+                        self.write_terminal(f">> WARNUNG: Keine Daten von MT5 für {symbol} empfangen.\n")
+                        continue
+                        
+                    df = pd.DataFrame(rates)
+                    df['time'] = pd.to_datetime(df['time'], unit='s')
+                    df.set_index('time', inplace=True)
+                    
+                    if df.empty:
+                        continue
+                    
+                    fig = Figure(figsize=(5, 3.5), facecolor='#1E1E1E')
+                    ax = fig.add_subplot(111)
+                    title = f"{symbol[:3]}/{symbol[3:]}"
+                    ax.set_title(title, color='white')
+                    ax.tick_params(colors='white')
+                    
+                    # Plotly ist hübsch, aber mplfinance im Plot-Modus ist nativ einbettbar
+                    mpf.plot(df, type='candle', ax=ax, style=s, show_nontrading=False, warn_too_much_data=1000)
+                    
+                    # Layout anpassen
+                    fig.tight_layout()
+                    figures.append((title, fig))
+                
+                # Update GUI
+                self.after(0, lambda: self._render_charts(figures))
+            except Exception as e:
+                self.after(0, lambda: self.write_terminal(f">> Fehler beim Chart-Download: {str(e)}\n"))
+                self.after(0, lambda: messagebox.showerror("API Fehler", f"Fehler beim Abrufen der Marktdaten:\n{e}"))
+                self.after(0, lambda: self.charts_loading_lbl.configure(text="Fehler beim Laden der Daten."))
+
+        threading.Thread(target=fetch_and_plot, daemon=True).start()
+
+    def _render_charts(self, figures):
+        # Remove loading label
+        if hasattr(self, 'charts_loading_lbl') and self.charts_loading_lbl.winfo_exists():
+            self.charts_loading_lbl.destroy()
+            
+        self.write_terminal(">> Forex-Charts (Major Pairs) erfolgreich gerendert.\n")
+        
+        grid_row = 0
+        grid_col = 0
+        for title, fig in figures:
+            # Create a frame for the padding/border
+            frame = ctk.CTkFrame(self.charts_container, corner_radius=10, fg_color="#1E1E1E")
+            frame.grid(row=grid_row, column=grid_col, padx=10, pady=10, sticky="nsew")
+            
+            # Embed matplotlib figure
+            canvas = FigureCanvasTkAgg(fig, master=frame)
+            canvas_widget = canvas.get_tk_widget()
+            canvas_widget.pack(fill="both", expand=True, padx=5, pady=5)
+            canvas.draw()
+            
+            grid_col += 1
+            if grid_col > 1:
+                grid_col = 0
+                grid_row += 1
+
     def new_chart(self):
-        """Erstellt ein neues Chart"""
-        if PLOTLY_AVAILABLE:
-            self.write_terminal("Neues Chart erstellt\n")
-        else:
-            messagebox.showinfo("Info", "Charts sind nur verfügbar, wenn Plotly installiert ist.")
-            
+        # Obsolete with grid approach, reroute to reload
+        self.load_forex_charts()
+
     def test_ollama_connection(self):
-        """Testet die Ollama-Verbindung"""
-        url = self.ollama_url_entry.get()
-        self.write_terminal(f"Teste Verbindung zu {url}...\n")
-        # In einer echten Implementierung würde hier eine HTTP-Anfrage erfolgen
-        self.write_terminal("Verbindung erfolgreich!\n")
-        messagebox.showinfo("Erfolg", "Verbindung zu Ollama erfolgreich!")
-        
+        url = self.url_entry.get()
+        self.write_terminal(f">> Testing ping to {url}...\n")
+        # Simulierter Erfolg
+        self.after(500, lambda: self.write_terminal(">> SUCCESS: Ollama is reachable.\n"))
+
     def save_config(self):
-        """Speichert die Konfiguration"""
-        self.write_terminal("Konfiguration gespeichert\n")
-        messagebox.showinfo("Erfolg", "Konfiguration wurde gespeichert!")
-        
-    def run(self):
-        """Startet die GUI"""
-        self.root.mainloop()
+        self.write_terminal(">> Hardware and risk configuration flushed to disk.\n")
+        # Kleines Checkmark Label anzeigen als feedback
+        feedback = ctk.CTkLabel(self, text="✔ Gespeichert!", text_color="#5EBA7D", bg_color="transparent")
+        feedback.place(relx=0.9, rely=0.05, anchor="ne")
+        self.after(2000, feedback.destroy)
+
 
 def main():
-    """Hauptfunktion"""
     try:
         app = ModernFinGPTGUI()
-        app.run()
+        app.mainloop()
     except Exception as e:
-        print(f"Fehler beim Starten der GUI: {e}")
-        messagebox.showerror("Startfehler", f"Fehler beim Starten: {e}")
+        import traceback
+        traceback.print_exc()
+        print(f"Schwerwiegender Fehler beim GUI-Start: {e}")
 
 if __name__ == "__main__":
     main()

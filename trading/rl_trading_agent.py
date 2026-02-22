@@ -44,12 +44,13 @@ class TradingEnvironment:
         self.entry_price = 0
         self.max_drawdown = 0
         self.peak_balance = self.balance
+        self.time_in_position = 0
         
         # Reward Parameters
         self.profit_reward_factor = 1.0
-        self.loss_penalty_factor = 1.5
-        self.holding_penalty = 0.001  # Kleine Strafe für das Halten von Positionen
-        self.transaction_cost = 0.0001  # Spread/Gebühren
+        self.loss_penalty_factor = 2.0  # Erhöhte Strafe für Verluste (Risk Aversion)
+        self.holding_penalty = 0.005  # Höhere Strafe für das Halten von Positionen
+        self.transaction_cost = 0.0002  # Höhere realistischere Spread/Gebühren
         
         # State Features (Input für NN)
         self.state_features = [
@@ -270,7 +271,7 @@ class TradingEnvironment:
 
 class DQNAgent:
     """
-    Deep Q-Network Agent für Trading
+    Double Deep Q-Network (DDQN) Agent für Trading
     """
     
     def __init__(self, state_size, action_size, learning_rate=0.001):
@@ -356,15 +357,19 @@ class DQNAgent:
         # Aktuelle Q-Values
         current_q = self.q_network.predict(states, verbose=0)
         
-        # Next Q-Values vom Target Network
-        next_q = self.target_network.predict(next_states, verbose=0)
+        # Double DQN (DDQN) Logic Update
+        # 1. Action Selektion durch Q-Network
+        best_actions = np.argmax(self.q_network.predict(next_states, verbose=0), axis=1)
+        
+        # 2. Q-Wert Evaluierung durch Target Network
+        next_q_target = self.target_network.predict(next_states, verbose=0)
         
         # Q-Learning Update
         for i in range(self.batch_size):
             if dones[i]:
                 current_q[i][actions[i]] = rewards[i]
             else:
-                current_q[i][actions[i]] = rewards[i] + self.gamma * np.max(next_q[i])
+                current_q[i][actions[i]] = rewards[i] + self.gamma * next_q_target[i][best_actions[i]]
         
         # Training
         self.q_network.fit(states, current_q, epochs=1, verbose=0)
