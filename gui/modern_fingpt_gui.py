@@ -181,7 +181,7 @@ class ModernFinGPTGUI(ctk.CTk):
         self.ai_dot = ctk.CTkLabel(self.ai_visualizer_frame, text="●", text_color="gray", font=ctk.CTkFont(size=24))
         self.ai_dot.pack(side="left", padx=(20, 10), pady=15)
         
-        self.ai_status_lbl = ctk.CTkLabel(self.ai_visualizer_frame, text="Zzz... Warte auf Live-Stream", font=ctk.CTkFont(size=14, weight="bold", italic=True), text_color="gray60")
+        self.ai_status_lbl = ctk.CTkLabel(self.ai_visualizer_frame, text="Zzz... Warte auf Live-Stream", font=ctk.CTkFont(size=14, weight="bold", slant="italic"), text_color="gray60")
         self.ai_status_lbl.pack(side="left", pady=15)
         
         # State variables for animation
