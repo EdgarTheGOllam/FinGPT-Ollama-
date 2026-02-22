@@ -1,6 +1,6 @@
 {
   "ollama_url": "http://localhost:11434",
-  "llm_model": "gpt-oss:120b-cloud",
+  "llm_model": "qwen3-coder:480b-cloud",
   "interval": 5,
   "ai_temperature": 0.3,
   "prompt_lang": "Deutsch",

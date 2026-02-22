@@ -108,6 +108,7 @@ class ModernFinGPTGUI(ctk.CTk):
         # State variables
         self.is_live_running = False
         self.live_data_rows = []
+        self.pnl_history = []  # Stores recent P&L values for the Live Chart
         
         # Konstruktor Aufruf für Layout
         self.setup_layout()
@@ -144,6 +145,7 @@ class ModernFinGPTGUI(ctk.CTk):
         self.tabview.add("📰 News")
         self.tabview.add("💻 Terminal")
         self.tabview.add("⚙️ Konfiguration")
+        self.tabview.add("❓ FAQ")
         
         # Tabs konfigurieren
         self.setup_dashboard_tab()
@@ -153,6 +155,7 @@ class ModernFinGPTGUI(ctk.CTk):
         self.setup_news_tab()
         self.setup_terminal_tab()
         self.setup_config_tab()
+        self.setup_faq_tab()
 
         
         # 3. Status Bar
@@ -168,14 +171,17 @@ class ModernFinGPTGUI(ctk.CTk):
         
         # We will create these labels dynamically or explicitly
         self.indicators = {}
+        self.indicator_labels = {}  # Store references for tooltips/text updates
+        
         for sys_name in ["Python", "MT5", "Ollama", "RL Engine"]:
             frame = ctk.CTkFrame(self.indicator_frame, fg_color="transparent")
-            frame.pack(side="left", padx=8)
-            dot = ctk.CTkLabel(frame, text="●", text_color="gray", font=ctk.CTkFont(size=14))
-            dot.pack(side="left", padx=(0, 4))
-            lbl = ctk.CTkLabel(frame, text=sys_name, font=ctk.CTkFont(size=11), text_color="gray70")
+            frame.pack(side="left", padx=10)
+            dot = ctk.CTkLabel(frame, text="●", text_color="gray", font=ctk.CTkFont(size=16))
+            dot.pack(side="left", padx=(0, 6))
+            lbl = ctk.CTkLabel(frame, text=sys_name, font=ctk.CTkFont(size=13, weight="bold"), text_color="gray70")
             lbl.pack(side="left")
             self.indicators[sys_name] = dot
+            self.indicator_labels[sys_name] = lbl
             
         self.update_footer_indicators()
         # Load any previously saved settings from disk
@@ -211,9 +217,9 @@ class ModernFinGPTGUI(ctk.CTk):
         self.ai_animation_idx = 0
         self.ai_current_symbol = None
 
-        # Live Data List
+        # Live Data List (Left Side)
         data_frame = ctk.CTkFrame(tab, corner_radius=15, fg_color=("gray90", "gray13"))
-        data_frame.grid(row=3, column=0, columnspan=3, sticky="nsew", padx=10, pady=10)
+        data_frame.grid(row=3, column=0, columnspan=2, sticky="nsew", padx=(10, 5), pady=10)
         data_frame.grid_rowconfigure(1, weight=1)
         data_frame.grid_columnconfigure(0, weight=1)
 
@@ -233,6 +239,20 @@ class ModernFinGPTGUI(ctk.CTk):
             lbl.grid(row=0, column=i, sticky="w", padx=10)
 
         ctk.CTkFrame(self.scroll_list, height=1, fg_color=("gray70", "gray30")).pack(fill="x", pady=(0, 5))
+
+        # Live P&L Chart (Right Side)
+        self.chart_frame = ctk.CTkFrame(tab, corner_radius=15, fg_color=("gray90", "gray13"))
+        self.chart_frame.grid(row=3, column=2, sticky="nsew", padx=(5, 10), pady=10)
+        self.chart_frame.grid_rowconfigure(1, weight=1)
+        self.chart_frame.grid_columnconfigure(0, weight=1)
+        
+        chart_hdr = ctk.CTkLabel(self.chart_frame, text="Live P&L Laufzeit", font=ctk.CTkFont(size=16, weight="bold"))
+        chart_hdr.grid(row=0, column=0, sticky="w", padx=20, pady=15)
+        
+        # We use a native Tkinter canvas for high-performance smooth drawing
+        import tkinter as tk
+        self.pnl_canvas = tk.Canvas(self.chart_frame, bg="#212121", highlightthickness=0)
+        self.pnl_canvas.grid(row=1, column=0, sticky="nsew", padx=15, pady=(0, 15))
 
         # Initial Mock Data
         self.populate_sample_data()
@@ -920,6 +940,12 @@ class ModernFinGPTGUI(ctk.CTk):
                                               text="KI Begründung — klicke 🤖 in einer Trade-Zeile",
                                               font=ctk.CTkFont(size=13, weight="bold"), text_color="gray60")
         self._ai_panel_header.grid(row=0, column=1, sticky="w")
+        
+        self._ai_reflection_btn = ctk.CTkButton(self._ai_panel, text="🧠 System-Analyse anfordern",
+                                          font=ctk.CTkFont(size=12, weight="bold"),
+                                          fg_color="#A23B72", hover_color="#8c3363",
+                                          width=180, height=28, command=self._analyze_past_trade_async)
+        # We grid it conditionally in _show_ai_reasoning
 
         self._ai_reasoning_box = ctk.CTkTextbox(self._ai_panel, height=100, fg_color="transparent",
                                                   font=ctk.CTkFont(family="Segoe UI", size=12),
@@ -1033,6 +1059,7 @@ class ModernFinGPTGUI(ctk.CTk):
             try:
                 with open(fpath, 'r', encoding='utf-8') as f:
                     jt = json.load(f)
+                jt["_filepath"] = fpath
                 json_by_ticket[jt.get("ticket", 0)] = jt
                 # If MT5 failed, use JSON as primary source
                 if not mt5_loaded:
@@ -1053,6 +1080,8 @@ class ModernFinGPTGUI(ctk.CTk):
                         trade["ai_confidence"]   = jt.get("ai_confidence", "")
                         trade["indicators_used"] = jt.get("indicators_used", [])
                         trade["tags"]            = jt.get("tags", [])
+                        trade["reflection_analysis"] = jt.get("reflection_analysis", "")
+                        trade["_filepath"]       = jt.get("_filepath", "")
 
         self._journal_entries = entries
         return entries
@@ -1196,6 +1225,8 @@ class ModernFinGPTGUI(ctk.CTk):
         reasoning = trade.get("ai_reasoning") or "Keine KI-Begründung für diesen Trade gespeichert."
         confidence = trade.get("ai_confidence", "")
         indicators = trade.get("indicators_used", [])
+        reflection = trade.get("reflection_analysis")
+        profit = trade.get("profit", 0)
 
         self._ai_panel_header.configure(
             text=f"🤖 KI Begründung  —  {symbol} {action}  "
@@ -1204,7 +1235,12 @@ class ModernFinGPTGUI(ctk.CTk):
 
         self._ai_reasoning_box.configure(state="normal")
         self._ai_reasoning_box.delete("1.0", "end")
-        self._ai_reasoning_box.insert("end", reasoning)
+        
+        box_content = reasoning
+        if reflection:
+            box_content += "\n\n💡 KI Selbst-Reflexion (Fehleranalyse):\n" + reflection
+            
+        self._ai_reasoning_box.insert("end", box_content)
         self._ai_reasoning_box.configure(state="disabled")
 
         ind_text = ""
@@ -1214,6 +1250,73 @@ class ModernFinGPTGUI(ctk.CTk):
         if tags:
             ind_text += ("  |  Tags: " if ind_text else "Tags: ") + ", ".join(tags)
         self._ai_indicators_lbl.configure(text=ind_text)
+        
+        # Show Reflection button only for losing trades that haven't been analyzed yet
+        if profit < 0 and not reflection and trade.get("_filepath"):
+            self._ai_reflection_btn.grid(row=0, column=2, padx=(0, 15))
+            self._ai_reflection_btn.configure(state="normal", text="🧠 System-Analyse anfordern")
+        else:
+            self._ai_reflection_btn.grid_forget()
+
+    def _analyze_past_trade_async(self):
+        trade = self._selected_trade
+        if not trade or not trade.get("_filepath"):
+            return
+            
+        self._ai_reflection_btn.configure(state="disabled", text="Analysiere...")
+        
+        def run_analysis():
+            import requests, json
+            
+            prompt = (
+                f"Du bist ein professioneller Trading-Coach. Du analysierst einen vergangenen Trade deines eigenen Systems, der im Stop-Loss endete.\n\n"
+                f"Trade-Daten:\n"
+                f"- Symbol: {trade.get('symbol')}\n"
+                f"- Richtung: {trade.get('action')}\n"
+                f"- Einstiegspreis: {trade.get('open_price')}\n"
+                f"- Ausstiegspreis: {trade.get('close_price')}\n"
+                f"- Verwendete Indikatoren: {', '.join(trade.get('indicators_used', []))}\n"
+                f"- Ursprüngliche System-Begründung: {trade.get('ai_reasoning')}\n\n"
+                f"Bitte schreibe in 2-3 klaren und sachlichen Sätzen auf Deutsch, was der Fehler gewesen sein könnte "
+                f"(z.B. Fakeout, gegen den übergeordneten Trend gehandelt, wichtige News ignoriert, Fehlinterpretation) "
+                f"und was das System beim nächsten Mal besser machen sollte."
+            )
+            
+            # Load URL and Model from config
+            base_url = self.config.get("Ollama", "BaseURL", fallback="http://localhost:11434").rstrip('/')
+            model = self.config.get("Ollama", "Model", fallback="llama3.2")
+            url = f"{base_url}/api/generate"
+            
+            try:
+                response = requests.post(url, json={"model": model, "prompt": prompt, "stream": False}, timeout=45)
+                if response.status_code == 200:
+                    result_text = response.json().get("response", "Keine vernünftige Antwort erhalten.")
+                else:
+                    result_text = f"Fehler bei der Analyse: HTTP {response.status_code}"
+            except Exception as e:
+                result_text = f"Verbindungsfehler zu Ollama: {str(e)}"
+                
+            def on_done():
+                trade["reflection_analysis"] = result_text.strip()
+                # Update JSON file permanently
+                filepath = trade.get("_filepath")
+                try:
+                    with open(filepath, 'r', encoding='utf-8') as f:
+                        file_data = json.load(f)
+                    file_data["reflection_analysis"] = trade["reflection_analysis"]
+                    with open(filepath, 'w', encoding='utf-8') as f:
+                        json.dump(file_data, f, indent=4, ensure_ascii=False)
+                    self.write_terminal(f">> [JOURNAL] KI-Reflexion für Ticket {trade.get('ticket')} dauerhaft gespeichert.\n", "SUCCESS")
+                except Exception as e:
+                    self.write_terminal(f">> [JOURNAL] Fehler beim Speichern der Reflexion: {e}\n", "ERROR")
+                
+                # Update UI
+                self._show_ai_reasoning(trade)
+                
+            self.after(0, on_done)
+            
+        import threading
+        threading.Thread(target=run_analysis, daemon=True).start()
 
     def _export_journal_csv(self):
         """Export currently visible month's trades to CSV."""
@@ -2091,7 +2194,82 @@ class ModernFinGPTGUI(ctk.CTk):
 
         except Exception as e:
             self.write_terminal(f">> [SETTINGS ERROR] Laden fehlgeschlagen: {e}\n")
+
+    # ==========================================
+    # 7. FAQ TAB (Hilfe & Dokumentation)
+    # ==========================================
+    def setup_faq_tab(self):
+        tab = self.tabview.tab("❓ FAQ")
+        tab.grid_columnconfigure(0, weight=1)
+        tab.grid_rowconfigure(1, weight=1)
+        
+        # Header
+        header = ctk.CTkFrame(tab, fg_color="transparent")
+        header.grid(row=0, column=0, sticky="ew", padx=20, pady=(20, 10))
+        
+        ctk.CTkLabel(header, text="Häufig gestellte Fragen (FAQ)", 
+                     font=ctk.CTkFont(size=24, weight="bold")).pack(side="left")
+        ctk.CTkLabel(header, text="Hilfe zur Software & Trading-Plattform", 
+                     font=ctk.CTkFont(size=14), text_color="gray60").pack(side="left", padx=(15, 0), pady=(8, 0))
+        
+        # Scrollable Content
+        scroll = ctk.CTkScrollableFrame(tab, fg_color="transparent")
+        scroll.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 20))
+        
+        # FAQ Daten
+        faqs = [
+            ("Wie verbinde ich MetaTrader 5?", 
+             "Wechsle in den Tab '⚙️ Konfiguration' und überprüfe, ob der MT5-Pfad korrekt ist. "
+             "Wenn alles stimmt, klicke oben rechts auf '▶ Live Starten'. Achte darauf, dass im MetaTrader 5 "
+             "oben der Button 'Algo-Trading' aktiviert (grün) ist!"),
+             
+            ("Was bedeutet der rote Punkt bei RL Engine unten rechts?", 
+             "Die RL (Reinforcement Learning) Engine sucht nach fertig trainierten KI-Agenten im Ordner 'storage/rl_agents'. "
+             "Der rote Punkt bedeutet, dass das System momentan im Basis-Modus läuft, weil noch keine Modelle "
+             "trainiert und gespeichert wurden. FinGPT funktioniert auch ohne diese Agenten einwandfrei."),
+             
+            ("Warum tradet die KI nicht, obwohl Live gestartet ist?", 
+             "1. Ist 'Algo-Trading' im MT5 an?\n"
+             "2. Ist im '⚙️ Konfiguration' Tab -> '⚙️ System' der Schalter 'Trading Erlaubt' aktiv?\n"
+             "3. Findet die KI gerade überhaupt ein Setup? FinGPT erzwingt keine Trades. "
+             "Schau im '💻 Terminal' Tab nach Log-Ausgaben oder nutze den '🤖 KI Trade-Berater' in der Live Markt-Übersicht für manuelle Setups."),
+             
+            ("Wie funktioniert der AI Trade Coach (Reflexion) im Journal?", 
+             "Wenn ein Trade im Minus geschlossen wird, taucht im '📝 Journal' Tab beim Anklicken "
+             "des Trades im KI-Panel unten rechts der Button '🧠 System-Analyse anfordern' auf. "
+             "Darüber schickt FinGPT rückwirkend die Indikatordaten nochmals an Ollama, um aus "
+             "dem Fehler zu lernen (z.B. Fakeouts, gegen den Trend gehandelt etc.)."),
+             
+            ("Wie liest FinGPT die Charts?", 
+             "Die Software nutzt die MetaTrader 5 Schnittstelle, um Preisdaten (Open, High, Low, Close) für "
+             "verschiedene Zeitfenster (z.B. M15, H1, H4) direkt im Hintergrund abzufragen. "
+             "Die Python-Engine berechnet daraus Indikatoren (RSI, MACD, Bollinger Bänder) und gibt "
+             "diese textuell an das lokale Ollama-Modell weiter."),
+             
+            ("Muss Ollama im Hintergrund laufen?", 
+             "Ja! FinGPT greift auf ein lokales KI-Modell (z.B. llama3.2) über die Ollama API zu. "
+             "Ohne gestarteten Ollama-Service (meist http://localhost:11434) funktioniert die "
+             "KI-Analyse, das Journal-Reasoning und das Setup-Finden nicht.")
+        ]
+        
+        # Rendere FAQ Cards
+        for idx, (question, answer) in enumerate(faqs):
+            card = ctk.CTkFrame(scroll, fg_color=("gray90", "gray13"), corner_radius=12)
+            card.pack(fill="x", padx=10, pady=(0, 15))
+            card.grid_columnconfigure(0, weight=1)
             
+            # Question (Bold)
+            q_lbl = ctk.CTkLabel(card, text=f"Q: {question}", 
+                                 font=ctk.CTkFont(size=14, weight="bold"), 
+                                 text_color="#5EBA7D", justify="left", anchor="w")
+            q_lbl.grid(row=0, column=0, sticky="ew", padx=20, pady=(15, 5))
+            
+            # Answer
+            a_lbl = ctk.CTkLabel(card, text=answer, 
+                                 font=ctk.CTkFont(size=13), 
+                                 text_color="gray70", justify="left", anchor="w", wraplength=900)
+            a_lbl.grid(row=1, column=0, sticky="ew", padx=20, pady=(0, 15))
+
     # --- Funktionalitäten ---
 
     def toggle_live_data(self):
@@ -2186,10 +2364,19 @@ class ModernFinGPTGUI(ctk.CTk):
 
         # RL Engine logic (simulate or check path)
         rl_path = "storage/rl_agents"
-        if os.path.exists(rl_path) and len(os.listdir(rl_path)) > 0:
+        has_agents = os.path.exists(rl_path) and len(os.listdir(rl_path)) > 0
+        if has_agents:
             self.indicators["RL Engine"].configure(text_color="#5EBA7D")
+            
+            # Safe access to indicator_labels which was added later
+            if hasattr(self, 'indicator_labels') and "RL Engine" in self.indicator_labels:
+                self.indicator_labels["RL Engine"].configure(text="RL Engine", text_color="gray70")
         else:
             self.indicators["RL Engine"].configure(text_color="#E74C3C") # No agents trained
+            
+            # Add a hint why it's red
+            if hasattr(self, 'indicator_labels') and "RL Engine" in self.indicator_labels:
+                self.indicator_labels["RL Engine"].configure(text="RL Engine (Keine Agenten)", text_color="#E74C3C")
 
         # Repeat every 10 seconds
         self.after(10000, self.update_footer_indicators)
@@ -2221,6 +2408,12 @@ class ModernFinGPTGUI(ctk.CTk):
             
             history_deals = mt5.history_deals_total(datetime.now().replace(hour=0, minute=0, second=0), datetime.now())
             self.trades_card.update_value(str(history_deals) if history_deals is not None else "0")
+
+            # Update P&L Chart
+            self.pnl_history.append(acc_info.profit)
+            if len(self.pnl_history) > 50:
+                self.pnl_history.pop(0)
+            self._draw_pnl_chart()
 
         # Aktualisiere Symbole
         for symbol, row in self.live_data_rows:
@@ -2255,6 +2448,61 @@ class ModernFinGPTGUI(ctk.CTk):
                         
                 row.update_data(f"{tick.bid:.5f}", change_str)
                 row.update_trend(*trend_colors)
+
+    def _draw_pnl_chart(self):
+        """Draws a smooth line chart on the pnl_canvas."""
+        if not hasattr(self, 'pnl_canvas') or not self.pnl_history:
+            return
+            
+        self.pnl_canvas.delete("all")
+        width = self.pnl_canvas.winfo_width()
+        height = self.pnl_canvas.winfo_height()
+        
+        # Can be 1x1 if canvas isn't mapped yet
+        if width < 10 or height < 10:
+            return
+            
+        data = self.pnl_history
+        max_val = max(data) if max(data) > 0 else 0.01  # don't divide by 0
+        min_val = min(data) if min(data) < 0 else -0.01
+        
+        # Add padding
+        pad_y = 10
+        range_val = (max_val - min_val) if (max_val - min_val) != 0 else 1
+        scale_y = (height - 2*pad_y) / range_val
+        
+        # Find 0 line
+        zero_y = height - pad_y - (0 - min_val) * scale_y
+        
+        # Color based on current profit
+        line_color = "#5EBA7D" if data[-1] >= 0 else "#E74C3C"
+        
+        # Draw 0 line
+        self.pnl_canvas.create_line(0, zero_y, width, zero_y, fill="#3A3A3A", dash=(4, 2))
+        
+        if len(data) == 1:
+            return
+            
+        points = []
+        step_x = width / (max(len(data)-1, 1))
+        
+        for i, val in enumerate(data):
+            x = i * step_x
+            y = height - pad_y - (val - min_val) * scale_y
+            points.extend([x, y])
+            
+        # Draw line
+        self.pnl_canvas.create_line(points, fill=line_color, width=3, smooth=True)
+        
+        # Draw fill polygon (down to minimum visible y or zero line)
+        poly_points = [0, height] + points + [width, height] 
+        # Note: tkinter canvas doesn't easily support gradient fills natively,
+        # but a solid transparent-ish fill can be simulated with stipple (though stipple is ugly on windows).
+        # We'll just stick to a clean, bright line since it looks more modern.
+        
+        # Add glow effect (draw wider faint line underneath)
+        self.pnl_canvas.create_line(points, fill=line_color, width=8, stipple="gray50", smooth=True)
+        self.pnl_canvas.create_line(points, fill=line_color, width=3, smooth=True)
 
     def start_simulated_data(self):
         def bg_simulator():
