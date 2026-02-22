@@ -15,6 +15,7 @@ import random
 from datetime import datetime
 import sys
 import os
+import requests
 
 # Konfiguriere das CustomTkinter Aussehen
 ctk.set_appearance_mode("Dark")  # "System", "Dark", "Light"
@@ -282,7 +283,7 @@ class ModernFinGPTGUI(ctk.CTk):
         self.url_entry.grid(row=1, column=1, sticky="w", padx=20, pady=10)
         
         ctk.CTkLabel(sys_panel, text="LLM Modell:").grid(row=2, column=0, sticky="w", padx=20, pady=10)
-        self.model_combo = ctk.CTkComboBox(sys_panel, values=["llama3.2", "hermes3", "mistral", "gemma2"])
+        self.model_combo = ctk.CTkComboBox(sys_panel, values=["Lade Modelle..."])
         self.model_combo.grid(row=2, column=1, sticky="w", padx=20, pady=10)
 
         ctk.CTkLabel(sys_panel, text="Auto-Trading Intervall (sek):").grid(row=3, column=0, sticky="w", padx=20, pady=10)
@@ -337,6 +338,47 @@ class ModernFinGPTGUI(ctk.CTk):
         save_btn = ctk.CTkButton(scroll_config, text="💾 Alle Systemeinstellungen Speichern", command=self.save_config, 
                       font=ctk.CTkFont(weight="bold", size=14), height=45, fg_color="#2E86AB", hover_color="#21618C")
         save_btn.grid(row=3, column=0, sticky="e", padx=10, pady=20)
+        
+        # Initial Model Fetch
+        self.after(500, self.fetch_ollama_models_silently)
+
+    def fetch_ollama_models_silently(self):
+        try:
+            url = self.url_entry.get().strip()
+            response = requests.get(f"{url}/api/tags", timeout=3)
+            if response.status_code == 200:
+                models = [model['name'] for model in response.json().get('models', [])]
+                if models:
+                    self.model_combo.configure(values=models)
+                    self.model_combo.set(models[0])
+                else:
+                    self.model_combo.configure(values=["Keine Modelle gefunden"])
+                    self.model_combo.set("Keine Modelle gefunden")
+            else:
+                self.model_combo.configure(values=["Verbindung fehlgeschlagen"])
+                self.model_combo.set("Verbindung fehlgeschlagen")
+        except Exception:
+            self.model_combo.configure(values=["Verbindung fehlgeschlagen"])
+            self.model_combo.set("Verbindung fehlgeschlagen")
+
+    def test_ollama_connection(self):
+        try:
+            url = self.url_entry.get().strip()
+            response = requests.get(f"{url}/api/tags", timeout=5)
+            if response.status_code == 200:
+                models = [model['name'] for model in response.json().get('models', [])]
+                if models:
+                    self.model_combo.configure(values=models)
+                    self.model_combo.set(models[0])
+                    messagebox.showinfo("Erfolg", f"Ollama verbunden! {len(models)} Modelle gefunden.")
+                    self.write_terminal(f">> Ollama Connection OK. Models: {', '.join(models)}\n")
+                else:
+                    self.model_combo.configure(values=["Keine Modelle gefunden"])
+                    messagebox.showwarning("Warnung", "Ollama ist erreichbar, aber es sind keine Modelle installiert.")
+            else:
+                messagebox.showerror("Fehler", f"Server antwortete mit Status: {response.status_code}")
+        except requests.exceptions.RequestException as e:
+            messagebox.showerror("Verbindungsfehler", f"Ollama Daemon konnte nicht erreicht werden:\n{e}")
 
     def test_mt5_connection(self):
         if mt5.initialize():
