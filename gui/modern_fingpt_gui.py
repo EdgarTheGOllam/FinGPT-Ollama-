@@ -219,51 +219,57 @@ class ModernFinGPTGUI(ctk.CTk):
         self.risk_card = self.create_metric_card(tab, "Freie Margin", "€--", 1, 2)
 
         # AI Agent Visualizer & Lückenfüller-Widgets (Middle Banner)
-        self.ai_visualizer_frame = ctk.CTkFrame(tab, height=90, corner_radius=15, fg_color=("gray85", "gray17"))
+        # AI Agent Visualizer & Lückenfüller-Widgets (Middle Banner)
+        # We increase height significantly for a more premium, large "Pinterest" feel.
+        self.ai_visualizer_frame = ctk.CTkFrame(tab, height=140, corner_radius=15, fg_color=("gray85", "gray17"))
         self.ai_visualizer_frame.grid(row=2, column=0, columnspan=3, sticky="ew", padx=10, pady=(10, 0))
         self.ai_visualizer_frame.grid_propagate(False) # Keep fixed height
-        self.ai_visualizer_frame.grid_columnconfigure(0, weight=2) # Sonar gets more space
-        self.ai_visualizer_frame.grid_columnconfigure(1, weight=1) # Goal
+        self.ai_visualizer_frame.grid_columnconfigure(0, weight=1) # Goal
+        self.ai_visualizer_frame.grid_columnconfigure(1, weight=2) # Center Sonar gets more space
         self.ai_visualizer_frame.grid_columnconfigure(2, weight=1) # Best Trade
         
-        # 1. AI Sonar Canvas (Left)
-        sonar_container = ctk.CTkFrame(self.ai_visualizer_frame, fg_color="transparent")
-        sonar_container.grid(row=0, column=0, sticky="nsew", padx=10, pady=5)
+        # 1. Daily Goal Widget (Left now)
+        goal_container = ctk.CTkFrame(self.ai_visualizer_frame, fg_color="transparent")
+        goal_container.grid(row=0, column=0, sticky="nsew", padx=20, pady=20)
         
-        # Title above sonar
-        self.sonar_title = ctk.CTkLabel(sonar_container, text="KI-Engine: Standby", font=ctk.CTkFont(size=14, weight="bold"), text_color="gray60")
-        self.sonar_title.grid(row=0, column=0, columnspan=2, sticky="w", padx=10, pady=(5,0))
+        ctk.CTkLabel(goal_container, text="🎯 Tages-Ziel (100€)", font=ctk.CTkFont(size=13, weight="bold"), text_color="gray60").pack(anchor="w")
+        self.goal_progress = ctk.CTkProgressBar(goal_container, height=12, progress_color="#F1C40F")
+        self.goal_progress.pack(fill="x", pady=(15, 5))
+        self.goal_progress.set(0.0)
+        self.goal_lbl = ctk.CTkLabel(goal_container, text="0.00€ / 100€", font=ctk.CTkFont(size=12), text_color="gray50")
+        self.goal_lbl.pack(anchor="e")
+        
+        # 2. AI Sonar Canvas (Center - Large & Premium)
+        sonar_container = ctk.CTkFrame(self.ai_visualizer_frame, fg_color="transparent")
+        sonar_container.grid(row=0, column=1, sticky="nsew", padx=10, pady=5)
+        # Center the canvas within this column
+        sonar_container.grid_columnconfigure(0, weight=1)
+        sonar_container.grid_rowconfigure(0, weight=1)
         
         import tkinter as tk
-        # Small canvas for the radar circles
-        self.sonar_canvas = tk.Canvas(sonar_container, bg="#212121", width=50, height=50, highlightthickness=0)
-        self.sonar_canvas.grid(row=1, column=0, padx=(10, 10), pady=0)
+        # Much larger canvas for a "Pinterest" style floating orb array
+        # bg matches gray17 #2b2b2b
+        self.sonar_width = 300
+        self.sonar_height = 120
+        self.sonar_canvas = tk.Canvas(sonar_container, bg="#2b2b2b", width=self.sonar_width, height=self.sonar_height, highlightthickness=0)
+        self.sonar_canvas.grid(row=0, column=0, pady=(5, 0)) # Centered
         
         self.ai_status_lbl = ctk.CTkLabel(sonar_container, text="Zzz... Warte auf Live-Stream", font=ctk.CTkFont(size=13, slant="italic"), text_color="gray50")
-        self.ai_status_lbl.grid(row=1, column=1, sticky="w")
+        self.ai_status_lbl.grid(row=1, column=0, pady=(5, 5))
         
-        # Draw initial sleeping dot
+        # Set up dynamic orb lists
         self.sonar_circles = []
-        self._sonar_base_dot = self.sonar_canvas.create_oval(20, 20, 30, 30, fill="gray40", outline="")
-        
-        # 2. Daily Goal Widget (Middle)
-        goal_container = ctk.CTkFrame(self.ai_visualizer_frame, fg_color="transparent")
-        goal_container.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
-        
-        ctk.CTkLabel(goal_container, text="Tages-Ziel (100€)", font=ctk.CTkFont(size=12, weight="bold"), text_color="gray60").pack(anchor="w")
-        self.goal_progress = ctk.CTkProgressBar(goal_container, height=10, progress_color="#F1C40F")
-        self.goal_progress.pack(fill="x", pady=(10, 5))
-        self.goal_progress.set(0.0)
-        self.goal_lbl = ctk.CTkLabel(goal_container, text="0.00€ / 100€", font=ctk.CTkFont(size=11), text_color="gray50")
-        self.goal_lbl.pack(anchor="e")
+        cx, cy = self.sonar_width / 2, self.sonar_height / 2
+        # Center core dot
+        self._sonar_base_dot = self.sonar_canvas.create_oval(cx-8, cy-8, cx+8, cy+8, fill="gray40", outline="")
         
         # 3. MVP Trade Widget (Right)
         mvp_container = ctk.CTkFrame(self.ai_visualizer_frame, fg_color="transparent")
-        mvp_container.grid(row=0, column=2, sticky="nsew", padx=10, pady=10)
+        mvp_container.grid(row=0, column=2, sticky="nsew", padx=20, pady=20)
         
-        ctk.CTkLabel(mvp_container, text="🏆 Bester Trade Heute", font=ctk.CTkFont(size=12, weight="bold"), text_color="gray60").pack(anchor="w")
-        self.mvp_trade_lbl = ctk.CTkLabel(mvp_container, text="Noch keine Trades", font=ctk.CTkFont(size=16, weight="bold"), text_color="#5EBA7D")
-        self.mvp_trade_lbl.pack(anchor="center", pady=10)
+        ctk.CTkLabel(mvp_container, text="🏆 Bester Trade Heute", font=ctk.CTkFont(size=13, weight="bold"), text_color="gray60").pack(anchor="e")
+        self.mvp_trade_lbl = ctk.CTkLabel(mvp_container, text="Noch keine Trades", font=ctk.CTkFont(size=18, weight="bold"), text_color="#5EBA7D")
+        self.mvp_trade_lbl.pack(anchor="e", pady=10)
         
         # State variables for animation
         self.ai_animation_idx = 0
@@ -2639,53 +2645,79 @@ class ModernFinGPTGUI(ctk.CTk):
         self.after(500, self.animate_status_dot)
 
     def _animate_sonar(self):
+        # Always fetch actual canvas dimensions to ensure center is dynamically correct
+        self.sonar_canvas.update_idletasks()
+        cw = self.sonar_canvas.winfo_width()
+        ch = self.sonar_canvas.winfo_height()
+        if cw < 50: cw = self.sonar_width    # Fallback if not rendered yet
+        if ch < 50: ch = self.sonar_height
+        
+        cx, cy = cw / 2, ch / 2
+        
         if not self.is_live_running:
             # Sleep state
-            self.sonar_title.configure(text="KI-Engine: Standby", text_color="gray60")
             self.ai_status_lbl.configure(text="Zzz... Warte auf Live-Stream", text_color="gray50")
             self.sonar_canvas.itemconfig(self._sonar_base_dot, fill="gray40")
+            # Center the base dot
+            self.sonar_canvas.coords(self._sonar_base_dot, cx-8, cy-8, cx+8, cy+8)
             for c in self.sonar_circles:
                 self.sonar_canvas.delete(c)
             self.sonar_circles.clear()
-            self._sonar_radii = [5, 15, 25]
+            self._sonar_phase = 0.0
             return
             
-        # Active State
-        self.sonar_title.configure(text="KI-Engine: Live Analyse", text_color="#1ABC9C")
-        
-        # Change text based on iteration
-        if self.ai_animation_idx % 8 == 0 and hasattr(self, 'dashboard_symbols') and len(self.dashboard_symbols) > 0:
-            symbol_idx = (self.ai_animation_idx // 8) % len(self.dashboard_symbols)
+        # Change text very slowly
+        if self.ai_animation_idx % 40 == 0 and hasattr(self, 'dashboard_symbols') and len(self.dashboard_symbols) > 0:
+            symbol_idx = (self.ai_animation_idx // 40) % len(self.dashboard_symbols)
             self.ai_current_symbol = self.dashboard_symbols[symbol_idx][1]
-            self.ai_status_lbl.configure(text=f"🧠 Scanne {self.ai_current_symbol} nach Setups...", text_color="#5EBA7D")
+            self.ai_status_lbl.configure(text=f"🟢 KI-Engine analysiert {self.ai_current_symbol}...", text_color="#5EBA7D")
             
-        # Pulse Base Dot
-        base_color = "#1ABC9C" if self.ai_animation_idx % 2 == 0 else "#117A65"
+        import math
+        if not hasattr(self, '_sonar_phase'):
+            self._sonar_phase = 0.0
+            
+        self._sonar_phase += 0.04  # Slowed down for Pinterest vibe
+        phase = self._sonar_phase
+        
+        # Pulse Center Core Dot
+        base_intensity = int(140 + 60 * math.sin(phase))
+        base_intensity = max(0, min(255, base_intensity))
+        base_color = f"#{16:02x}{base_intensity:02x}{130:02x}" # Emerald/Teal core
         self.sonar_canvas.itemconfig(self._sonar_base_dot, fill=base_color)
+        
+        # Core drift
+        drift_x = 10 * math.sin(phase * 0.45)
+        drift_y = 6 * math.cos(phase * 0.35)
+        self.sonar_canvas.coords(self._sonar_base_dot, cx+drift_x-6, cy+drift_y-6, cx+drift_x+6, cy+drift_y+6)
             
-        # Animate Rings
+        # Draw floating orbs
         for c in self.sonar_circles:
             self.sonar_canvas.delete(c)
         self.sonar_circles.clear()
         
-        for i in range(len(self._sonar_radii)):
-            r = self._sonar_radii[i]
-            # Draw circle (outline color fades as radius increases)
-            # Simplistic fade: if small radius -> bright outline. Handled by width maybe.
-            w = max(1, 3 - int(r/10))
-            circle = self.sonar_canvas.create_oval(25-r, 25-r, 25+r, 25+r, outline="#1ABC9C", width=w)
-            self.sonar_circles.append(circle)
+        # Orb settings: (radius_base, radius_var, drift_x_amp, drift_x_freq, drift_y_amp, drift_y_freq, color, width)
+        orbs = [
+            (25, 8, 30, 0.6, 15, 0.4, "#1ABC9C", 2),
+            (45, 12, 50, 0.3, 20, 0.5, "#117A65", 1.5),
+            (70, 15, 80, 0.2, 30, 0.3, "#0E6251", 1),
+            (15, 4, -40, 0.7, -10, 0.6, "#48C9B0", 1.5) # Fast small satellite
+        ]
+        
+        for base_r, var_r, dx_amp, dx_f, dy_amp, dy_f, color, w in orbs:
+            r = base_r + var_r * math.sin(phase * dx_f + dy_f) # Dynamic radius
+            dx = dx_amp * math.sin(phase * dx_f)
+            dy = dy_amp * math.cos(phase * dy_f + 1.0)
             
-            # Increase radius
-            self._sonar_radii[i] += 2
-            
-            # Reset if too big
-            if self._sonar_radii[i] > 25:
-                self._sonar_radii[i] = 2 # Start small again
+            # Subtle opacity hack: darker hex codes for outer rings
+            c = self.sonar_canvas.create_oval(
+                cx + dx - r, cy + dy - r, 
+                cx + dx + r, cy + dy + r, 
+                outline=color, width=w
+            )
+            self.sonar_circles.append(c)
         
         self.ai_animation_idx += 1
-        self.after(100, self._animate_sonar) # Fast 100ms update for smooth rings
-
+        self.after(33, self._animate_sonar) # ~30fps smooth update
     def update_footer_indicators(self):
         # Python is always running if we are here
         self.indicators["Python"].configure(text_color="#5EBA7D")
