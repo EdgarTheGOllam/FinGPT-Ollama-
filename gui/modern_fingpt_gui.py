@@ -141,14 +141,27 @@ class ModernFinGPTGUI(ctk.CTk):
         self.status_label = ctk.CTkLabel(self.status_bar, text="Bereit | Letzte Aktualisierung: Nie", font=ctk.CTkFont(size=12))
         self.status_label.pack(side="left", padx=15, pady=5)
         
-        sys_info = f"Python {sys.version_info.major}.{sys.version_info.minor} | CustomTkinter {ctk.__version__}"
-        self.sys_info_label = ctk.CTkLabel(self.status_bar, text=sys_info, font=ctk.CTkFont(size=12), text_color="gray50")
-        self.sys_info_label.pack(side="right", padx=15, pady=5)
+        # System Indicators
+        self.indicator_frame = ctk.CTkFrame(self.status_bar, fg_color="transparent")
+        self.indicator_frame.pack(side="right", padx=15, pady=5)
+        
+        # We will create these labels dynamically or explicitly
+        self.indicators = {}
+        for sys_name in ["Python", "MT5", "Ollama", "RL Engine"]:
+            frame = ctk.CTkFrame(self.indicator_frame, fg_color="transparent")
+            frame.pack(side="left", padx=8)
+            dot = ctk.CTkLabel(frame, text="●", text_color="gray", font=ctk.CTkFont(size=14))
+            dot.pack(side="left", padx=(0, 4))
+            lbl = ctk.CTkLabel(frame, text=sys_name, font=ctk.CTkFont(size=11), text_color="gray70")
+            lbl.pack(side="left")
+            self.indicators[sys_name] = dot
+            
+        self.update_footer_indicators()
 
     def setup_dashboard_tab(self):
         tab = self.tabview.tab("📊 Dashboard")
         tab.grid_columnconfigure((0, 1, 2), weight=1)
-        tab.grid_rowconfigure(2, weight=1)
+        tab.grid_rowconfigure(3, weight=1)
         
         # Top Cards
         self.balance_card = self.create_metric_card(tab, "Kontostand", "€--", 0, 0)
@@ -159,9 +172,25 @@ class ModernFinGPTGUI(ctk.CTk):
         self.winrate_card = self.create_metric_card(tab, "Margin Level", "-%", 1, 1)
         self.risk_card = self.create_metric_card(tab, "Freie Margin", "€--", 1, 2)
 
+        # AI Agent Visualizer (Middle Banner)
+        self.ai_visualizer_frame = ctk.CTkFrame(tab, height=60, corner_radius=15, fg_color=("gray85", "gray17"))
+        self.ai_visualizer_frame.grid(row=2, column=0, columnspan=3, sticky="ew", padx=10, pady=(10, 0))
+        self.ai_visualizer_frame.grid_propagate(False) # Keep fixed height
+        self.ai_visualizer_frame.grid_columnconfigure(1, weight=1)
+        
+        self.ai_dot = ctk.CTkLabel(self.ai_visualizer_frame, text="●", text_color="gray", font=ctk.CTkFont(size=24))
+        self.ai_dot.pack(side="left", padx=(20, 10), pady=15)
+        
+        self.ai_status_lbl = ctk.CTkLabel(self.ai_visualizer_frame, text="Zzz... Warte auf Live-Stream", font=ctk.CTkFont(size=14, weight="bold", italic=True), text_color="gray60")
+        self.ai_status_lbl.pack(side="left", pady=15)
+        
+        # State variables for animation
+        self.ai_animation_idx = 0
+        self.ai_current_symbol = None
+
         # Live Data List
         data_frame = ctk.CTkFrame(tab, corner_radius=15, fg_color=("gray90", "gray13"))
-        data_frame.grid(row=2, column=0, columnspan=3, sticky="nsew", padx=10, pady=10)
+        data_frame.grid(row=3, column=0, columnspan=3, sticky="nsew", padx=10, pady=10)
         data_frame.grid_rowconfigure(1, weight=1)
         data_frame.grid_columnconfigure(0, weight=1)
 
@@ -455,20 +484,88 @@ class ModernFinGPTGUI(ctk.CTk):
             self.is_live_running = True
             self.live_btn.configure(text="⏹ Live Stoppen", fg_color="#E74C3C", hover_color="#C0392B")
             self.animate_status_dot() # Start pulsing
+            
+            # Start AI Visualizer Animation
+            self.ai_animation_idx = 0
+            self.animate_ai_visualizer()
+            
             self.write_terminal(">> MT5 Live-Stream gestartet. Empfange Ticks...\n")
             self.start_live_stream_thread()
 
     def animate_status_dot(self):
         if not self.is_live_running:
             self.status_dot.configure(text_color="#E74C3C")
+            self.indicators["MT5"].configure(text_color="#E74C3C")
             return
             
         current_color = self.status_dot.cget("text_color")
         # Pulse between bright green and a darker green
         next_color = "#5EBA7D" if current_color != "#5EBA7D" else "#1E8449"
         self.status_dot.configure(text_color=next_color)
+        self.indicators["MT5"].configure(text_color=next_color)
         
         self.after(500, self.animate_status_dot)
+
+    def animate_ai_visualizer(self):
+        if not self.is_live_running or not hasattr(self, 'dashboard_symbols') or len(self.dashboard_symbols) == 0:
+            self.ai_dot.configure(text_color="gray")
+            self.ai_status_lbl.configure(text="Zzz... Warte auf Live-Stream", text_color="gray60")
+            return
+            
+        current_color = self.ai_dot.cget("text_color")
+        
+        # Rotate symbol every 3 seconds (6 ticks of 500ms)
+        if self.ai_animation_idx % 6 == 0:
+            symbol_idx = (self.ai_animation_idx // 6) % len(self.dashboard_symbols)
+            self.ai_current_symbol = self.dashboard_symbols[symbol_idx][1]
+            self.ai_status_lbl.configure(text=f"🧠 Ollama analysiert {self.ai_current_symbol}...", text_color="#1ABC9C")
+            
+        # Pulse dot (Cyan/Teal)
+        next_color = "#1ABC9C" if current_color != "#1ABC9C" else "#117A65"
+        self.ai_dot.configure(text_color=next_color)
+        
+        self.ai_animation_idx += 1
+        self.after(500, self.animate_ai_visualizer)
+
+    def update_footer_indicators(self):
+        # Python is always running if we are here
+        self.indicators["Python"].configure(text_color="#5EBA7D")
+        
+        # MT5 indicator is handled by animate_status_dot when live, 
+        # but if we are not live, let's just check terminal exists
+        if not self.is_live_running:
+            try:
+                # mt5.terminal_info() can check if connected without starting stream
+                if mt5.terminal_info() is not None:
+                    self.indicators["MT5"].configure(text_color="#5EBA7D")
+                else:
+                    self.indicators["MT5"].configure(text_color="#E74C3C")
+            except:
+                self.indicators["MT5"].configure(text_color="#E74C3C")
+
+        # Ollama check (non-blocking thread to avoid UI freeze)
+        def check_ollama():
+            try:
+                url = self.url_entry.get().strip()
+                resp = requests.get(f"{url}/api/tags", timeout=2)
+                if resp.status_code == 200:
+                    self.after(0, lambda: self.indicators["Ollama"].configure(text_color="#5EBA7D"))
+                else:
+                    self.after(0, lambda: self.indicators["Ollama"].configure(text_color="#E74C3C"))
+            except Exception:
+                self.after(0, lambda: self.indicators["Ollama"].configure(text_color="#E74C3C"))
+        
+        threading.Thread(target=check_ollama, daemon=True).start()
+
+        # RL Engine logic (simulate or check path)
+        rl_path = "storage/rl_agents"
+        if os.path.exists(rl_path) and len(os.listdir(rl_path)) > 0:
+            self.indicators["RL Engine"].configure(text_color="#5EBA7D")
+        else:
+            self.indicators["RL Engine"].configure(text_color="#E74C3C") # No agents trained
+
+        # Repeat every 10 seconds
+        self.after(10000, self.update_footer_indicators)
 
     def start_live_stream_thread(self):
         def update_loop():
