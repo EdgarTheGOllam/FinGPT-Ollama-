@@ -47,7 +47,9 @@ class MT5FinGPT:
         self.available_models = []
         self.selected_model = None
         self.mt5_connected = False
+        self._reconnect_in_progress = False   # set by reconnect_mt5()
         self.trading_enabled = False
+
         self.default_lot_size = 0.5
         self.max_risk_percent = 2.0
         self.auto_trading = False
@@ -316,12 +318,41 @@ class MT5FinGPT:
         except Exception as e:
             print(f"Logging Fehler: {e}")
     
-    def log_trade(self, symbol, action, result, reasoning=""):
-        """Spezielle Logging-Funktion für Trades"""
+    def log_trade(self, symbol, action, result, reasoning="", confidence="", indicators=None, lot_size=0.0, profit=0.0, ticket=0):
+        """Spezielle Logging-Funktion für Trades — schreibt auch ins Trade Journal."""
         trade_info = f"{action} {symbol} - {result}"
         if reasoning:
             trade_info += f" | Grund: {reasoning}"
         self.log("TRADE", trade_info, "TRADE")
+        
+        # Write to Trade Journal JSON
+        try:
+            import json, os
+            journal_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "storage", "trade_journal")
+            os.makedirs(journal_dir, exist_ok=True)
+            
+            now = datetime.now()
+            entry = {
+                "ticket": ticket or int(now.timestamp()),
+                "symbol": symbol,
+                "action": action,
+                "result": result,
+                "open_time": now.isoformat(),
+                "close_time": None,
+                "lot_size": lot_size,
+                "profit": profit,
+                "ai_reasoning": reasoning,
+                "ai_confidence": confidence,
+                "indicators_used": indicators or [],
+                "tags": []
+            }
+            
+            fname = f"{entry['ticket']}_{symbol}_{now.strftime('%Y%m%d')}.json"
+            fpath = os.path.join(journal_dir, fname)
+            with open(fpath, 'w', encoding='utf-8') as f:
+                json.dump(entry, f, indent=2, ensure_ascii=False)
+        except Exception as je:
+            self.log("DEBUG", f"Journal write error: {je}", "SYSTEM")
     
     def log_error(self, function_name, error, details=""):
         """Spezielle Logging-Funktion für Fehler"""
@@ -4376,34 +4407,77 @@ class MT5FinGPT:
     # ==========================================
     def connect_mt5(self):
         if not MT5_AVAILABLE:
-            print("MT5 nicht verfügbar")
+            self.log("ERROR", "MT5 nicht verfügbar", "MT5")
             return False
-        
+
         try:
-            print("Verbinde zu MT5...")
+            self.log("INFO", "Verbinde zu MT5…", "MT5")
+            mt5.shutdown()          # clear any stale state first
             if not mt5.initialize():
-                print("MT5 nicht initialisiert")
+                err = mt5.last_error()
+                self.log("ERROR", f"MT5 initialize() fehlgeschlagen: {err}", "MT5")
                 return False
-            
+
             account_info = mt5.account_info()
             if account_info is None:
-                print("Keine Account-Info")
+                self.log("ERROR", "Keine Account-Info nach initialize()", "MT5")
                 return False
-            
-            print(f"MT5 verbunden: {account_info.company}")
+
+            self.log("INFO", f"MT5 verbunden: {account_info.company} | Balance: {account_info.balance:.2f}", "MT5")
             self.mt5_connected = True
+            self._reconnect_in_progress = False
             return True
-            
+
         except Exception as e:
-            print(f"MT5 Fehler: {e}")
+            self.log("ERROR", f"MT5 connect Fehler: {e}", "MT5")
             return False
-    
+
     def disconnect_mt5(self):
         if MT5_AVAILABLE and self.mt5_connected:
             mt5.shutdown()
-            print("MT5 getrennt")
+            self.log("INFO", "MT5 getrennt", "MT5")
             self.mt5_connected = False
-    
+
+    def is_mt5_alive(self) -> bool:
+        """Quick health probe — returns True if MT5 is connected and responding."""
+        if not MT5_AVAILABLE or not self.mt5_connected:
+            return False
+        try:
+            return mt5.account_info() is not None
+        except Exception:
+            return False
+
+    def reconnect_mt5(self, max_retries: int = 10, base_delay: float = 5.0) -> bool:
+        """Reconnect loop with exponential back-off.
+
+        Retries up to *max_retries* times. Delay doubles each attempt, capped at 300 s.
+        Returns True as soon as a connection succeeds, False if all retries are exhausted.
+        """
+        if getattr(self, '_reconnect_in_progress', False):
+            self.log("WARNING", "Reconnect bereits aktiv – überspringe", "MT5")
+            return False
+
+        self._reconnect_in_progress = True
+        self.mt5_connected = False
+        self.log("WARNING", "MT5 Verbindung verloren – starte Auto-Reconnect…", "MT5")
+
+        delay = base_delay
+        for attempt in range(1, max_retries + 1):
+            self.log("INFO", f"Reconnect-Versuch {attempt}/{max_retries} (warte {delay:.0f}s)…", "MT5")
+            time.sleep(delay)
+
+            if self.connect_mt5():
+                self.log("INFO", f"✅ MT5 Reconnect erfolgreich nach {attempt} Versuch(en)", "MT5")
+                return True
+
+            # Exponential back-off, cap at 5 minutes
+            delay = min(delay * 2, 300.0)
+
+        self.log("ERROR", f"MT5 Reconnect nach {max_retries} Versuchen fehlgeschlagen – Auto-Trading gestoppt", "MT5")
+        self._reconnect_in_progress = False
+        return False
+
+
     def get_mt5_live_data(self, symbol):
         if not self.mt5_connected:
             return "MT5 nicht verbunden"
@@ -5388,90 +5462,92 @@ Antworte auf Deutsch und konkret."""
             return False
     
     def run_auto_trading(self):
-        """Verbessertes Auto-Trading mit erweiterte Fehlerbehandlung"""
-        print("\n🚀 STARTE AUTO-TRADING")
-        print("STOPP: Ctrl+C")
-        print(f"Symbole: {self.auto_trade_symbols}")
-        print(f"Intervall: {self.analysis_interval}s")
-    
+        """Auto-Trading mit MT5 Auto-Reconnect bei Verbindungsverlust."""
+        self.log("INFO", "STARTE AUTO-TRADING | STOPP: Ctrl+C", "SYSTEM")
+        self.log("INFO", f"Symbole: {self.auto_trade_symbols} | Intervall: {self.analysis_interval}s", "SYSTEM")
+
         cycle = 0
         consecutive_errors = 0
         max_consecutive_errors = 5
-    
+
         try:
             while self.auto_trading:
                 cycle += 1
-                print(f"\n📊 ZYKLUS #{cycle} - {datetime.now().strftime('%H:%M:%S')}")
-            
-                # System Health Check alle 10 Zyklen
+                self.log("INFO", f"ZYKLUS #{cycle} - {datetime.now().strftime('%H:%M:%S')}", "SYSTEM")
+
+                # ── MT5 Liveness-Check & Auto-Reconnect ──────────────────
+                if not self.is_mt5_alive():
+                    self.log("WARNING", "MT5 nicht erreichbar — Auto-Reconnect wird gestartet…", "MT5")
+                    if not self.reconnect_mt5(max_retries=10, base_delay=5.0):
+                        self.log("ERROR", "MT5 Reconnect endgueltig fehlgeschlagen — Trading beendet", "MT5")
+                        self.auto_trading = False
+                        break
+                    consecutive_errors = 0
+
+                # ── System Health Check alle 10 Zyklen ────────────────────
                 if cycle % 10 == 0:
                     if not self.system_health_check():
-                        print("⚠️ System Health Check fehlgeschlagen - Auto-Trading pausiert")
-                        time.sleep(60)  # 1 Minute warten
+                        self.log("WARNING", "Health Check fehlgeschlagen - 60s Pause", "SYSTEM")
+                        time.sleep(60)
                         continue
-            
-                # Position Management alle 2 Zyklen
+
+                # ── Position Management alle 2 Zyklen ─────────────────────
                 if cycle % 2 == 0:
                     try:
-                        print("🔧 Position Management Check...")
+                        self.log("INFO", "Position Management Check...", "SYSTEM")
                         self.manage_open_positions()
                     except Exception as e:
-                        print(f"⚠️ Position Management Fehler: {e}")
+                        self.log("WARNING", f"Position Management Fehler: {e}", "SYSTEM")
                         self.log_error("position_management", e)
-            
+
                 cycle_success = False
-            
-                # Durch alle Symbole iterieren
+
+                # ── Symbole iterieren ──────────────────────────────────────
                 for i, symbol in enumerate(self.auto_trade_symbols):
                     try:
-                        print(f"\n[{i+1}/{len(self.auto_trade_symbols)}] 🔍 {symbol}")
-                    
-                        # Auto-Trade Cycle mit Timeout
+                        self.log("INFO", f"[{i+1}/{len(self.auto_trade_symbols)}] {symbol}", "SYSTEM")
                         success = self.auto_trade_cycle_with_timeout(symbol, timeout=30)
-                    
                         if success:
                             cycle_success = True
-                            consecutive_errors = 0  # Reset error counter bei Erfolg
-                    
-                        # Kurze Pause zwischen Symbolen
+                            consecutive_errors = 0
                         time.sleep(2)
-                    
                     except Exception as e:
                         consecutive_errors += 1
-                        print(f"❌ {symbol}: Fehler - {e}")
+                        self.log("ERROR", f"{symbol}: Fehler - {e}", "SYSTEM")
                         self.log_error("auto_trade_symbol", e, f"Symbol: {symbol}, Zyklus: {cycle}")
-                    
-                        # Bei zu vielen Fehlern in Folge Auto-Trading pausieren
                         if consecutive_errors >= max_consecutive_errors:
-                            print(f"🛑 Zu viele Fehler in Folge ({consecutive_errors}) - Auto-Trading pausiert für 5 Minuten")
-                            time.sleep(300)  # 5 Minuten Pause
+                            self.log("WARNING",
+                                     f"Zu viele Fehler ({consecutive_errors}) - 5 Min Pause", "SYSTEM")
+                            time.sleep(300)
                             consecutive_errors = 0
-            
-                # Zyklus-Zusammenfassung
-                status_icon = "✅" if cycle_success else "❌"
-                print(f"\n{status_icon} Zyklus #{cycle} abgeschlossen")
-            
-                # Risk Management Status anzeigen
+
+                # ── Zyklus-Zusammenfassung ─────────────────────────────────
+                self.log("INFO",
+                         f"{'OK' if cycle_success else 'FEHLER'} Zyklus #{cycle} abgeschlossen", "SYSTEM")
+
                 if hasattr(self, 'risk_manager') and self.risk_manager and cycle % 5 == 0:
                     try:
                         summary = self.risk_manager.get_risk_summary()
-                        print(f"💰 Tages P&L: {summary.get('daily_pnl', 0):.2f}€ | Trades: {summary.get('trades_today', 0)}")
+                        self.log("INFO",
+                                 f"Tages P&L: {summary.get('daily_pnl', 0):.2f} | "
+                                 f"Trades: {summary.get('trades_today', 0)}", "TRADE")
                     except Exception as e:
-                        print(f"⚠️ Risk Summary Fehler: {e}")
-            
-                print(f"⏱️ Warte {self.analysis_interval}s bis zum nächsten Zyklus...")
+                        self.log("WARNING", f"Risk Summary Fehler: {e}", "SYSTEM")
+
+                self.log("INFO", f"Warte {self.analysis_interval}s...", "SYSTEM")
                 time.sleep(self.analysis_interval)
-            
+
         except KeyboardInterrupt:
-            print("\n🛑 Auto-Trading durch Benutzer gestoppt!")
+            self.log("INFO", "Auto-Trading durch Benutzer gestoppt!", "SYSTEM")
             self.auto_trading = False
         except Exception as e:
-            print(f"\n💥 Kritischer Auto-Trading Fehler: {e}")
+            self.log("ERROR", f"Kritischer Auto-Trading Fehler: {e}", "SYSTEM")
             self.log_error("run_auto_trading", e)
             self.auto_trading = False
         finally:
-            print("🔄 Auto-Trading beendet")
-    
+            self.log("INFO", "Auto-Trading beendet", "SYSTEM")
+
+
     def system_health_check(self):
         """System Health Check für Auto-Trading"""
         try:

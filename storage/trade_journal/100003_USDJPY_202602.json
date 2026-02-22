@@ -1,0 +1,23 @@
+{
+  "ticket": 100003,
+  "symbol": "USDJPY",
+  "action": "BUY",
+  "result": "LOSS",
+  "open_time": "2026-02-19T10:00:06.879878",
+  "close_time": "2026-02-19T13:15:06.879878",
+  "open_price": 151.2,
+  "close_price": 150.9,
+  "lot_size": 0.1,
+  "profit": -30.0,
+  "ai_reasoning": "USDJPY hat einen bullischen Breakout aus einer Konsolidierungszone versucht. Der Yen schwächte sich intraday ab. Allerdings war der Widerstand bei 151.50 stärker als erwartet. Stop wurde bei 150.90 getroffen nach unerwarteter BOJ-Intervention.",
+  "ai_confidence": "61%",
+  "indicators_used": [
+    "Support/Resistance",
+    "EMA 50",
+    "ATR"
+  ],
+  "tags": [
+    "breakout",
+    "asian_carryover"
+  ]
+}

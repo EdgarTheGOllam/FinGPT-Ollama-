@@ -125,14 +125,21 @@ class ModernFinGPTGUI(ctk.CTk):
         
         self.tabview.add("📊 Dashboard")
         self.tabview.add("📈 Charts")
+        self.tabview.add("🎭 Debate")
+        self.tabview.add("📝 Journal")
+        self.tabview.add("📰 News")
         self.tabview.add("💻 Terminal")
         self.tabview.add("⚙️ Konfiguration")
         
         # Tabs konfigurieren
         self.setup_dashboard_tab()
         self.setup_charts_tab()
+        self.setup_debate_tab()
+        self.setup_journal_tab()
+        self.setup_news_tab()
         self.setup_terminal_tab()
         self.setup_config_tab()
+
         
         # 3. Status Bar
         self.status_bar = ctk.CTkFrame(self, height=30, corner_radius=10)
@@ -157,6 +164,8 @@ class ModernFinGPTGUI(ctk.CTk):
             self.indicators[sys_name] = dot
             
         self.update_footer_indicators()
+        # Load any previously saved settings from disk
+        self.after(300, self.load_settings)
 
     def setup_dashboard_tab(self):
         tab = self.tabview.tab("📊 Dashboard")
@@ -220,23 +229,40 @@ class ModernFinGPTGUI(ctk.CTk):
         return card
 
     def populate_sample_data(self):
-        # Initialisiere die Zeilen mit echten Paaren
+        """Initialise dashboard rows. Called once on startup; load_settings will override."""
+        self.live_data_rows = []
+        self._rebuild_symbol_rows("EURUSD, GBPUSD, USDJPY, USDCHF, AUDUSD, USDCAD")
+
+    def _rebuild_symbol_rows(self, raw_pairs: str):
+        """Parse comma-separated pairs string, rebuild self.dashboard_symbols and
+        the live-data rows in the dashboard.  Safe to call at any time."""
+        split_pairs = [p.strip().upper() for p in raw_pairs.split(',') if p.strip()]
+        if not split_pairs:
+            return
+
         self.dashboard_symbols = [
-            ("EUR/USD", "EURUSD"),
-            ("GBP/USD", "GBPUSD"),
-            ("USD/JPY", "USDJPY"),
-            ("USD/CHF", "USDCHF"),
-            ("AUD/USD", "AUDUSD"),
-            ("USD/CAD", "USDCAD")
+            (f"{p[:3]}/{p[3:]}" if len(p) == 6 else p, p)
+            for p in split_pairs
         ]
-        
+
+        # Destroy old rows
+        if hasattr(self, 'scroll_list'):
+            for w in self.scroll_list.winfo_children():
+                if isinstance(w, LiveDataRow):
+                    w.destroy()
+
+        if hasattr(self, 'live_data_rows'):
+            self.live_data_rows.clear()
+        else:
+            self.live_data_rows = []
+
         for display_name, symbol in self.dashboard_symbols:
             row = LiveDataRow(self.scroll_list, display_name, "---", "0.00%", "---", "HOLD")
             row.pack(fill="x", pady=2)
             self.live_data_rows.append((symbol, row))
 
-        # initial fetch
         self.update_dashboard_data()
+
 
     def setup_charts_tab(self):
         tab = self.tabview.tab("📈 Charts")
@@ -581,23 +607,1044 @@ class ModernFinGPTGUI(ctk.CTk):
         
         threading.Thread(target=fetch_chart, daemon=True).start()
 
+    # ══════════════════════════════════════════════════════
+    # KI DEBATE TAB
+    # ══════════════════════════════════════════════════════
+    def setup_debate_tab(self):
+        """🎭 KI Debate Mode — Bull vs Bear vs Judge."""
+        tab = self.tabview.tab("🎭 Debate")
+        tab.grid_columnconfigure(0, weight=1)
+        tab.grid_rowconfigure(2, weight=1)
+
+        # ── Header / Controls ────────────────────────────────
+        ctrl = ctk.CTkFrame(tab, fg_color="transparent")
+        ctrl.grid(row=0, column=0, sticky="ew", padx=12, pady=(12, 4))
+        ctrl.grid_columnconfigure(2, weight=1)
+
+        ctk.CTkLabel(ctrl, text="🎭 KI Debate Mode",
+                     font=ctk.CTkFont(size=18, weight="bold"),
+                     text_color="#A855F7").grid(row=0, column=0, padx=(0, 20), sticky="w")
+
+        ctk.CTkLabel(ctrl, text="Symbol:").grid(row=0, column=1, padx=(0, 6), sticky="w")
+        self._debate_symbol = ctk.CTkEntry(ctrl, width=120, placeholder_text="EURUSD")
+        self._debate_symbol.insert(0, "EURUSD")
+        self._debate_symbol.grid(row=0, column=2, sticky="w", padx=(0, 12))
+
+        self._debate_btn = ctk.CTkButton(
+            ctrl, text="⚔️ Debatte starten",
+            fg_color="#7C3AED", hover_color="#6D28D9", width=170,
+            command=self._start_debate)
+        self._debate_btn.grid(row=0, column=3, padx=(0, 12))
+
+        self._debate_status = ctk.CTkLabel(ctrl, text="Bereit.", text_color="gray60",
+                                           font=ctk.CTkFont(size=12))
+        self._debate_status.grid(row=0, column=4, sticky="w")
+
+        # ── Progress bar ─────────────────────────────────────
+        self._debate_progress = ctk.CTkProgressBar(tab, mode="indeterminate",
+                                                    progress_color="#7C3AED")
+        self._debate_progress.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 6))
+        self._debate_progress.set(0)
+
+        # ── Main debate area: Bull | Bear ─────────────────────
+        panels = ctk.CTkFrame(tab, fg_color="transparent")
+        panels.grid(row=2, column=0, sticky="nsew", padx=12, pady=(0, 6))
+        panels.grid_columnconfigure((0, 1), weight=1)
+        panels.grid_rowconfigure(1, weight=1)
+
+        # Bull panel
+        bull_hdr = ctk.CTkFrame(panels, fg_color=("#DCFCE7", "#14532D"), corner_radius=10)
+        bull_hdr.grid(row=0, column=0, sticky="ew", padx=(0, 6), pady=(0, 4))
+        ctk.CTkLabel(bull_hdr, text="🟢 BULL Analyst",
+                     font=ctk.CTkFont(size=14, weight="bold"),
+                     text_color="#4ADE80").pack(anchor="w", padx=12, pady=8)
+
+        self._bull_box = ctk.CTkTextbox(panels, corner_radius=10,
+                                         fg_color=("gray92", "gray12"),
+                                         font=ctk.CTkFont(family="Segoe UI", size=12),
+                                         text_color="#4ADE80", wrap="word",
+                                         state="disabled")
+        self._bull_box.grid(row=1, column=0, sticky="nsew", padx=(0, 6))
+
+        # Bear panel
+        bear_hdr = ctk.CTkFrame(panels, fg_color=("#FEE2E2", "#7F1D1D"), corner_radius=10)
+        bear_hdr.grid(row=0, column=1, sticky="ew", padx=(6, 0), pady=(0, 4))
+        ctk.CTkLabel(bear_hdr, text="🔴 BEAR Analyst",
+                     font=ctk.CTkFont(size=14, weight="bold"),
+                     text_color="#F87171").pack(anchor="w", padx=12, pady=8)
+
+        self._bear_box = ctk.CTkTextbox(panels, corner_radius=10,
+                                         fg_color=("gray92", "gray12"),
+                                         font=ctk.CTkFont(family="Segoe UI", size=12),
+                                         text_color="#F87171", wrap="word",
+                                         state="disabled")
+        self._bear_box.grid(row=1, column=1, sticky="nsew", padx=(6, 0))
+
+        # ── Verdict panel ─────────────────────────────────────
+        verdict_frame = ctk.CTkFrame(tab, corner_radius=12,
+                                      fg_color=("gray88", "gray16"))
+        verdict_frame.grid(row=3, column=0, sticky="ew", padx=12, pady=(0, 10))
+        verdict_frame.grid_columnconfigure(1, weight=1)
+        tab.grid_rowconfigure(3, weight=0)
+
+        ctk.CTkLabel(verdict_frame, text="⚖️",
+                     font=ctk.CTkFont(size=26)).grid(row=0, column=0, padx=(14, 8), pady=10)
+        self._verdict_lbl = ctk.CTkLabel(verdict_frame,
+                                          text="Richter-Urteil erscheint hier nach der Debatte…",
+                                          font=ctk.CTkFont(size=13, weight="bold"),
+                                          text_color="gray50", wraplength=700, justify="left")
+        self._verdict_lbl.grid(row=0, column=1, sticky="w", padx=(0, 14), pady=10)
+
+    # ── Debate helpers ─────────────────────────────────────────────────────
+    def _start_debate(self):
+        symbol = self._debate_symbol.get().strip().upper() or "EURUSD"
+        self._debate_btn.configure(state="disabled", text="⏳ Läuft…")
+        self._debate_status.configure(text="Starte Debatte…", text_color="#A855F7")
+        self._debate_progress.start()
+        self._write_debate_box(self._bull_box, "🟢 Warte auf Bull Analyst…\n", "#4ADE80")
+        self._write_debate_box(self._bear_box, "🔴 Warte auf Bear Analyst…\n", "#F87171")
+        self._verdict_lbl.configure(text="⚖️ Richter analysiert noch…", text_color="gray50")
+        threading.Thread(target=self._run_debate_bg, args=(symbol,), daemon=True).start()
+
+    def _write_debate_box(self, box: ctk.CTkTextbox, text: str, color: str = "#D4D4D4"):
+        box.configure(state="normal")
+        box.delete("0.0", "end")
+        box.insert("end", text)
+        box.configure(state="disabled", text_color=color)
+
+    def _ollama_debate_call(self, system_prompt: str, user_prompt: str) -> str:
+        """Single Ollama API call with a system role prompt."""
+        try:
+            url = self.url_entry.get().strip()
+            model = self.model_combo.get().strip() or "llama3"
+            payload = {
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user",   "content": user_prompt},
+                ],
+                "stream": False,
+                "options": {"temperature": 0.7, "num_predict": 400},
+            }
+            resp = requests.post(f"{url}/api/chat", json=payload, timeout=120)
+            if resp.status_code == 200:
+                return resp.json().get("message", {}).get("content", "").strip()
+            return f"[Fehler: HTTP {resp.status_code}]"
+        except Exception as e:
+            return f"[Verbindungsfehler: {e}]"
+
+    def _run_debate_bg(self, symbol: str):
+        """Background thread: fetch market data → 3 Ollama calls → update UI."""
+        try:
+            # ── Step 0: Gather basic market data from MT5 ──────────────
+            market_ctx = f"Symbol: {symbol}\n"
+            try:
+                tick = mt5.symbol_info_tick(symbol)
+                if tick:
+                    market_ctx += f"Bid: {tick.bid:.5f} | Ask: {tick.ask:.5f}\n"
+                rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_H1, 0, 20)
+                if rates is not None and len(rates) > 1:
+                    closes = [r['close'] for r in rates]
+                    gain = closes[-1] - closes[0]
+                    market_ctx += f"H1 letzte 20 Kerzen: Eröffnung {closes[0]:.5f} → Jetzt {closes[-1]:.5f} | Diff: {gain:+.5f}\n"
+            except Exception:
+                market_ctx += "(MT5 nicht verfügbar – nur KI-Analyse)\n"
+
+            user_msg = (
+                f"Analysiere {symbol} für einen möglichen Trade.\n"
+                f"Marktdaten:\n{market_ctx}\n"
+                "Antworte auf Deutsch. Maximal 200 Wörter."
+            )
+
+            # ── Step 1: BULL ─────────────────────────────────────────
+            self.after(0, lambda: self._debate_status.configure(
+                text="🟢 Bull Analyst denkt…", text_color="#4ADE80"))
+            bull_sys = (
+                "Du bist ein sehr optimistischer Forex-Analyst. "
+                "Deine Aufgabe ist es, ausschließlich BUY/Long-Argumente für das Symbol zu finden. "
+                "Nenne konkrete technische und fundamentale Gründe, warum jetzt ein KAUF sinnvoll ist. "
+                "Sei überzeugend und zeige mögliche Gewinnziele."
+            )
+            bull_text = self._ollama_debate_call(bull_sys, user_msg)
+            self.after(0, lambda t=bull_text: self._write_debate_box(self._bull_box, t, "#4ADE80"))
+
+            # ── Step 2: BEAR ─────────────────────────────────────────
+            self.after(0, lambda: self._debate_status.configure(
+                text="🔴 Bear Analyst denkt…", text_color="#F87171"))
+            bear_sys = (
+                "Du bist ein sehr pessimistischer Forex-Analyst. "
+                "Deine Aufgabe ist es, ausschließlich SELL/Short-Argumente für das Symbol zu finden. "
+                "Nenne konkrete technische und fundamentale Gründe, warum jetzt ein VERKAUF sinnvoll ist. "
+                "Sei überzeugend und zeige mögliche Verlustrisiken beim Kauf."
+            )
+            bear_text = self._ollama_debate_call(bear_sys, user_msg)
+            self.after(0, lambda t=bear_text: self._write_debate_box(self._bear_box, t, "#F87171"))
+
+            # ── Step 3: JUDGE ────────────────────────────────────────
+            self.after(0, lambda: self._debate_status.configure(
+                text="⚖️ Richter urteilt…", text_color="#FBBF24"))
+            judge_sys = (
+                "Du bist ein unparteiischer Senior-Analyst. Du hast gerade zwei Analysten gehört: "
+                "einen sehr bullischen und einen sehr bärischen. "
+                "Deine Aufgabe: Bewerte beide Argumente fair, entscheide wer recht hat, "
+                "und gib eine klare Empfehlung: BUY, SELL oder HOLD. "
+                "Format deiner Antwort: Kurze Zusammenfassung beider Seiten (2 Sätze), "
+                "dann: URTEIL: [BUY/SELL/HOLD] — Konfidenz: [0-100%] — Grund: [1 Satz]"
+            )
+            judge_msg = (
+                f"Symbol: {symbol}\n\n"
+                f"BULL-Argumente:\n{bull_text}\n\n"
+                f"BEAR-Argumente:\n{bear_text}\n\n"
+                "Was ist dein Urteil?"
+            )
+            verdict = self._ollama_debate_call(judge_sys, judge_msg)
+
+            # Parse verdict colour
+            v_upper = verdict.upper()
+            if "BUY" in v_upper:
+                v_color = "#4ADE80"
+            elif "SELL" in v_upper:
+                v_color = "#F87171"
+            else:
+                v_color = "#FBBF24"
+
+            self.after(0, lambda t=verdict, c=v_color: (
+                self._verdict_lbl.configure(text=t, text_color=c),
+                self._debate_status.configure(text="Debatte abgeschlossen ✅", text_color="gray60"),
+            ))
+
+        except Exception as e:
+            self.after(0, lambda err=e: self._debate_status.configure(
+                text=f"Fehler: {err}", text_color="#F87171"))
+        finally:
+            self.after(0, self._debate_progress.stop)
+            self.after(0, lambda: self._debate_btn.configure(
+                state="normal", text="⚔️ Debatte starten"))
+
+    # ══════════════════════════════════════════════════════
+    # TRADE JOURNAL TAB
+    # ══════════════════════════════════════════════════════
+    def setup_journal_tab(self):
+        tab = self.tabview.tab("📝 Journal")
+
+        tab.grid_columnconfigure(0, weight=1)
+        tab.grid_rowconfigure(1, weight=1)  # trade list expands
+
+        # ── State ──────────────────────────────────────────
+        self._journal_year  = datetime.now().year
+        self._journal_month = datetime.now().month
+        self._journal_entries   = {}  # date_str -> list of trade dicts
+        self._selected_journal_day = None
+        self._selected_trade  = None
+
+        # Seed demo data on very first run so calendar isn't empty
+        self._seed_demo_trades()
+
+        # ── Top bar: calendar controls + stats ─────────────
+        top = ctk.CTkFrame(tab, fg_color="transparent")
+        top.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 0))
+        top.grid_columnconfigure(2, weight=1)
+
+        ctk.CTkButton(top, text="◀", width=36, command=self._journal_prev_month).grid(row=0, column=0, padx=(0, 4))
+        self._cal_title_lbl = ctk.CTkLabel(top, text="", font=ctk.CTkFont(size=15, weight="bold"))
+        self._cal_title_lbl.grid(row=0, column=1, padx=8)
+        ctk.CTkButton(top, text="▶", width=36, command=self._journal_next_month).grid(row=0, column=2, sticky="w", padx=(4, 0))
+
+        # Stats summary labels
+        stats_frame = ctk.CTkFrame(top, fg_color="transparent")
+        stats_frame.grid(row=0, column=3, sticky="e", padx=(20, 0))
+        self._j_stat_trades = ctk.CTkLabel(stats_frame, text="Trades: --", font=ctk.CTkFont(size=12), text_color="gray70")
+        self._j_stat_trades.pack(side="left", padx=8)
+        self._j_stat_winrate = ctk.CTkLabel(stats_frame, text="Win Rate: --%", font=ctk.CTkFont(size=12), text_color="gray70")
+        self._j_stat_winrate.pack(side="left", padx=8)
+        self._j_stat_pnl = ctk.CTkLabel(stats_frame, text="Gesamt P&L: --", font=ctk.CTkFont(size=13, weight="bold"), text_color="gray70")
+        self._j_stat_pnl.pack(side="left", padx=8)
+        ctk.CTkButton(stats_frame, text="📥 CSV Export", width=110, command=self._export_journal_csv,
+                      fg_color="transparent", border_width=1).pack(side="left", padx=(16, 0))
+
+        # ── Calendar grid ──────────────────────────────────
+        self._cal_frame = ctk.CTkFrame(tab, fg_color=("gray90", "gray13"), corner_radius=12)
+        self._cal_frame.grid(row=1, column=0, sticky="new", padx=10, pady=8)
+
+        # ── Trade list (scrollable) ─────────────────────────
+        list_container = ctk.CTkFrame(tab, corner_radius=12, fg_color=("gray90", "gray13"))
+        list_container.grid(row=2, column=0, sticky="nsew", padx=10, pady=(0, 4))
+        list_container.grid_columnconfigure(0, weight=1)
+        list_container.grid_rowconfigure(1, weight=1)
+        tab.grid_rowconfigure(2, weight=2)
+
+        self._j_list_title = ctk.CTkLabel(list_container, text="← Klicke einen Tag um Trades zu sehen",
+                                           font=ctk.CTkFont(size=13, weight="bold"), text_color="gray60")
+        self._j_list_title.grid(row=0, column=0, sticky="w", padx=15, pady=8)
+
+        # Header row
+        hdr = ctk.CTkFrame(list_container, fg_color=("gray80", "gray20"), corner_radius=0)
+        hdr.grid(row=1, column=0, sticky="ew", padx=0)
+        for col, (txt, w) in enumerate([("Ticket", 80), ("Symbol", 80), ("Richtung", 80),
+                                         ("Eröffnung", 90), ("Schlusskurs", 90),
+                                         ("Lots", 55), ("Profit", 80), ("KI", 40)]):
+            ctk.CTkLabel(hdr, text=txt, font=ctk.CTkFont(size=11, weight="bold"),
+                         text_color="gray60", width=w).grid(row=0, column=col, padx=6, pady=4, sticky="w")
+
+        self._j_scroll = ctk.CTkScrollableFrame(list_container, fg_color="transparent", corner_radius=0)
+        self._j_scroll.grid(row=2, column=0, sticky="nsew", padx=0, pady=0)
+        list_container.grid_rowconfigure(2, weight=1)
+
+        # ── AI Reasoning Panel (collapsible) ───────────────
+        self._ai_panel = ctk.CTkFrame(tab, corner_radius=12, fg_color=("gray85", "gray15"))
+        self._ai_panel.grid(row=3, column=0, sticky="ew", padx=10, pady=(0, 8))
+        tab.grid_rowconfigure(3, weight=0)
+        self._ai_panel.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(self._ai_panel, text="🤖", font=ctk.CTkFont(size=20)).grid(row=0, column=0, padx=(15, 8), pady=10)
+        self._ai_panel_header = ctk.CTkLabel(self._ai_panel,
+                                              text="KI Begründung — klicke 🤖 in einer Trade-Zeile",
+                                              font=ctk.CTkFont(size=13, weight="bold"), text_color="gray60")
+        self._ai_panel_header.grid(row=0, column=1, sticky="w")
+
+        self._ai_reasoning_box = ctk.CTkTextbox(self._ai_panel, height=100, fg_color="transparent",
+                                                  font=ctk.CTkFont(family="Segoe UI", size=12),
+                                                  text_color="#D4D4D4", wrap="word", state="disabled")
+        self._ai_reasoning_box.grid(row=1, column=0, columnspan=3, sticky="ew", padx=15, pady=(0, 10))
+
+        self._ai_indicators_lbl = ctk.CTkLabel(self._ai_panel, text="", font=ctk.CTkFont(size=11),
+                                                text_color="#569CD6")
+        self._ai_indicators_lbl.grid(row=2, column=0, columnspan=3, sticky="w", padx=15, pady=(0, 8))
+
+        # Initial render
+        self._render_journal_calendar()
+
+    # ── Calendar helpers ────────────────────────────────────────────────────
+    def _journal_prev_month(self):
+        if self._journal_month == 1:
+            self._journal_month = 12; self._journal_year -= 1
+        else:
+            self._journal_month -= 1
+        self._render_journal_calendar()
+
+    def _journal_next_month(self):
+        if self._journal_month == 12:
+            self._journal_month = 1; self._journal_year += 1
+        else:
+            self._journal_month += 1
+        self._render_journal_calendar()
+
+    def _load_journal_entries(self, year, month):
+        """Load trade history: primary source = MT5 history_deals_get(),
+        secondary = JSON files in storage/trade_journal/ (add AI reasoning).
+        Falls back to JSON-only if MT5 is not available."""
+        import json, os, glob
+        from datetime import datetime, timezone
+
+        entries = {}  # date_str -> [trade_dict, ...]
+
+        # ── 1. Try pulling real MT5 history ──────────────────────────────
+        try:
+            import MetaTrader5 as _mt5
+            if not _mt5.initialize():
+                raise RuntimeError("MT5 not initialized")
+
+            # Month range (UTC timestamps)
+            from_dt = datetime(year, month, 1, tzinfo=timezone.utc)
+            # Last day of month
+            import calendar as _cal
+            last_day = _cal.monthrange(year, month)[1]
+            to_dt   = datetime(year, month, last_day, 23, 59, 59, tzinfo=timezone.utc)
+
+            deals = _mt5.history_deals_get(from_dt, to_dt)
+
+            if deals:
+                # deal entry types: 0=in (open), 1=out (close), 2=in/out
+                DEAL_TYPE_BUY  = 0
+                DEAL_TYPE_SELL = 1
+                DEAL_ENTRY_IN  = 0
+                DEAL_ENTRY_OUT = 1
+
+                for deal in deals:
+                    # Skip balance/credit/commission lines (symbol is empty or type > 1)
+                    if not deal.symbol:
+                        continue
+
+                    otype = deal.type          # 0=BUY, 1=SELL
+                    action = "BUY" if otype == DEAL_TYPE_BUY else "SELL"
+
+                    deal_dt = datetime.fromtimestamp(deal.time)
+                    date_str = deal_dt.strftime("%Y-%m-%d")
+                    profit   = round(deal.profit + deal.commission + deal.swap, 2)
+
+                    trade = {
+                        "ticket":      deal.ticket,
+                        "order":       deal.order,
+                        "symbol":      deal.symbol,
+                        "action":      action,
+                        "entry":       "OPEN" if deal.entry == DEAL_ENTRY_IN else "CLOSE",
+                        "open_time":   deal_dt.isoformat(),
+                        "close_time":  None,
+                        "open_price":  deal.price,
+                        "close_price": deal.price,
+                        "lot_size":    deal.volume,
+                        "profit":      profit,
+                        "commission":  round(deal.commission, 2),
+                        "swap":        round(deal.swap, 2),
+                        "comment":     deal.comment,
+                        "magic":       deal.magic,
+                        "result":      "WIN" if profit > 0 else ("LOSS" if profit < 0 else "BE"),
+                        # AI fields — filled in from JSON overlay below
+                        "ai_reasoning":   "",
+                        "ai_confidence":  "",
+                        "indicators_used": [],
+                        "tags":           [],
+                    }
+                    entries.setdefault(date_str, []).append(trade)
+
+            mt5_loaded = True
+        except Exception as mt5_err:
+            mt5_loaded = False
+            self.after(0, lambda e=str(mt5_err): self.write_terminal(
+                f">> [JOURNAL] MT5 nicht verfügbar, lade JSON-Daten. ({e})\n", "WARNING"))
+
+        # ── 2. Load JSON files (AI reasoning overlay / fallback) ──────────
+        journal_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                   "storage", "trade_journal")
+        prefix = f"{year}{month:02d}"
+
+        # Build lookup: ticket -> json_trade  (for overlay)
+        json_by_ticket = {}
+        for fpath in glob.glob(os.path.join(journal_dir, f"*_{prefix}*.json")):
+            try:
+                with open(fpath, 'r', encoding='utf-8') as f:
+                    jt = json.load(f)
+                json_by_ticket[jt.get("ticket", 0)] = jt
+                # If MT5 failed, use JSON as primary source
+                if not mt5_loaded:
+                    date_str = jt.get("open_time", "")[:10]
+                    if date_str:
+                        entries.setdefault(date_str, []).append(jt)
+            except Exception:
+                pass
+
+        # ── 3. Overlay AI reasoning onto MT5 deals ────────────────────────
+        if mt5_loaded:
+            for day_trades in entries.values():
+                for trade in day_trades:
+                    jt = json_by_ticket.get(trade["ticket"]) or \
+                         json_by_ticket.get(trade.get("order", -1))
+                    if jt:
+                        trade["ai_reasoning"]    = jt.get("ai_reasoning", "")
+                        trade["ai_confidence"]   = jt.get("ai_confidence", "")
+                        trade["indicators_used"] = jt.get("indicators_used", [])
+                        trade["tags"]            = jt.get("tags", [])
+
+        self._journal_entries = entries
+        return entries
+
+    def _render_journal_calendar(self):
+        """Render the calendar grid for the current month."""
+        import calendar
+        year, month = self._journal_year, self._journal_month
+        entries = self._load_journal_entries(year, month)
+
+        # Update title
+        month_names = ["Januar","Februar","März","April","Mai","Juni",
+                        "Juli","August","September","Oktober","November","Dezember"]
+        self._cal_title_lbl.configure(text=f"{month_names[month-1]} {year}")
+
+        # Compute monthly stats
+        all_trades = [t for day_trades in entries.values() for t in day_trades]
+        total_pnl = sum(t.get("profit", 0) for t in all_trades)
+        wins = sum(1 for t in all_trades if t.get("profit", 0) > 0)
+        win_rate = (wins / len(all_trades) * 100) if all_trades else 0
+        pnl_color = "#5EBA7D" if total_pnl >= 0 else "#E74C3C"
+        self._j_stat_trades.configure(text=f"Trades: {len(all_trades)}")
+        self._j_stat_winrate.configure(text=f"Win Rate: {win_rate:.0f}%")
+        self._j_stat_pnl.configure(text=f"Gesamt P&L: {'+' if total_pnl >= 0 else ''}{total_pnl:.2f}€",
+                                    text_color=pnl_color)
+
+        # Clear old calendar widgets
+        for w in self._cal_frame.winfo_children():
+            w.destroy()
+
+        # Day headers
+        for col, day_name in enumerate(["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]):
+            ctk.CTkLabel(self._cal_frame, text=day_name,
+                         font=ctk.CTkFont(size=11, weight="bold"),
+                         text_color="gray50", width=52).grid(row=0, column=col, padx=2, pady=(6, 2))
+
+        # Calendar days
+        cal = calendar.monthcalendar(year, month)
+        today = datetime.now().date()
+
+        for row_idx, week in enumerate(cal):
+            for col_idx, day in enumerate(week):
+                if day == 0:
+                    ctk.CTkFrame(self._cal_frame, width=52, height=52, fg_color="transparent").grid(
+                        row=row_idx + 1, column=col_idx, padx=2, pady=2)
+                    continue
+
+                date_str = f"{year}-{month:02d}-{day:02d}"
+                day_trades = entries.get(date_str, [])
+                day_pnl = sum(t.get("profit", 0) for t in day_trades)
+                n_trades = len(day_trades)
+
+                # Color coding
+                is_today = (datetime(year, month, day).date() == today)
+                if n_trades == 0:
+                    bg = ("#D5D5D5", "#2A2A2A") if not is_today else "#2E86AB"
+                    fg = "gray50"
+                elif day_pnl > 0:
+                    bg = ("#C8F7C5", "#1A4A30")
+                    fg = "#5EBA7D"
+                else:
+                    bg = ("#FAD4D4", "#4A1A1A")
+                    fg = "#E74C3C"
+
+                # Build the day cell frame (acts as a button)
+                cell = ctk.CTkFrame(self._cal_frame, width=58, height=58, corner_radius=8,
+                                    fg_color=bg, cursor="hand2")
+                cell.grid(row=row_idx + 1, column=col_idx, padx=2, pady=2)
+                cell.grid_propagate(False)
+
+                num_lbl = ctk.CTkLabel(cell, text=str(day),
+                                       font=ctk.CTkFont(size=16, weight="bold"),
+                                       text_color=("gray20", "white") if n_trades == 0 else fg)
+                num_lbl.place(relx=0.5, rely=0.35, anchor="center")
+
+                if n_trades > 0:
+                    sub_lbl = ctk.CTkLabel(cell, text=f"{n_trades}T  {'+' if day_pnl>=0 else ''}{day_pnl:.0f}€",
+                                           font=ctk.CTkFont(size=8), text_color=fg)
+                    sub_lbl.place(relx=0.5, rely=0.75, anchor="center")
+
+                # Click binding
+                for widget in [cell, num_lbl]:
+                    widget.bind("<Button-1>", lambda e, ds=date_str: self._show_day_trades(ds))
+                if n_trades > 0:
+                    sub_lbl.bind("<Button-1>", lambda e, ds=date_str: self._show_day_trades(ds))
+
+    def _show_day_trades(self, date_str):
+        """Populate the trade list for a clicked day."""
+        self._selected_journal_day = date_str
+        day_trades = self._journal_entries.get(date_str, [])
+
+        # Update title
+        day_pnl = sum(t.get("profit", 0) for t in day_trades)
+        pnl_color = "#5EBA7D" if day_pnl >= 0 else "#E74C3C"
+        self._j_list_title.configure(
+            text=f"📅 {date_str}  —  {len(day_trades)} Trade(s)  |  P&L: {'+' if day_pnl>=0 else ''}{day_pnl:.2f}€",
+            text_color=pnl_color if day_trades else "gray60")
+
+        # Clear old rows
+        for w in self._j_scroll.winfo_children():
+            w.destroy()
+
+        if not day_trades:
+            ctk.CTkLabel(self._j_scroll, text="Keine Trades an diesem Tag.",
+                         text_color="gray50").pack(pady=20)
+            return
+
+        for i, trade in enumerate(day_trades):
+            profit = trade.get("profit", 0)
+            profit_color = "#5EBA7D" if profit >= 0 else "#E74C3C"
+            row_bg = ("gray85", "gray18") if i % 2 == 0 else ("gray80", "gray15")
+
+            row = ctk.CTkFrame(self._j_scroll, fg_color=row_bg, corner_radius=6)
+            row.pack(fill="x", padx=4, pady=2)
+
+            data = [
+                (str(trade.get("ticket", "-")), 80, "gray60"),
+                (trade.get("symbol", "-"), 80, "white"),
+                (trade.get("action", "-"), 80, "#5EBA7D" if trade.get("action") == "BUY" else "#E74C3C"),
+                (str(trade.get("open_price", "-")), 90, "gray80"),
+                (str(trade.get("close_price", trade.get("open_price", "-"))), 90, "gray80"),
+                (str(trade.get("lot_size", "-")), 55, "gray70"),
+                (f"{'+' if profit>=0 else ''}{profit:.2f}€", 80, profit_color),
+            ]
+            for col_idx, (text, width, color) in enumerate(data):
+                ctk.CTkLabel(row, text=text, width=width, text_color=color,
+                             font=ctk.CTkFont(size=11)).grid(row=0, column=col_idx, padx=6, pady=6, sticky="w")
+
+            # AI reasoning button
+            ai_btn = ctk.CTkButton(row, text="🤖", width=36, height=28,
+                                    fg_color="#1A1A4A" if trade.get("ai_reasoning") else "transparent",
+                                    hover_color="#2E86AB",
+                                    command=lambda t=trade: self._show_ai_reasoning(t))
+            ai_btn.grid(row=0, column=len(data), padx=6, pady=6)
+
+    def _show_ai_reasoning(self, trade):
+        """Show the AI reasoning panel for a selected trade."""
+        self._selected_trade = trade
+        symbol = trade.get("symbol", "?")
+        action = trade.get("action", "?")
+        reasoning = trade.get("ai_reasoning") or "Keine KI-Begründung für diesen Trade gespeichert."
+        confidence = trade.get("ai_confidence", "")
+        indicators = trade.get("indicators_used", [])
+
+        self._ai_panel_header.configure(
+            text=f"🤖 KI Begründung  —  {symbol} {action}  "
+                 f"{'| Konfidenz: ' + confidence if confidence else ''}",
+            text_color="#C586C0")
+
+        self._ai_reasoning_box.configure(state="normal")
+        self._ai_reasoning_box.delete("1.0", "end")
+        self._ai_reasoning_box.insert("end", reasoning)
+        self._ai_reasoning_box.configure(state="disabled")
+
+        ind_text = ""
+        if indicators:
+            ind_text = "Verwendete Indikatoren: " + "  •  ".join(indicators)
+        tags = trade.get("tags", [])
+        if tags:
+            ind_text += ("  |  Tags: " if ind_text else "Tags: ") + ", ".join(tags)
+        self._ai_indicators_lbl.configure(text=ind_text)
+
+    def _export_journal_csv(self):
+        """Export currently visible month's trades to CSV."""
+        import csv, os
+        from tkinter import filedialog
+        all_trades = [t for trades in self._journal_entries.values() for t in trades]
+        if not all_trades:
+            from tkinter import messagebox
+            messagebox.showinfo("CSV Export", "Keine Trades zum Exportieren gefunden.")
+            return
+
+        default_name = f"journal_{self._journal_year}_{self._journal_month:02d}.csv"
+        filepath = filedialog.asksaveasfilename(defaultextension=".csv",
+                                                initialfile=default_name,
+                                                filetypes=[("CSV", "*.csv")])
+        if not filepath:
+            return
+
+        fields = ["ticket","symbol","action","result","open_time","close_time",
+                  "lot_size","profit","ai_confidence","indicators_used","ai_reasoning"]
+        with open(filepath, 'w', newline='', encoding='utf-8-sig') as f:
+            writer = csv.DictWriter(f, fieldnames=fields, extrasaction='ignore')
+            writer.writeheader()
+            for t in all_trades:
+                row = dict(t)
+                row["indicators_used"] = "; ".join(t.get("indicators_used", []))
+                writer.writerow(row)
+        self.write_terminal(f">> [JOURNAL] CSV exportiert: {filepath}\n", "SYSTEM")
+
+    def _seed_demo_trades(self):
+        """Create demo journal entries if trade_journal folder is empty."""
+        import json, os, glob
+        journal_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                   "storage", "trade_journal")
+        os.makedirs(journal_dir, exist_ok=True)
+        if glob.glob(os.path.join(journal_dir, "*.json")):
+            return  # already has data
+
+        today = datetime.now()
+        demo_trades = [
+            {"ticket": 100001, "symbol": "EURUSD", "action": "BUY", "result": "WIN",
+             "open_time": (today.replace(day=max(1,today.day-5), hour=9, minute=15)).isoformat(),
+             "close_time": (today.replace(day=max(1,today.day-5), hour=11, minute=45)).isoformat(),
+             "open_price": 1.08421, "close_price": 1.08580, "lot_size": 0.1, "profit": 15.90,
+             "ai_reasoning": "EURUSD zeigt bullische Divergenz auf dem RSI H1-Chart. Die 200er EMA wirkt als dynamischer Support. Das Preisniveau 1.0840 ist ein starker historischer Support. London Session ist in vollem Gange mit erhöhtem Volumen. BBands sind eng — Breakout erwartet. Fundamental spricht ein schwächerer USD durch gestrige Fed-Kommentare für Long.",
+             "ai_confidence": "84%", "indicators_used": ["RSI H1", "EMA 200", "Bollinger Bands", "Volume"], "tags": ["trend_follow", "london_session"]},
+            {"ticket": 100002, "symbol": "GBPUSD", "action": "SELL", "result": "WIN",
+             "open_time": (today.replace(day=max(1,today.day-5), hour=14, minute=0)).isoformat(),
+             "close_time": (today.replace(day=max(1,today.day-5), hour=16, minute=30)).isoformat(),
+             "open_price": 1.26800, "close_price": 1.26510, "lot_size": 0.1, "profit": 29.00,
+             "ai_reasoning": "GBPUSD hat ein Double-Top auf H4 gebildet. RSI zeigt Überkauft bei 72. Die NY-Session eröffnet bearish. MACD Crossover nach unten bestätigt den Short-Signal. Target ist der nächste Support bei 1.2640.",
+             "ai_confidence": "79%", "indicators_used": ["MACD", "RSI H4", "Candlestick Pattern"], "tags": ["reversal", "ny_session"]},
+            {"ticket": 100003, "symbol": "USDJPY", "action": "BUY", "result": "LOSS",
+             "open_time": (today.replace(day=max(1,today.day-3), hour=10, minute=0)).isoformat(),
+             "close_time": (today.replace(day=max(1,today.day-3), hour=13, minute=15)).isoformat(),
+             "open_price": 151.200, "close_price": 150.900, "lot_size": 0.1, "profit": -30.00,
+             "ai_reasoning": "USDJPY hat einen bullischen Breakout aus einer Konsolidierungszone versucht. Der Yen schwächte sich intraday ab. Allerdings war der Widerstand bei 151.50 stärker als erwartet. Stop wurde bei 150.90 getroffen nach unerwarteter BOJ-Intervention.",
+             "ai_confidence": "61%", "indicators_used": ["Support/Resistance", "EMA 50", "ATR"], "tags": ["breakout", "asian_carryover"]},
+            {"ticket": 100004, "symbol": "AUDUSD", "action": "SELL", "result": "WIN",
+             "open_time": (today.replace(day=max(1,today.day-1), hour=8, minute=30)).isoformat(),
+             "close_time": (today.replace(day=max(1,today.day-1), hour=12, minute=0)).isoformat(),
+             "open_price": 0.65800, "close_price": 0.65600, "lot_size": 0.1, "profit": 20.00,
+             "ai_reasoning": "AUDUSD befindet sich in einem klaren Abwärtstrend auf dem Daily Chart. Der heutige Bounce zur EMA 20 bietet eine ideale Short-Einstiegsgelegenheit mit gutem R:R von 1:3. China PMI-Daten waren schlechter als erwartet — negativ für AUD.",
+             "ai_confidence": "88%", "indicators_used": ["EMA 20", "Trend Structure", "Fundamentals"], "tags": ["trend_continuation", "london_open"]},
+        ]
+
+        for trade in demo_trades:
+            dt_str = trade["open_time"][:8].replace("-", "")
+            fname = f"{trade['ticket']}_{trade['symbol']}_{dt_str}.json"
+            with open(os.path.join(journal_dir, fname), 'w', encoding='utf-8') as f:
+                json.dump(trade, f, indent=2, ensure_ascii=False)
+
+    # ══════════════════════════════════════════════════════
+    # NEWS & SENTIMENT FEED TAB
+    # ══════════════════════════════════════════════════════
+    def setup_news_tab(self):
+        tab = self.tabview.tab("📰 News")
+        tab.grid_columnconfigure(0, weight=1)
+        tab.grid_rowconfigure(1, weight=1)
+
+        # State
+        self._news_items        = []   # list of dicts
+        self._news_analyzing    = False
+        self._news_filter_pair  = "Alle"
+
+        # ── Control bar ─────────────────────────────────────
+        ctrl = ctk.CTkFrame(tab, fg_color="transparent")
+        ctrl.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 0))
+
+        self._news_refresh_btn = ctk.CTkButton(
+            ctrl, text="🔄 News Laden", width=130,
+            fg_color="#2E86AB", hover_color="#21618C",
+            command=self._fetch_news_threaded)
+        self._news_refresh_btn.pack(side="left", padx=(0, 8))
+
+        self._news_analyze_btn = ctk.CTkButton(
+            ctrl, text="🤖 Alle Analysieren", width=150,
+            fg_color="#8E44AD", hover_color="#6C3483",
+            command=self._analyze_all_news_threaded)
+        self._news_analyze_btn.pack(side="left", padx=(0, 14))
+
+        # Currency pair filter chips
+        ctk.CTkLabel(ctrl, text="Filter:", text_color="gray60").pack(side="left", padx=(0, 4))
+        self._news_filter_btns = {}
+        for pair in ["Alle", "EUR", "GBP", "USD", "JPY", "CHF", "AUD", "CAD", "NZD"]:
+            btn = ctk.CTkButton(ctrl, text=pair, width=52, height=26,
+                                fg_color="#2E86AB" if pair == "Alle" else ("gray75", "gray25"),
+                                hover_color="#21618C",
+                                command=lambda p=pair: self._news_filter(p))
+            btn.pack(side="left", padx=2)
+            self._news_filter_btns[pair] = btn
+
+        # Status right-side
+        self._news_status_lbl = ctk.CTkLabel(ctrl, text="● Bereit", text_color="gray50",
+                                              font=ctk.CTkFont(size=11))
+        self._news_status_lbl.pack(side="right", padx=15)
+
+        # ── News feed (scrollable) ───────────────────────────
+        self._news_scroll = ctk.CTkScrollableFrame(tab, fg_color=("gray88", "gray12"),
+                                                    corner_radius=12)
+        self._news_scroll.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
+        self._news_scroll.grid_columnconfigure(0, weight=1)
+
+        # Placeholder
+        self._news_placeholder = ctk.CTkLabel(
+            self._news_scroll,
+            text="🔄  Klicke 'News Laden' um aktuelle Forex-Nachrichten zu laden.",
+            font=ctk.CTkFont(size=13), text_color="gray50")
+        self._news_placeholder.pack(pady=40)
+
+        # Auto-load on tab open
+        self.after(800, self._fetch_news_threaded)
+
+    # ── News fetching ────────────────────────────────────────────────────────
+    def _fetch_news_threaded(self):
+        if self._news_analyzing:
+            return
+        self._news_refresh_btn.configure(state="disabled", text="⏳ Lade...")
+        self._news_status_lbl.configure(text="● Lade Nachrichten...", text_color="#E67E22")
+        threading.Thread(target=self._fetch_news_bg, daemon=True).start()
+
+    def _fetch_news_bg(self):
+        """Fetch news from multiple free public RSS/JSON sources."""
+        import xml.etree.ElementTree as ET
+
+        sources = [
+            # FXStreet RSS
+            ("FXStreet", "https://www.fxstreet.com/rss/news"),
+            # MarketWatch currencies RSS
+            ("MarketWatch", "https://feeds.marketwatch.com/marketwatch/marketpulse/"),
+            # Investopedia Forex
+            ("Investopedia", "https://www.investopedia.com/feedbuilder/feed/getfeed?feedName=rss_forex"),
+            # Forex Live
+            ("ForexLive", "https://www.forexlive.com/feed/news"),
+        ]
+
+        all_items = []
+        for source_name, url in sources:
+            try:
+                resp = requests.get(url, timeout=8,
+                                    headers={"User-Agent": "Mozilla/5.0 FinGPT-NewsReader/1.0"})
+                resp.raise_for_status()
+                root = ET.fromstring(resp.content)
+                ns = ""
+                # Try both RSS 2.0 and Atom
+                items = root.findall(".//item") or root.findall(".//{http://www.w3.org/2005/Atom}entry")
+                for item in items[:10]:   # max 10 per source
+                    def g(tag):
+                        el = item.find(tag)
+                        if el is None:
+                            el = item.find("{http://www.w3.org/2005/Atom}" + tag.lstrip("./"))
+                        return (el.text or "").strip() if el is not None else ""
+                    title   = g("title") or g("summary")
+                    pub_raw = g("pubDate") or g("published") or g("updated")
+                    desc    = g("description") or g("summary") or ""
+                    # Clean HTML from desc
+                    import re
+                    desc = re.sub(r'<[^>]+>', '', desc)[:300]
+                    if not title:
+                        continue
+                    all_items.append({
+                        "source":    source_name,
+                        "title":     title,
+                        "published": pub_raw,
+                        "summary":   desc,
+                        "sentiment": {},    # filled by Ollama later
+                        "pairs":     self._detect_pairs(title + " " + desc),
+                    })
+            except Exception as e:
+                self.after(0, lambda s=source_name, err=str(e):
+                    self.write_terminal(f">> [NEWS] {s} Fehler: {err[:60]}\n", "WARNING"))
+
+        # Sort by recency heuristic (just keep insertion order from latest source)
+        self._news_items = all_items
+        self.after(0, self._render_news_feed)
+        self.after(0, lambda: self._news_refresh_btn.configure(state="normal", text="🔄 News Laden"))
+        count = len(all_items)
+        self.after(0, lambda c=count: self._news_status_lbl.configure(
+            text=f"● {c} Artikel geladen", text_color="#5EBA7D"))
+
+    def _detect_pairs(self, text):
+        """Detect currency pairs mentioned in text."""
+        text_up = text.upper()
+        pairs = []
+        currencies = {"EUR": ["EUR","EURO","EUROPEAN","ECB"],
+                      "GBP": ["GBP","POUND","BOE","STERLING","UK","BRITAIN"],
+                      "USD": ["USD","DOLLAR","FED","FEDERAL RESERVE","DXY"],
+                      "JPY": ["JPY","YEN","BOJ","JAPAN"],
+                      "CHF": ["CHF","FRANC","SNB","SWISS"],
+                      "AUD": ["AUD","AUSSIE","RBA","AUSTRALIA"],
+                      "CAD": ["CAD","LOONIE","BOC","CANADA"],
+                      "NZD": ["NZD","KIWI","RBNZ","NEW ZEALAND"]}
+        for cur, keywords in currencies.items():
+            if any(kw in text_up for kw in keywords):
+                pairs.append(cur)
+        return pairs or ["USD"]   # default USD if nothing found
+
+    # ── Ollama Sentiment Analysis ────────────────────────────────────────────
+    def _analyze_all_news_threaded(self):
+        if not self._news_items:
+            self._fetch_news_threaded()
+            return
+        if self._news_analyzing:
+            return
+        self._news_analyzing = True
+        self._news_analyze_btn.configure(state="disabled", text="⏳ Analysiere...")
+        self._news_status_lbl.configure(text="● Ollama analysiert...", text_color="#8E44AD")
+        threading.Thread(target=self._analyze_all_news_bg, daemon=True).start()
+
+    def _analyze_all_news_bg(self):
+        total = len(self._news_items)
+        for i, item in enumerate(self._news_items):
+            if item.get("sentiment"):
+                continue
+            sentiment = self._ollama_analyze_news(item["title"], item["summary"], item["pairs"])
+            item["sentiment"] = sentiment
+            progress = i + 1
+            self.after(0, lambda p=progress, t=total:
+                self._news_status_lbl.configure(text=f"● Analysiere {p}/{t}...",
+                                                text_color="#8E44AD"))
+        self.after(0, self._render_news_feed)
+        self.after(0, lambda: self._news_analyze_btn.configure(state="normal",
+                                                                text="🤖 Alle Analysieren"))
+        self.after(0, lambda: self._news_status_lbl.configure(
+            text="● Analyse abgeschlossen", text_color="#5EBA7D"))
+        self._news_analyzing = False
+
+    def _ollama_analyze_news(self, title, summary, pairs):
+        """Ask Ollama to rate the news as BULLISH / BEARISH / NEUTRAL per detected currency."""
+        try:
+            url   = self.url_entry.get().strip()
+            model = self.model_combo.get()
+            if not url or "Verbindung" in model or "Lade" in model:
+                return {}
+
+            pairs_str = ", ".join(pairs) if pairs else "EUR, USD"
+            prompt = (
+                f"Du bist ein erfahrener Forex-Analyst. Bewerte die folgende Finanznachricht "
+                f"kurz und präzise für diese Währungen: {pairs_str}.\n\n"
+                f"Überschrift: {title}\n"
+                f"Zusammenfassung: {summary}\n\n"
+                f"Antworte NUR mit einem JSON-Objekt im Format:\n"
+                f'{{"EUR": "BULLISH", "USD": "BEARISH", "GBP": "NEUTRAL", ...}}\n'
+                f"Verwende ausschließlich: BULLISH, BEARISH oder NEUTRAL. Kein weiterer Text."
+            )
+            payload = {"model": model, "prompt": prompt, "stream": False,
+                       "options": {"temperature": 0.1, "num_predict": 120}}
+            resp = requests.post(f"{url}/api/generate", json=payload, timeout=20)
+            raw  = resp.json().get("response", "").strip()
+
+            import json as _json, re as _re
+            match = _re.search(r'\{[^}]+\}', raw)
+            if match:
+                return _json.loads(match.group(0))
+        except Exception:
+            pass
+        return {}
+
+    # ── News Rendering ───────────────────────────────────────────────────────
+    def _news_filter(self, pair):
+        self._news_filter_pair = pair
+        # Update button highlights
+        for p, btn in self._news_filter_btns.items():
+            btn.configure(fg_color="#2E86AB" if p == pair else ("gray75", "gray25"))
+        self._render_news_feed()
+
+    def _render_news_feed(self):
+        """Render news cards into the scrollable frame."""
+        for w in self._news_scroll.winfo_children():
+            w.destroy()
+
+        items = self._news_items
+        flt   = self._news_filter_pair
+        if flt != "Alle":
+            items = [it for it in items if flt in it.get("pairs", [])]
+
+        if not items:
+            ctk.CTkLabel(self._news_scroll,
+                         text="Keine Nachrichten gefunden. Klicke 🔄 News Laden.",
+                         text_color="gray50").pack(pady=40)
+            return
+
+        # Remove old placeholder
+        SENT_COLOR = {"BULLISH": "#5EBA7D", "BEARISH": "#E74C3C", "NEUTRAL": "#E67E22"}
+        SENT_ICON  = {"BULLISH": "🟢", "BEARISH": "🔴", "NEUTRAL": "🟡"}
+
+        for idx, item in enumerate(items):
+            card_bg = ("gray85", "gray16") if idx % 2 == 0 else ("gray82", "gray14")
+            card = ctk.CTkFrame(self._news_scroll, fg_color=card_bg, corner_radius=10)
+            card.pack(fill="x", padx=6, pady=4)
+            card.grid_columnconfigure(0, weight=1)
+
+            # Row 1: Source + Time + Pairs badges
+            top_row = ctk.CTkFrame(card, fg_color="transparent")
+            top_row.grid(row=0, column=0, sticky="ew", padx=12, pady=(8, 0))
+
+            src_lbl = ctk.CTkLabel(top_row, text=f"📡 {item['source']}",
+                                   font=ctk.CTkFont(size=10, weight="bold"),
+                                   text_color="#569CD6")
+            src_lbl.pack(side="left")
+
+            time_txt = item.get("published", "")[:22]
+            ctk.CTkLabel(top_row, text=f"  {time_txt}", text_color="gray50",
+                         font=ctk.CTkFont(size=10)).pack(side="left", padx=8)
+
+            # Pair badges
+            for pair in item.get("pairs", []):
+                sentiment = item.get("sentiment", {}).get(pair, "")
+                badge_color = SENT_COLOR.get(sentiment, "gray40")
+                badge_text  = f"{SENT_ICON.get(sentiment, '⚪')} {pair}"
+                ctk.CTkLabel(top_row, text=badge_text, fg_color=badge_color,
+                             corner_radius=6, font=ctk.CTkFont(size=10, weight="bold"),
+                             text_color="white").pack(side="right", padx=3)
+
+            # Row 2: Headline
+            ctk.CTkLabel(card, text=item["title"],
+                         font=ctk.CTkFont(size=12, weight="bold"),
+                         text_color="white", wraplength=800, justify="left",
+                         anchor="w").grid(row=1, column=0, sticky="ew", padx=12, pady=(4, 2))
+
+            # Row 3: Summary (if any)
+            if item.get("summary"):
+                ctk.CTkLabel(card, text=item["summary"][:180] + ("…" if len(item["summary"]) > 180 else ""),
+                             font=ctk.CTkFont(size=11), text_color="gray65",
+                             wraplength=800, justify="left",
+                             anchor="w").grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 4))
+
+            # Analyze button (single item) if no sentiment yet
+            if not item.get("sentiment"):
+                def _analyze_one(it=item):
+                    threading.Thread(target=lambda: (
+                        it.__setitem__("sentiment",
+                                       self._ollama_analyze_news(it["title"], it["summary"], it["pairs"])),
+                        self.after(0, self._render_news_feed)
+                    ), daemon=True).start()
+                ctk.CTkButton(card, text="🤖", width=32, height=22,
+                              fg_color="transparent", hover_color="#8E44AD",
+                              command=_analyze_one).grid(row=0, column=1, padx=8, pady=4)
+
+            # Bottom separator
+            ctk.CTkFrame(card, height=1, fg_color="gray30").grid(
+                row=3, column=0, columnspan=2, sticky="ew", padx=12, pady=(4, 0))
+
     def setup_terminal_tab(self):
+
+
+
         tab = self.tabview.tab("💻 Terminal")
         tab.grid_columnconfigure(0, weight=1)
         tab.grid_rowconfigure(1, weight=1)
 
+        # ── Control bar ──────────────────────────────────────────────
         controls = ctk.CTkFrame(tab, fg_color="transparent")
-        controls.grid(row=0, column=0, sticky="ew", padx=10, pady=10)
-        
-        ctk.CTkButton(controls, text="🧹 Säubern", command=self.clear_terminal, fg_color="#E74C3C", hover_color="#C0392B").pack(side="left", padx=(0, 10))
-        ctk.CTkButton(controls, text="🤖 Output Simulieren", command=self.simulate_terminal_output, fg_color="transparent", border_width=2).pack(side="left")
+        controls.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 0))
 
-        self.terminal_box = ctk.CTkTextbox(tab, corner_radius=15, font=ctk.CTkFont(family="Consolas", size=13), 
-                                           fg_color="#1E1E1E", text_color="#D4D4D4", wrap="word")
-        self.terminal_box.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
-        
-        self.write_terminal("FinGPT Professional System Initialized...\n")
-        self.write_terminal("Ready for incoming streams.\n> ")
+        ctk.CTkButton(controls, text="🧹 Leeren", command=self.clear_terminal,
+                      fg_color="#E74C3C", hover_color="#C0392B", width=90).pack(side="left", padx=(0, 6))
+
+        self._log_paused = False
+        self._pause_btn = ctk.CTkButton(controls, text="⏸ Pause", command=self._toggle_log_pause,
+                                        fg_color="#E67E22", hover_color="#D35400", width=90)
+        self._pause_btn.pack(side="left", padx=(0, 6))
+
+        ctk.CTkButton(controls, text="📂 Log-Ordner", command=self._open_log_folder,
+                      fg_color="transparent", border_width=1, width=110).pack(side="left", padx=(0, 14))
+
+        # Filter buttons
+        ctk.CTkLabel(controls, text="Filter:", text_color="gray60").pack(side="left", padx=(0, 5))
+        self._log_filter = ctk.StringVar(value="ALL")
+        for label, val, color in [("Alle", "ALL", "#2E86AB"), ("TRADE 💰", "TRADE", "#5EBA7D"),
+                                   ("ERROR ❌", "ERROR", "#E74C3C"), ("WARN ⚠️", "WARNING", "#F1C40F"),
+                                   ("AI 🤖", "AI", "#8E44AD")]:
+            ctk.CTkButton(controls, text=label, width=80,
+                          command=lambda v=val: self._set_log_filter(v),
+                          fg_color=color, hover_color="gray30",
+                          border_width=1).pack(side="left", padx=2)
+
+        # Right side: live log status indicator
+        self._log_status_lbl = ctk.CTkLabel(controls, text="● Log: warte...", text_color="gray50",
+                                             font=ctk.CTkFont(size=11))
+        self._log_status_lbl.pack(side="right", padx=15)
+
+        # ── Terminal text box ─────────────────────────────────────────
+        # We use the underlying Tk Text widget directly for full tag/color support
+        import tkinter as tk
+        self._term_frame = ctk.CTkFrame(tab, corner_radius=15, fg_color="#101010")
+        self._term_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
+        self._term_frame.grid_rowconfigure(0, weight=1)
+        self._term_frame.grid_columnconfigure(0, weight=1)
+
+        self.terminal_box = tk.Text(self._term_frame,
+                                    bg="#101010", fg="#D4D4D4",
+                                    font=("Consolas", 12),
+                                    insertbackground="#D4D4D4",
+                                    selectbackground="#264F78",
+                                    relief="flat", borderwidth=0,
+                                    wrap="word", state="disabled")
+        self.terminal_box.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
+
+        # Scrollbar
+        sb = tk.Scrollbar(self._term_frame, command=self.terminal_box.yview,
+                          bg="#1E1E1E", troughcolor="#1E1E1E", highlightthickness=0)
+        sb.grid(row=0, column=1, sticky="ns")
+        self.terminal_box.configure(yscrollcommand=sb.set)
+
+        # Color tags
+        self.terminal_box.tag_configure("ts",      foreground="#569CD6")   # timestamp (blue)
+        self.terminal_box.tag_configure("INFO",    foreground="#D4D4D4")   # white
+        self.terminal_box.tag_configure("SYSTEM",  foreground="#9CDCFE")   # light blue
+        self.terminal_box.tag_configure("MT5",     foreground="#4EC9B0")   # teal
+        self.terminal_box.tag_configure("AI",      foreground="#C586C0")   # purple
+        self.terminal_box.tag_configure("TRADE",   foreground="#5EBA7D")   # green  ★ important
+        self.terminal_box.tag_configure("WARNING", foreground="#F1C40F")   # yellow
+        self.terminal_box.tag_configure("ERROR",   foreground="#F44747", font=("Consolas", 12, "bold"))
+        self.terminal_box.tag_configure("DEBUG",   foreground="#666666")   # gray
+        self.terminal_box.tag_configure("INDICATORS", foreground="#CE9178")# orange
+        self.terminal_box.tag_configure("RISK",    foreground="#E74C3C")   # red-ish
+        self.terminal_box.tag_configure("PROMPT",  foreground="#DCDCAA")   # yellow-ish
+        self.terminal_box.tag_configure("CATEGORY",foreground="#608B4E")   # bracket green
+        self.terminal_box.tag_configure("separator",foreground="#333333")
+
+        # Boot messages
+        self.write_terminal("FinGPT Professional", "SYSTEM")
+        self.write_terminal("  ─────────────────────────────────────────────\n", "separator")
+        self.write_terminal("  System initialisiert. Log-Stream startet...\n\n", "SYSTEM")
+
+        # Start live log tail
+        self._log_filter_value = "ALL"
+        self._log_tail_running = False
+        self._start_log_tail()
 
     def setup_config_tab(self):
         tab = self.tabview.tab("⚙️ Konfiguration")
@@ -720,22 +1767,55 @@ class ModernFinGPTGUI(ctk.CTk):
         mt5_tab.grid_columnconfigure(1, weight=1)
         ctk.CTkLabel(mt5_tab, text="⚙️ MetaTrader 5 & System", font=ctk.CTkFont(size=16, weight="bold"), text_color="#E74C3C").grid(row=0, column=0, columnspan=2, sticky="w", padx=20, pady=(15, 10))
         ctk.CTkButton(mt5_tab, text="MT5 Manuell Neuverbinden", command=self.test_mt5_connection, fg_color="transparent", border_width=1).grid(row=1, column=0, sticky="w", padx=20, pady=10)
-        ctk.CTkLabel(mt5_tab, text="Aktive Währungspaare:").grid(row=2, column=0, sticky="w", padx=20, pady=10)
+        ctk.CTkLabel(mt5_tab, text="Währungspaare Preset:").grid(row=2, column=0, sticky="w", padx=20, pady=(10, 2))
+
+        # Preset definitions
+        self._pair_presets = {
+            "🏆 Majors (6 Paare)":
+                "EURUSD, GBPUSD, USDJPY, USDCHF, AUDUSD, USDCAD",
+            "🥈 Majors + Minors (14 Paare)":
+                "EURUSD, GBPUSD, USDJPY, USDCHF, AUDUSD, USDCAD, NZDUSD, "
+                "EURGBP, EURJPY, GBPJPY, AUDNZD, CADJPY, AUDCAD, NZDJPY",
+            "🔀 Crosses (EUR/GBP/JPY Cross)":
+                "EURGBP, EURJPY, EURCAD, EURAUD, EURNZD, EURCHF, "
+                "GBPJPY, GBPCAD, GBPAUD, GBPNZD, GBPCHF",
+            "💎 Exotics":
+                "USDTRY, USDZAR, USDMXN, USDHKD, USDSGD, EURTRY, "
+                "GBPTRY, XAUUSD, XAGUSD",
+            "🌐 Alle Paare (Majors + Minors + Crosses)":
+                "EURUSD, GBPUSD, USDJPY, USDCHF, AUDUSD, USDCAD, NZDUSD, "
+                "EURGBP, EURJPY, EURCAD, EURAUD, EURNZD, EURCHF, "
+                "GBPJPY, GBPCAD, GBPAUD, GBPNZD, GBPCHF, "
+                "AUDNZD, AUDCAD, CADJPY, NZDJPY, CHFJPY",
+            "✏️ Custom (Manuell eingeben)": "",
+        }
+
+        self._pairs_preset_var = ctk.StringVar(value="🏆 Majors (6 Paare)")
+        pairs_preset_combo = ctk.CTkComboBox(
+            mt5_tab,
+            values=list(self._pair_presets.keys()),
+            variable=self._pairs_preset_var,
+            width=350,
+            command=self._on_pairs_preset_change,
+        )
+        pairs_preset_combo.grid(row=2, column=1, sticky="w", padx=20, pady=(10, 2))
+
+        ctk.CTkLabel(mt5_tab, text="Aktive Paare (editierbar):").grid(row=3, column=0, sticky="w", padx=20, pady=(2, 10))
         self.pairs_entry = ctk.CTkEntry(mt5_tab, width=350)
-        self.pairs_entry.insert(0, "EURUSD, GBPUSD, USDJPY, USDCHF, AUDUSD, USDCAD")
-        self.pairs_entry.grid(row=2, column=1, sticky="w", padx=20, pady=10)
-        ctk.CTkLabel(mt5_tab, text="Konto Typ:").grid(row=3, column=0, sticky="w", padx=20, pady=10)
+        self.pairs_entry.insert(0, self._pair_presets["🏆 Majors (6 Paare)"])
+        self.pairs_entry.grid(row=3, column=1, sticky="ew", padx=20, pady=(2, 10))
+        ctk.CTkLabel(mt5_tab, text="Konto Typ:").grid(row=4, column=0, sticky="w", padx=20, pady=10)
         self.account_type_var = ctk.StringVar(value="Demo")
-        ctk.CTkComboBox(mt5_tab, values=["Demo", "Live", "Cent"], variable=self.account_type_var, width=150).grid(row=3, column=1, sticky="w", padx=20, pady=10)
-        ctk.CTkLabel(mt5_tab, text="Magic Number:").grid(row=4, column=0, sticky="w", padx=20, pady=10)
+        ctk.CTkComboBox(mt5_tab, values=["Demo", "Live", "Cent"], variable=self.account_type_var, width=150).grid(row=4, column=1, sticky="w", padx=20, pady=10)
+        ctk.CTkLabel(mt5_tab, text="Magic Number:").grid(row=5, column=0, sticky="w", padx=20, pady=10)
         self.magic_number_entry = ctk.CTkEntry(mt5_tab, width=120)
         self.magic_number_entry.insert(0, "42069")
-        self.magic_number_entry.grid(row=4, column=1, sticky="w", padx=20, pady=10)
-        ctk.CTkLabel(mt5_tab, text="Logging Level:").grid(row=5, column=0, sticky="w", padx=20, pady=10)
+        self.magic_number_entry.grid(row=5, column=1, sticky="w", padx=20, pady=10)
+        ctk.CTkLabel(mt5_tab, text="Logging Level:").grid(row=6, column=0, sticky="w", padx=20, pady=10)
         self.log_level_var = ctk.StringVar(value="INFO")
-        ctk.CTkComboBox(mt5_tab, values=["DEBUG", "INFO", "WARNING", "ERROR"], variable=self.log_level_var, width=150).grid(row=5, column=1, sticky="w", padx=20, pady=10)
+        ctk.CTkComboBox(mt5_tab, values=["DEBUG", "INFO", "WARNING", "ERROR"], variable=self.log_level_var, width=150).grid(row=6, column=1, sticky="w", padx=20, pady=10)
         self.debug_mode_switch = ctk.CTkSwitch(mt5_tab, text="Debug-Modus (mehr Terminal-Output)", progress_color="#E74C3C")
-        self.debug_mode_switch.grid(row=6, column=0, columnspan=2, sticky="w", padx=20, pady=15)
+        self.debug_mode_switch.grid(row=7, column=0, columnspan=2, sticky="w", padx=20, pady=15)
 
         # Save Button (below all sub-tabs)
         tab.grid_rowconfigure(1, weight=0)
@@ -745,7 +1825,16 @@ class ModernFinGPTGUI(ctk.CTk):
 
         self.after(500, self.fetch_ollama_models_silently)
 
+    def _on_pairs_preset_change(self, choice):
+        """Fill the pairs entry when a preset is selected from the dropdown."""
+        pairs = self._pair_presets.get(choice, "")
+        self.pairs_entry.delete(0, "end")
+        if pairs:
+            self.pairs_entry.insert(0, pairs)
+        # If "Custom" → entry stays empty and user types freely
+
     def fetch_ollama_models_silently(self):
+
         try:
             url = self.url_entry.get().strip()
             response = requests.get(f"{url}/api/tags", timeout=3)
@@ -793,7 +1882,6 @@ class ModernFinGPTGUI(ctk.CTk):
     def save_config(self):
         try:
             # Gather Configuration Data
-            # System & KI
             ollama_url = self.url_entry.get().strip()
             llm_model = self.model_combo.get()
             auto_trade_interval = int(self.interval_slider.get())
@@ -804,40 +1892,158 @@ class ModernFinGPTGUI(ctk.CTk):
             max_daily_loss = float(self.risk_daily_entry.get())
             max_pos = int(self.max_pos_entry.get())
             
-            # Pairs
+            # Pairs — delegate to shared helper
             raw_pairs = self.pairs_entry.get().strip()
             if raw_pairs:
-                split_pairs = [p.strip() for p in raw_pairs.upper().split(',') if p.strip()]
-                # Update dashboard_symbols (Format: "EUR/USD", "EURUSD")
-                self.dashboard_symbols = [(f"{p[:3]}/{p[3:]}" if len(p) == 6 else p, p) for p in split_pairs]
-                
-                # Rebuild LiveDataRows in Dashboard
-                for widget in self.scroll_list.winfo_children():
-                    if isinstance(widget, LiveDataRow):
-                        widget.destroy()
-                
-                self.live_data_rows.clear()
-                for display_name, symbol in self.dashboard_symbols:
-                    row = LiveDataRow(self.scroll_list, display_name, "---", "0.00%", "---", "HOLD")
-                    row.pack(fill="x", pady=2)
-                    self.live_data_rows.append((symbol, row))
+                self._rebuild_symbol_rows(raw_pairs)
 
-            # Simulate backend assignment for UI demonstration purposes
-            # In a full integration, these would be passed to FinGPT core or a JSON config
-            
             status_msg = f">> [CONFIG SAVED] Model: {llm_model} | Auto: {is_auto_trading} | Interval: {auto_trade_interval}s\n"
             status_msg += f">> [RISK LIMITS] Risk/Trade: {max_risk}% | Daily Loss: {max_daily_loss}% | Max Pos: {max_pos}\n"
             status_msg += f">> [PAIRS] Monitoring {len(self.dashboard_symbols)} pairs.\n"
             self.write_terminal(status_msg)
             
+            # Persist to disk
+            self.save_settings()
+            
             messagebox.showinfo("Erfolg", "Konfiguration wurde erfolgreich gespeichert und angewendet!")
             
-            # Force immediate update of new pairs if live
             if self.is_live_running:
                 self.update_dashboard_data()
                 
         except ValueError as e:
             messagebox.showerror("Eingabefehler", f"Bitte überprüfen Sie Ihre numerischen Eingaben.\nDetails: {str(e)}")
+
+    def _config_path(self):
+        import os
+        config_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "storage", "gui_settings")
+        os.makedirs(config_dir, exist_ok=True)
+        return os.path.join(config_dir, "config.json")
+
+    def save_settings(self):
+        """Save all GUI settings to a JSON file for persistence across restarts."""
+        import json
+        cfg = {
+            # KI & Ollama
+            "ollama_url":       self.url_entry.get().strip(),
+            "llm_model":        self.model_combo.get(),
+            "interval":         int(self.interval_slider.get()),
+            "ai_temperature":   round(self.ai_temp_slider.get(), 1),
+            "prompt_lang":      self.prompt_lang_var.get(),
+            # Trading Style
+            "trading_style":    self.trading_style_var.get(),
+            "signal_strategy":  self.signal_strategy_var.get(),
+            "risk_profile":     self.risk_profile_var.get(),
+            "max_risk":         self.risk_trade_entry.get(),
+            "max_daily_loss":   self.risk_daily_entry.get(),
+            "max_positions":    self.max_pos_entry.get(),
+            "auto_trading":     bool(self.trading_active_switch.get()),
+            "session_london":   bool(self.session_london.get()),
+            "session_ny":       bool(self.session_ny.get()),
+            "session_asia":     bool(self.session_asia.get()),
+            # Reinforcement Learning
+            "rl_algo":          self.rl_algo_var.get(),
+            "rl_learning_rate": round(self.rl_lr_slider.get(), 4),
+            "rl_gamma":         round(self.rl_gamma_slider.get(), 2),
+            "rl_steps":         self.rl_steps_entry.get(),
+            "rl_reward":        self.rl_reward_var.get(),
+            "rl_checkpoint":    self.rl_checkpoint_entry.get(),
+            "rl_live_enabled":  bool(self.rl_live_switch.get()),
+            # MT5 & System
+            "pairs":            self.pairs_entry.get(),
+            "account_type":     self.account_type_var.get(),
+            "magic_number":     self.magic_number_entry.get(),
+            "log_level":        self.log_level_var.get(),
+            "debug_mode":       bool(self.debug_mode_switch.get()),
+        }
+        try:
+            with open(self._config_path(), 'w', encoding='utf-8') as f:
+                json.dump(cfg, f, indent=2, ensure_ascii=False)
+            self.write_terminal(f">> [SETTINGS] Gespeichert in: {self._config_path()}\n")
+        except Exception as e:
+            self.write_terminal(f">> [SETTINGS ERROR] Speichern fehlgeschlagen: {e}\n")
+
+    def load_settings(self):
+        """Load saved GUI settings from JSON and apply to all widgets."""
+        import json
+        try:
+            path = self._config_path()
+            import os
+            if not os.path.exists(path):
+                return  # No saved config yet, keep defaults
+
+            with open(path, 'r', encoding='utf-8') as f:
+                cfg = json.load(f)
+
+            def _set_entry(widget, key):
+                v = cfg.get(key)
+                if v is not None:
+                    widget.delete(0, "end")
+                    widget.insert(0, str(v))
+
+            def _set_combo(var_or_combo, key):
+                v = cfg.get(key)
+                if v is not None:
+                    if isinstance(var_or_combo, ctk.StringVar):
+                        var_or_combo.set(v)
+                    else:
+                        var_or_combo.set(v)
+
+            def _set_slider(slider, lbl, key, fmt="{:.0f}"):
+                v = cfg.get(key)
+                if v is not None:
+                    slider.set(float(v))
+                    lbl.configure(text=fmt.format(float(v)))
+
+            def _set_switch(switch, key):
+                v = cfg.get(key)
+                if v is not None:
+                    switch.select() if v else switch.deselect()
+
+            # KI & Ollama
+            _set_entry(self.url_entry, "ollama_url")
+            if cfg.get("llm_model"):
+                self.model_combo.set(cfg["llm_model"])
+            _set_slider(self.interval_slider, self.interval_lbl, "interval", fmt="{:.0f}s")
+            _set_slider(self.ai_temp_slider, self.ai_temp_lbl, "ai_temperature", fmt="{:.1f}")
+            _set_combo(self.prompt_lang_var, "prompt_lang")
+
+            # Trading Style
+            _set_combo(self.trading_style_var, "trading_style")
+            _set_combo(self.signal_strategy_var, "signal_strategy")
+            _set_combo(self.risk_profile_var, "risk_profile")
+            _set_entry(self.risk_trade_entry, "max_risk")
+            _set_entry(self.risk_daily_entry, "max_daily_loss")
+            _set_entry(self.max_pos_entry, "max_positions")
+            _set_switch(self.trading_active_switch, "auto_trading")
+            _set_switch(self.session_london, "session_london")
+            _set_switch(self.session_ny, "session_ny")
+            _set_switch(self.session_asia, "session_asia")
+
+            # Reinforcement Learning
+            _set_combo(self.rl_algo_var, "rl_algo")
+            _set_slider(self.rl_lr_slider, self.rl_lr_lbl, "rl_learning_rate", fmt="{:.4f}")
+            _set_slider(self.rl_gamma_slider, self.rl_gamma_lbl, "rl_gamma", fmt="{:.2f}")
+            _set_entry(self.rl_steps_entry, "rl_steps")
+            _set_combo(self.rl_reward_var, "rl_reward")
+            _set_entry(self.rl_checkpoint_entry, "rl_checkpoint")
+            _set_switch(self.rl_live_switch, "rl_live_enabled")
+
+            # MT5 & System
+            _set_entry(self.pairs_entry, "pairs")
+            _set_combo(self.account_type_var, "account_type")
+            _set_entry(self.magic_number_entry, "magic_number")
+            _set_combo(self.log_level_var, "log_level")
+            _set_switch(self.debug_mode_switch, "debug_mode")
+
+            # Auto-apply saved pairs to dashboard immediately
+            loaded_pairs = self.pairs_entry.get().strip()
+            if loaded_pairs:
+                self.after(0, lambda p=loaded_pairs: self._rebuild_symbol_rows(p))
+
+            self.write_terminal(f">> [SETTINGS] Einstellungen geladen aus: {path}\n")
+
+        except Exception as e:
+            self.write_terminal(f">> [SETTINGS ERROR] Laden fehlgeschlagen: {e}\n")
             
     # --- Funktionalitäten ---
 
@@ -996,23 +2202,165 @@ class ModernFinGPTGUI(ctk.CTk):
                     self.after(0, lambda: self.write_terminal(msg))
         threading.Thread(target=bg_simulator, daemon=True).start()
 
-    def write_terminal(self, text):
-        self.terminal_box.insert("end", text)
-        self.terminal_box.see("end")
+    def write_terminal(self, text, tag="INFO"):
+        """Write colored text to the terminal. tag must be one of the configured color tags."""
+        try:
+            tb = self.terminal_box
+            tb.configure(state="normal")
+            tb.insert("end", text, tag)
+            tb.configure(state="disabled")
+            if not getattr(self, '_log_paused', False):
+                tb.see("end")
+        except Exception:
+            pass  # terminal may not be ready yet
 
     def clear_terminal(self):
-        self.terminal_box.delete("0.0", "end")
-        self.write_terminal("> ")
+        try:
+            self.terminal_box.configure(state="normal")
+            self.terminal_box.delete("1.0", "end")
+            self.terminal_box.configure(state="disabled")
+            self.write_terminal("> Terminal geleert\n", "SYSTEM")
+        except Exception:
+            pass
+
+    def _toggle_log_pause(self):
+        self._log_paused = not self._log_paused
+        if self._log_paused:
+            self._pause_btn.configure(text="▶ Weiter", fg_color="#5EBA7D", hover_color="#4CAF50")
+        else:
+            self._pause_btn.configure(text="⏸ Pause", fg_color="#E67E22", hover_color="#D35400")
+            self.terminal_box.see("end")
+
+    def _open_log_folder(self):
+        import subprocess, os
+        log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs")
+        os.makedirs(log_dir, exist_ok=True)
+        subprocess.Popen(f'explorer "{log_dir}"')
+
+    def _set_log_filter(self, value):
+        self._log_filter_value = value
+        self.write_terminal(f"\n── Filter gesetzt: {value} ──\n", "separator")
+
+    def _parse_log_line(self, line):
+        """Parse a FinGPT log line and return (formatted_text, tag).
+        Log format: '2024-01-01 12:34:56,789 | INFO | [CATEGORY] message'
+        or console format: '12:34:56 ℹ️  [SYSTEM] message'
+        """
+        import re
+        line = line.rstrip('\n\r')
+        if not line.strip():
+            return None, None
+
+        # Filter check
+        flt = getattr(self, '_log_filter_value', 'ALL')
+
+        # Determine color tag by scanning for known keywords
+        tag = "INFO"
+        if "ERROR" in line or "❌" in line:
+            tag = "ERROR"
+        elif "WARNING" in line or "WARN" in line or "⚠️" in line:
+            tag = "WARNING"
+        elif "TRADE" in line or "💰" in line or "BUY" in line or "SELL" in line or "ORDER" in line:
+            tag = "TRADE"
+        elif "AI" in line or "🤖" in line or "LLM" in line or "Ollama" in line or "model" in line.lower():
+            tag = "AI"
+        elif "MT5" in line or "📊" in line or "MetaTrader" in line:
+            tag = "MT5"
+        elif "RISK" in line or "risk" in line.lower():
+            tag = "RISK"
+        elif "INDICATOR" in line or "indicator" in line.lower():
+            tag = "INDICATORS"
+        elif "DEBUG" in line or "🔍" in line:
+            tag = "DEBUG"
+        elif "SYSTEM" in line or "FinGPT" in line:
+            tag = "SYSTEM"
+
+        # Apply filter
+        if flt != "ALL" and tag != flt:
+            return None, None
+
+        # Format: prepend a clean timestamp if not already at start
+        ts_match = re.match(r'(\d{2}:\d{2}:\d{2})', line)
+        full_ts_match = re.match(r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})', line)
+
+        if full_ts_match:
+            # Standard logging format: strip date, keep time
+            ts = full_ts_match.group(1).split(' ')[1]
+            body = line[len(full_ts_match.group(1)):].lstrip(' |,0123456789')
+            return f"  {ts}  {body}\n", tag
+        elif ts_match:
+            # Already has HH:MM:SS prefix
+            return f"  {line}\n", tag
+        else:
+            return f"  {line}\n", tag
+
+    def _start_log_tail(self):
+        """Start background thread that tails the live FinGPT log file."""
+        import os, time
+        self._log_tail_running = True
+
+        def tail_loop():
+            log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs")
+            last_inode = None
+            last_pos = 0
+
+            while self._log_tail_running:
+                try:
+                    log_file = os.path.join(log_dir, f"fingpt_{datetime.now().strftime('%Y%m%d')}.log")
+                    if not os.path.exists(log_file):
+                        self.after(0, lambda: self._log_status_lbl.configure(
+                            text="● Log: keine Datei", text_color="gray50"))
+                        time.sleep(3)
+                        continue
+
+                    stat = os.stat(log_file)
+                    inode = stat.st_ino
+
+                    if inode != last_inode:
+                        # File rotated or first open
+                        last_inode = inode
+                        last_pos = 0
+
+                    with open(log_file, 'r', encoding='utf-8', errors='replace') as f:
+                        f.seek(last_pos)
+                        lines = f.readlines()
+                        last_pos = f.tell()
+
+                    if lines:
+                        for line in lines:
+                            text, tag = self._parse_log_line(line)
+                            if text:
+                                self.after(0, lambda t=text, tg=tag: self.write_terminal(t, tg))
+
+                        count = stat.st_size
+                        self.after(0, lambda c=count: self._log_status_lbl.configure(
+                            text=f"● Log aktiv  ({c//1024}KB)", text_color="#5EBA7D"))
+                    else:
+                        self.after(0, lambda: self._log_status_lbl.configure(
+                            text="● Log: verbunden", text_color="#5EBA7D"))
+
+                except Exception as ex:
+                    self.after(0, lambda e=str(ex): self._log_status_lbl.configure(
+                        text=f"● Log Fehler: {e[:30]}", text_color="#E74C3C"))
+
+                time.sleep(1)  # poll every 1 second
+
+        threading.Thread(target=tail_loop, daemon=True).start()
 
     def simulate_terminal_output(self):
+        """Kept for backwards compatibility - now injects a realistic log line."""
         msgs = [
-            "Analyzing deep learning model accuracy...",
-            "Executing fast scalp on EUR/USD.",
-            "Risk limits within bounds. Proceeding.",
-            "LLM inference completed in 452ms.",
-            "Fetching macroeconomic news sentiment..."
+            ("12:34:56 ℹ️  [SYSTEM] Analysiere EURUSD Marktstruktur...", "SYSTEM"),
+            ("12:34:57 💰 [TRADE] BUY Signal erkannt | GBPUSD | Konfidenz: 87.4%", "TRADE"),
+            ("12:34:58 🤖 [AI] Ollama Inference abgeschlossen | 412ms | model: llama3", "AI"),
+            ("12:34:59 ⚠️  [WARNING] Margin Level unter 200% - Vorsicht!", "WARNING"),
+            ("12:35:00 📊 [MT5] Tick empfangen: EURUSD Bid=1.08421 Ask=1.08435", "MT5"),
+            ("12:35:01 ❌ [ERROR] Slippage zu hoch auf USDJPY - Trade abgebrochen", "ERROR"),
+            ("12:35:02 ℹ️  [RISK] Max Daily Loss Grenze: 3.0% | Aktuell: 0.8%", "RISK"),
         ]
-        self.write_terminal(f"[{datetime.now().strftime('%H:%M:%S')}] {random.choice(msgs)}\n")
+        import random
+        txt, tag = random.choice(msgs)
+        self.write_terminal(f"  {txt}\n", tag)
 
     def load_forex_charts(self):
         self.write_terminal(">> Lade echte Forex-Candlesticks (Major Pairs) via MetaTrader 5...\n")
