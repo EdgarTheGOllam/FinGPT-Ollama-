@@ -115,7 +115,7 @@ class ModernFinGPTGUI(ctk.CTk):
                                       fg_color="#5EBA7D", hover_color="#4CAF50", corner_radius=20, font=ctk.CTkFont(weight="bold"))
         self.live_btn.pack(side="right", padx=(10, 0))
         
-        self.status_dot = ctk.CTkLabel(self.header_frame, text="●", text_color="gray", font=ctk.CTkFont(size=20))
+        self.status_dot = ctk.CTkLabel(self.header_frame, text="●", text_color="#E74C3C", font=ctk.CTkFont(size=20))
         self.status_dot.pack(side="right")
         
         # 2. Main Tabview (ersetzt ttk.Notebook)
@@ -150,13 +150,13 @@ class ModernFinGPTGUI(ctk.CTk):
         tab.grid_rowconfigure(2, weight=1)
         
         # Top Cards
-        self.create_metric_card(tab, "Kontostand", "€25.430,75", 0, 0)
-        self.create_metric_card(tab, "Offene Positionen", "3", 0, 1)
-        self.create_metric_card(tab, "Heutige Trades", "12", 0, 2)
+        self.balance_card = self.create_metric_card(tab, "Kontostand", "€--", 0, 0)
+        self.positions_card = self.create_metric_card(tab, "Offene Positionen", "-", 0, 1)
+        self.trades_card = self.create_metric_card(tab, "Heutige Trades", "-", 0, 2)
         
-        self.create_metric_card(tab, "Gewinn/Verlust", "+€1.245,30", 1, 0)
-        self.create_metric_card(tab, "Win-Rate", "78%", 1, 1)
-        self.create_metric_card(tab, "Risiko-Level", "Medium", 1, 2)
+        self.pnl_card = self.create_metric_card(tab, "Gewinn/Verlust", "€--", 1, 0)
+        self.winrate_card = self.create_metric_card(tab, "Margin Level", "-%", 1, 1)
+        self.risk_card = self.create_metric_card(tab, "Freie Margin", "€--", 1, 2)
 
         # Live Data List
         data_frame = ctk.CTkFrame(tab, corner_radius=15, fg_color=("gray90", "gray13"))
@@ -187,21 +187,26 @@ class ModernFinGPTGUI(ctk.CTk):
     def create_metric_card(self, parent, title, value, row, col):
         card = MetricCard(parent, title=title, value=value)
         card.grid(row=row, column=col, padx=10, pady=10, sticky="nsew")
+        return card
 
     def populate_sample_data(self):
-        sample_data = [
-            ('EUR/USD', '1.08542', '+0.24%', '1.2M', 'BUY'),
-            ('GBP/USD', '1.26783', '-0.12%', '850K', 'SELL'),
-            ('USD/JPY', '151.234', '+0.08%', '2.1M', 'HOLD'),
-            ('BTC/USD', '43250.00', '+2.35%', '15.4K', 'BUY'),
-            ('XAU/USD', '2045.67', '-0.42%', '320K', 'SELL'),
-            ('NAS100', '15876.34', '+0.67%', '45.2M', 'BUY')
+        # Initialisiere die Zeilen mit echten Paaren
+        self.dashboard_symbols = [
+            ("EUR/USD", "EURUSD"),
+            ("GBP/USD", "GBPUSD"),
+            ("USD/JPY", "USDJPY"),
+            ("USD/CHF", "USDCHF"),
+            ("AUD/USD", "AUDUSD"),
+            ("USD/CAD", "USDCAD")
         ]
         
-        for item in sample_data:
-            row = LiveDataRow(self.scroll_list, *item)
+        for display_name, symbol in self.dashboard_symbols:
+            row = LiveDataRow(self.scroll_list, display_name, "---", "0.00%", "---", "HOLD")
             row.pack(fill="x", pady=2)
-            self.live_data_rows.append(row)
+            self.live_data_rows.append((symbol, row))
+
+        # initial fetch
+        self.update_dashboard_data()
 
     def setup_charts_tab(self):
         tab = self.tabview.tab("📈 Charts")
@@ -211,7 +216,17 @@ class ModernFinGPTGUI(ctk.CTk):
         controls = ctk.CTkFrame(tab, fg_color="transparent")
         controls.grid(row=0, column=0, sticky="ew", padx=10, pady=10)
         
-        ctk.CTkButton(controls, text="↻ Forex Charts Aktualisieren", command=self.load_forex_charts, fg_color="#2E86AB").pack(side="left", padx=(0, 10))
+        ctk.CTkButton(controls, text="↻ Charts Aktualisieren", command=self.load_forex_charts, fg_color="#2E86AB").pack(side="left", padx=(0, 10))
+        
+        # Timeframe Dropdown Menu
+        self.chart_timeframe_var = ctk.StringVar(value="D1 (Täglich)")
+        self.tf_combo = ctk.CTkComboBox(
+            controls, 
+            values=["M1 (1 Min)", "M5 (5 Min)", "M15 (15 Min)", "M30 (30 Min)", "H1 (1 Std)", "H4 (4 Std)", "D1 (Täglich)"], 
+            variable=self.chart_timeframe_var,
+            command=lambda choice: self.load_forex_charts()
+        )
+        self.tf_combo.pack(side="left", padx=10)
         
         self.charts_container = ctk.CTkScrollableFrame(tab, corner_radius=15, fg_color=("gray90", "gray13"))
         self.charts_container.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
@@ -248,77 +263,216 @@ class ModernFinGPTGUI(ctk.CTk):
 
     def setup_config_tab(self):
         tab = self.tabview.tab("⚙️ Konfiguration")
-        tab.grid_columnconfigure(0, weight=1)
         
-        # Ollama Panel
-        ollama_panel = ctk.CTkFrame(tab, corner_radius=15)
-        ollama_panel.grid(row=0, column=0, sticky="ew", padx=20, pady=20)
-        ollama_panel.grid_columnconfigure(1, weight=1)
+        # We need a scrollable container because config can get long
+        scroll_config = ctk.CTkScrollableFrame(tab, fg_color="transparent")
+        scroll_config.pack(fill="both", expand=True, padx=10, pady=10)
+        scroll_config.grid_columnconfigure(0, weight=1)
         
-        ctk.CTkLabel(ollama_panel, text="Ollama Setup", font=ctk.CTkFont(size=16, weight="bold")).grid(row=0, column=0, columnspan=3, sticky="w", padx=20, pady=(15, 10))
+        # 1. System & KI Panel
+        sys_panel = ctk.CTkFrame(scroll_config, corner_radius=15, fg_color=("gray90", "gray13"))
+        sys_panel.grid(row=0, column=0, sticky="ew", padx=10, pady=(0, 20))
+        sys_panel.grid_columnconfigure(1, weight=1)
         
-        ctk.CTkLabel(ollama_panel, text="Daemon URL:").grid(row=1, column=0, sticky="w", padx=20, pady=10)
-        self.url_entry = ctk.CTkEntry(ollama_panel, placeholder_text="http://localhost:11434")
+        ctk.CTkLabel(sys_panel, text="🤖 System & KI Einstellungen", font=ctk.CTkFont(size=16, weight="bold"), text_color="#2E86AB").grid(row=0, column=0, columnspan=2, sticky="w", padx=20, pady=(15, 10))
+        
+        ctk.CTkLabel(sys_panel, text="Ollama URL:").grid(row=1, column=0, sticky="w", padx=20, pady=10)
+        self.url_entry = ctk.CTkEntry(sys_panel, placeholder_text="http://localhost:11434")
         self.url_entry.insert(0, "http://localhost:11434")
         self.url_entry.grid(row=1, column=1, sticky="w", padx=20, pady=10)
         
-        ctk.CTkButton(ollama_panel, text="Test", command=self.test_ollama_connection, width=100).grid(row=1, column=2, padx=20, pady=10)
+        ctk.CTkLabel(sys_panel, text="LLM Modell:").grid(row=2, column=0, sticky="w", padx=20, pady=10)
+        self.model_combo = ctk.CTkComboBox(sys_panel, values=["llama3.2", "hermes3", "mistral", "gemma2"])
+        self.model_combo.grid(row=2, column=1, sticky="w", padx=20, pady=10)
 
-        # Risk Panel
-        risk_panel = ctk.CTkFrame(tab, corner_radius=15)
-        risk_panel.grid(row=1, column=0, sticky="ew", padx=20, pady=(0, 20))
+        ctk.CTkLabel(sys_panel, text="Auto-Trading Intervall (sek):").grid(row=3, column=0, sticky="w", padx=20, pady=10)
+        self.interval_slider = ctk.CTkSlider(sys_panel, from_=1, to=30, number_of_steps=29)
+        self.interval_slider.set(5)
+        self.interval_slider.grid(row=3, column=1, sticky="ew", padx=20, pady=10)
+        self.interval_lbl = ctk.CTkLabel(sys_panel, text="5s")
+        self.interval_lbl.grid(row=3, column=2, sticky="e", padx=(0, 20))
+        self.interval_slider.configure(command=lambda val: self.interval_lbl.configure(text=f"{int(val)}s"))
+
+        # 2. Risk Management Panel
+        risk_panel = ctk.CTkFrame(scroll_config, corner_radius=15, fg_color=("gray90", "gray13"))
+        risk_panel.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 20))
         risk_panel.grid_columnconfigure(1, weight=1)
 
-        ctk.CTkLabel(risk_panel, text="Risikomanagement", font=ctk.CTkFont(size=16, weight="bold")).grid(row=0, column=0, columnspan=2, sticky="w", padx=20, pady=(15, 10))
+        ctk.CTkLabel(risk_panel, text="🛡️ Risk Management", font=ctk.CTkFont(size=16, weight="bold"), text_color="#5EBA7D").grid(row=0, column=0, columnspan=2, sticky="w", padx=20, pady=(15, 10))
         
-        self.trading_active_switch = ctk.CTkSwitch(risk_panel, text="Auto-Trading Erlauben", progress_color="#5EBA7D")
+        self.trading_active_switch = ctk.CTkSwitch(risk_panel, text="Auto-Trading Global Erlauben", progress_color="#5EBA7D")
         self.trading_active_switch.select()
-        self.trading_active_switch.grid(row=1, column=0, sticky="w", padx=20, pady=15)
+        self.trading_active_switch.grid(row=1, column=0, columnspan=2, sticky="w", padx=20, pady=15)
 
-        ctk.CTkLabel(risk_panel, text="Max Drawdown (%):").grid(row=1, column=1, sticky="e", padx=(0, 10), pady=15)
-        self.risk_entry = ctk.CTkEntry(risk_panel, width=80)
-        self.risk_entry.insert(0, "2.0")
-        self.risk_entry.grid(row=1, column=2, sticky="e", padx=20, pady=15)
+        ctk.CTkLabel(risk_panel, text="Max Risiko pro Trade (%):").grid(row=2, column=0, sticky="w", padx=20, pady=10)
+        self.risk_trade_entry = ctk.CTkEntry(risk_panel, width=80)
+        self.risk_trade_entry.insert(0, "1.0")
+        self.risk_trade_entry.grid(row=2, column=1, sticky="w", padx=20, pady=10)
+        
+        ctk.CTkLabel(risk_panel, text="Max Daily Loss (%):").grid(row=3, column=0, sticky="w", padx=20, pady=10)
+        self.risk_daily_entry = ctk.CTkEntry(risk_panel, width=80)
+        self.risk_daily_entry.insert(0, "3.0")
+        self.risk_daily_entry.grid(row=3, column=1, sticky="w", padx=20, pady=10)
+        
+        ctk.CTkLabel(risk_panel, text="Max Offene Positionen:").grid(row=4, column=0, sticky="w", padx=20, pady=10)
+        self.max_pos_entry = ctk.CTkEntry(risk_panel, width=80)
+        self.max_pos_entry.insert(0, "3")
+        self.max_pos_entry.grid(row=4, column=1, sticky="w", padx=20, pady=10)
+
+        # 3. MT5 Panel
+        mt5_panel = ctk.CTkFrame(scroll_config, corner_radius=15, fg_color=("gray90", "gray13"))
+        mt5_panel.grid(row=2, column=0, sticky="ew", padx=10, pady=(0, 20))
+        mt5_panel.grid_columnconfigure(1, weight=1)
+        
+        ctk.CTkLabel(mt5_panel, text="� MetaTrader 5 Einstellungen", font=ctk.CTkFont(size=16, weight="bold"), text_color="#E74C3C").grid(row=0, column=0, columnspan=2, sticky="w", padx=20, pady=(15, 10))
+        
+        ctk.CTkButton(mt5_panel, text="MT5 Manuell Neuverbinden", command=self.test_mt5_connection, fg_color="transparent", border_width=1).grid(row=1, column=0, sticky="w", padx=20, pady=10)
+        
+        ctk.CTkLabel(mt5_panel, text="Aktive Währungspaare (Komma-getrennt):").grid(row=2, column=0, sticky="w", padx=20, pady=10)
+        self.pairs_entry = ctk.CTkEntry(mt5_panel, width=300)
+        self.pairs_entry.insert(0, "EURUSD, GBPUSD, USDJPY, USDCHF, AUDUSD, USDCAD")
+        self.pairs_entry.grid(row=2, column=1, sticky="w", padx=20, pady=10)
 
         # Save Action
-        ctk.CTkButton(tab, text="💾 Konfiguration Speichern", command=self.save_config, font=ctk.CTkFont(weight="bold", size=14),
-                      height=40, fg_color="#2E86AB", hover_color="#21618C").grid(row=2, column=0, sticky="e", padx=20, pady=20)
+        save_btn = ctk.CTkButton(scroll_config, text="💾 Alle Systemeinstellungen Speichern", command=self.save_config, 
+                      font=ctk.CTkFont(weight="bold", size=14), height=45, fg_color="#2E86AB", hover_color="#21618C")
+        save_btn.grid(row=3, column=0, sticky="e", padx=10, pady=20)
 
+    def test_mt5_connection(self):
+        if mt5.initialize():
+            messagebox.showinfo("Erfolg", "MetaTrader 5 erfolgreich verbunden!")
+            self.write_terminal(">> MT5 Connection re-initialized successfully.\n")
+        else:
+            messagebox.showerror("Fehler", "MT5 Terminal konnte nicht gefunden oder verbunden werden.")
+
+    def save_config(self):
+        try:
+            # Gather Configuration Data
+            # System & KI
+            ollama_url = self.url_entry.get().strip()
+            llm_model = self.model_combo.get()
+            auto_trade_interval = int(self.interval_slider.get())
+            
+            # Risk Management
+            is_auto_trading = self.trading_active_switch.get() == 1
+            max_risk = float(self.risk_trade_entry.get())
+            max_daily_loss = float(self.risk_daily_entry.get())
+            max_pos = int(self.max_pos_entry.get())
+            
+            # Pairs
+            raw_pairs = self.pairs_entry.get().strip()
+            if raw_pairs:
+                split_pairs = [p.strip() for p in raw_pairs.upper().split(',') if p.strip()]
+                # Update dashboard_symbols (Format: "EUR/USD", "EURUSD")
+                self.dashboard_symbols = [(f"{p[:3]}/{p[3:]}" if len(p) == 6 else p, p) for p in split_pairs]
+                
+                # Rebuild LiveDataRows in Dashboard
+                for widget in self.scroll_list.winfo_children():
+                    if isinstance(widget, LiveDataRow):
+                        widget.destroy()
+                
+                self.live_data_rows.clear()
+                for display_name, symbol in self.dashboard_symbols:
+                    row = LiveDataRow(self.scroll_list, display_name, "---", "0.00%", "---", "HOLD")
+                    row.pack(fill="x", pady=2)
+                    self.live_data_rows.append((symbol, row))
+
+            # Simulate backend assignment for UI demonstration purposes
+            # In a full integration, these would be passed to FinGPT core or a JSON config
+            
+            status_msg = f">> [CONFIG SAVED] Model: {llm_model} | Auto: {is_auto_trading} | Interval: {auto_trade_interval}s\n"
+            status_msg += f">> [RISK LIMITS] Risk/Trade: {max_risk}% | Daily Loss: {max_daily_loss}% | Max Pos: {max_pos}\n"
+            status_msg += f">> [PAIRS] Monitoring {len(self.dashboard_symbols)} pairs.\n"
+            self.write_terminal(status_msg)
+            
+            messagebox.showinfo("Erfolg", "Konfiguration wurde erfolgreich gespeichert und angewendet!")
+            
+            # Force immediate update of new pairs if live
+            if self.is_live_running:
+                self.update_dashboard_data()
+                
+        except ValueError as e:
+            messagebox.showerror("Eingabefehler", f"Bitte überprüfen Sie Ihre numerischen Eingaben.\nDetails: {str(e)}")
+            
     # --- Funktionalitäten ---
 
     def toggle_live_data(self):
-        if not self.is_live_running:
-            self.is_live_running = True
-            self.live_btn.configure(text="■ Live Stoppen", fg_color="#E74C3C", hover_color="#C0392B")
-            self.status_dot.configure(text_color="#5EBA7D")
-            self.write_terminal(">> Live-Stream zu Marktdaten aktiviert.\n")
-            self.start_live_stream_thread()
-        else:
+        if not hasattr(self, 'is_live_running'):
+            self.is_live_running = False
+            
+        if self.is_live_running:
             self.is_live_running = False
             self.live_btn.configure(text="▶ Live Starten", fg_color="#5EBA7D", hover_color="#4CAF50")
-            self.status_dot.configure(text_color="gray")
+            self.status_dot.configure(text_color="#E74C3C") # Static Red
             self.write_terminal(">> Live-Stream angehalten.\n")
+        else:
+            if not mt5.initialize():
+                messagebox.showerror("MT5 Fehler", "Konnte MetaTrader 5 nicht für Live-Daten initialisieren.")
+                return
+                
+            self.is_live_running = True
+            self.live_btn.configure(text="⏹ Live Stoppen", fg_color="#E74C3C", hover_color="#C0392B")
+            self.animate_status_dot() # Start pulsing
+            self.write_terminal(">> MT5 Live-Stream gestartet. Empfange Ticks...\n")
+            self.start_live_stream_thread()
+
+    def animate_status_dot(self):
+        if not self.is_live_running:
+            self.status_dot.configure(text_color="#E74C3C")
+            return
+            
+        current_color = self.status_dot.cget("text_color")
+        # Pulse between bright green and a darker green
+        next_color = "#5EBA7D" if current_color != "#5EBA7D" else "#1E8449"
+        self.status_dot.configure(text_color=next_color)
+        
+        self.after(500, self.animate_status_dot)
 
     def start_live_stream_thread(self):
         def update_loop():
             while self.is_live_running:
-                # Randomize rows safely in main thread
-                self.after(0, self.randomize_table_data)
+                self.after(0, self.update_dashboard_data)
                 now = datetime.now().strftime("%H:%M:%S")
                 self.after(0, lambda: self.status_label.configure(text=f"Live-Stream aktiv | Letzte Aktualisierung: {now}"))
-                time.sleep(1.5)
+                time.sleep(1.0) # Jede Sekunde aktualisieren
         threading.Thread(target=update_loop, daemon=True).start()
 
-    def randomize_table_data(self):
-        if self.live_data_rows:
-            row = random.choice(self.live_data_rows)
-            current_price = float(row.price_lbl.cget("text").replace(',', ''))
-            movement = random.uniform(-0.005, 0.005)
-            new_price = current_price * (1 + movement)
+    def update_dashboard_data(self):
+        if not mt5.initialize():
+            return
             
-            sign = "+" if movement > 0 else ""
-            change_str = f"{sign}{(movement*100):.2f}%"
-            row.update_data(f"{new_price:.4f}", change_str)
+        # Aktualisiere Account Metriken
+        acc_info = mt5.account_info()
+        if acc_info is not None:
+            self.balance_card.update_value(f"€{acc_info.balance:,.2f}")
+            self.pnl_card.update_value(f"€{acc_info.profit:,.2f}")
+            self.winrate_card.update_value(f"{acc_info.margin_level:.2f}%" if acc_info.margin_level > 0 else "---%")
+            self.risk_card.update_value(f"€{acc_info.margin_free:,.2f}")
+            
+            # Positionen prüfen
+            positions = mt5.positions_total()
+            self.positions_card.update_value(str(positions))
+            
+            history_deals = mt5.history_deals_total(datetime.now().replace(hour=0, minute=0, second=0), datetime.now())
+            self.trades_card.update_value(str(history_deals) if history_deals is not None else "0")
+
+        # Aktualisiere Symbole
+        for symbol, row in self.live_data_rows:
+            tick = mt5.symbol_info_tick(symbol)
+            if tick is not None:
+                # Berechne Änderung (simuliert über Tageskerze oder einfach bid/ask)
+                # Da uns die tägliche Änderung fehlt ohne rates, zeigen wir Bid/Ask Spread oder letzte Bewegungen.
+                # Für ein echtes "% Change" müsste man daily open laden
+                rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_D1, 0, 1)
+                if rates is not None and len(rates) > 0:
+                    open_price = rates[0]['open']
+                    change_pct = ((tick.bid - open_price) / open_price) * 100
+                    sign = "+" if change_pct > 0 else ""
+                    change_str = f"{sign}{change_pct:.2f}%"
+                else:
+                    change_str = "0.00%"
+                    
+                row.update_data(f"{tick.bid:.5f}", change_str)
 
     def start_simulated_data(self):
         def bg_simulator():
@@ -357,10 +511,17 @@ class ModernFinGPTGUI(ctk.CTk):
         self.charts_loading_lbl = ctk.CTkLabel(self.charts_container, text="Lade Livedaten für Major Pairs... (MT5)", font=ctk.CTkFont(size=14))
         self.charts_loading_lbl.grid(row=0, column=0, columnspan=2, pady=50)
 
-        pairs = ["EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD", "USDCAD"]
+        pairs = [
+            ("EUR/USD", "EURUSD"),
+            ("GBP/USD", "GBPUSD"),
+            ("USD/JPY", "USDJPY"),
+            ("USD/CHF", "USDCHF"),
+            ("AUD/USD", "AUDUSD"),
+            ("USD/CAD", "USDCAD")
+        ]
 
         # Use a style compatible with dark mode
-        mc = mpf.make_marketcolors(up='#5EBA7D', down='#E74C3C', edge='i', wick='i', vcdopctr=False)
+        mc = mpf.make_marketcolors(up='#5EBA7D', down='#E74C3C', edge='i', wick='i')
         s = mpf.make_mpf_style(marketcolors=mc, facecolor='#1E1E1E', edgecolor='gray', 
                                figcolor='#1E1E1E', gridcolor='#333333', gridstyle=':')
 
@@ -370,10 +531,20 @@ class ModernFinGPTGUI(ctk.CTk):
                 if not mt5.initialize():
                     raise Exception("MetaTrader 5 konnte nicht initialisiert werden.")
                 
+                # Bestimme Timeframe
+                tf_str = self.chart_timeframe_var.get()
+                if "M1 " in tf_str: tf = mt5.TIMEFRAME_M1
+                elif "M5" in tf_str: tf = mt5.TIMEFRAME_M5
+                elif "M15" in tf_str: tf = mt5.TIMEFRAME_M15
+                elif "M30" in tf_str: tf = mt5.TIMEFRAME_M30
+                elif "H1" in tf_str: tf = mt5.TIMEFRAME_H1
+                elif "H4" in tf_str: tf = mt5.TIMEFRAME_H4
+                else: tf = mt5.TIMEFRAME_D1
+                
                 figures = []
-                for symbol in pairs:
-                    # Lade 30 Tage (D1) Daten = TIMEFRAME_D1
-                    rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_D1, 0, 30)
+                for title, symbol in pairs:
+                    # Lade 60 Kerzen für besseren Chart-Überblick
+                    rates = mt5.copy_rates_from_pos(symbol, tf, 0, 60)
                     if rates is None or len(rates) == 0:
                         self.write_terminal(f">> WARNUNG: Keine Daten von MT5 für {symbol} empfangen.\n")
                         continue
@@ -387,8 +558,7 @@ class ModernFinGPTGUI(ctk.CTk):
                     
                     fig = Figure(figsize=(5, 3.5), facecolor='#1E1E1E')
                     ax = fig.add_subplot(111)
-                    title = f"{symbol[:3]}/{symbol[3:]}"
-                    ax.set_title(title, color='white')
+                    ax.set_title(title + f" ({tf_str.split(' ')[0]})", color='white')
                     ax.tick_params(colors='white')
                     
                     # Plotly ist hübsch, aber mplfinance im Plot-Modus ist nativ einbettbar
