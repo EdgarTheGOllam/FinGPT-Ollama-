@@ -94,7 +94,7 @@
 		<title>Belgian NBB Business Climate</title>
 		<country>EUR</country>
 		<date><![CDATA[02-23-2026]]></date>
-		<time><![CDATA[2:00pm]]></time>
+		<time><![CDATA[1:26pm]]></time>
 		<impact><![CDATA[Low]]></impact>
 		<forecast><![CDATA[-7.5]]></forecast>
 		<previous><![CDATA[-8.8]]></previous>
@@ -139,16 +139,6 @@
 		<forecast><![CDATA[3.50%]]></forecast>
 		<previous><![CDATA[3.50%]]></previous>
 		<url><![CDATA[https://www.forexfactory.com/calendar/898-ch-5-y-loan-prime-rate]]></url>
-	</event>
-	<event>
-		<title>Foreign Direct Investment ytd/y</title>
-		<country>CNY</country>
-		<date><![CDATA[02-24-2026]]></date>
-		<time><![CDATA[7:02am]]></time>
-		<impact><![CDATA[Low]]></impact>
-		<forecast />
-		<previous><![CDATA[-9.5%]]></previous>
-		<url><![CDATA[https://www.forexfactory.com/calendar/457-ch-foreign-direct-investment-ytdy]]></url>
 	</event>
 	<event>
 		<title>CBI Realized Sales</title>
@@ -409,6 +399,16 @@
 		<forecast><![CDATA[-22.9]]></forecast>
 		<previous><![CDATA[-24.1]]></previous>
 		<url><![CDATA[https://www.forexfactory.com/calendar/335-ge-gfk-consumer-climate]]></url>
+	</event>
+	<event>
+		<title>Foreign Direct Investment ytd/y</title>
+		<country>CNY</country>
+		<date><![CDATA[02-25-2026]]></date>
+		<time><![CDATA[7:02am]]></time>
+		<impact><![CDATA[Low]]></impact>
+		<forecast />
+		<previous><![CDATA[-9.5%]]></previous>
+		<url><![CDATA[https://www.forexfactory.com/calendar/457-ch-foreign-direct-investment-ytdy]]></url>
 	</event>
 	<event>
 		<title>RBA Gov Bullock Speaks</title>

@@ -1,6 +1,6 @@
 {
   "ollama_url": "http://localhost:11434",
-  "llm_model": "qwen3-coder:480b-cloud",
+  "llm_model": "Verbindung fehlgeschlagen",
   "interval": 5,
   "ai_temperature": 0.3,
   "prompt_lang": "Deutsch",
@@ -21,7 +21,7 @@
   "rl_reward": "Profit + Sharpe Ratio",
   "rl_checkpoint": "",
   "rl_live_enabled": true,
-  "pairs": "BTCUSD",
+  "pairs": "EURUSD, GBPUSD, USDJPY, USDCHF, AUDUSD, USDCAD",
   "account_type": "Live",
   "magic_number": "42069",
   "log_level": "INFO",

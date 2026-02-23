@@ -7,6 +7,9 @@
 # HTTP-Anfragen für Ollama-Verbindung
 requests>=2.31.0
 
+# GUI-Erweiterung
+customtkinter>=5.2.2
+
 # Datenverarbeitung (standardmäßig in Python enthalten)
 # json - JSON-Verarbeitung (keine Installation nötig)
 # pathlib - Pfadverarbeitung (keine Installation nötig)
