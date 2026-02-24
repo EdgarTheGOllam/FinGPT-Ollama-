@@ -24,7 +24,7 @@ try:
     print("✅ TensorFlow verfügbar")
 except ImportError:
     TF_AVAILABLE = False
-    print("❌ TensorFlow nicht installiert - pip install tensorflow")
+    print("[X] TensorFlow nicht installiert - pip install tensorflow")
 
 class TradingEnvironment:
     """

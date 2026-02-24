@@ -23,6 +23,11 @@ import signal
 import queue
 warnings.filterwarnings("ignore")
 
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout.reconfigure(encoding='utf-8')
+if sys.stderr.encoding != 'utf-8':
+    sys.stderr.reconfigure(encoding='utf-8')
+
 # MetaTrader 5 Import
 try:
     import MetaTrader5 as mt5
@@ -32,24 +37,20 @@ except ImportError:
     MT5_AVAILABLE = False
     print("MetaTrader5 nicht installiert")
 
-# Risk Manager Import
+# Import core modules
 from trading.risk_manager import RiskManager
-
-# In Ihrer FinGPT.py Datei hinzufügen:
 from trading.advanced_indicators import AdvancedIndicators, IndicatorIntegration
+from trading.rl_trading_agent import RLTradingManager
+from core.mt5_broker import MT5Broker
+from core.ai_analyzer import AIAnalyzer
+from core.market_analyzer import MarketAnalyzer
+from gui.cli_menu import CLIMenu
 
 class MT5FinGPT:
     def __init__(self):
         """Initialisiert das FinGPT System mit korrekter Reihenfolge"""
     
         # GRUNDLEGENDE EINSTELLUNGEN ZUERST
-        self.ollama_url = "http://localhost:11434"
-        self.available_models = []
-        self.selected_model = None
-        self.mt5_connected = False
-        self._reconnect_in_progress = False   # set by reconnect_mt5()
-        self.trading_enabled = False
-
         self.default_lot_size = 0.5
         self.max_risk_percent = 2.0
         self.auto_trading = False
@@ -59,37 +60,23 @@ class MT5FinGPT:
         # LOGGING SETUP - MUSS ZUERST KOMMEN!
         self.setup_logging()
         self.log("INFO", "FinGPT System wird initialisiert...")
-    
-        # RISK MANAGER - NACH LOGGING!
-        try:
-            from trading.risk_manager import RiskManager
-            self.risk_manager = RiskManager(logger=self.logger)
-            self.log("INFO", "Risk Manager erfolgreich initialisiert", "RISK")
-        except ImportError as e:
-            self.log("ERROR", f"Risk Manager Import Fehler: {e}", "RISK")
-            self.risk_manager = None
-        except Exception as e:
-            self.log("ERROR", f"Risk Manager Initialisierung Fehler: {e}", "RISK")
-            self.risk_manager = None
-    
-        # ERWEITERTE INDIKATOREN - NACH LOGGING!
-        try:
-            from trading.advanced_indicators import AdvancedIndicators, IndicatorIntegration
-            self.advanced_indicators = AdvancedIndicators(logger=self.logger)
-            self.integration = IndicatorIntegration(self)
-            self.log("INFO", "✅ Erweiterte Indikatoren erfolgreich initialisiert", "INDICATORS")
-            self.has_extended_indicators = True
-        except ImportError as e:
-            self.log("WARNING", f"Erweiterte Indikatoren nicht verfügbar: {e}", "INDICATORS")
-            self.advanced_indicators = None
-            self.integration = None
-            self.has_extended_indicators = False
-        except Exception as e:
-            self.log("ERROR", f"Erweiterte Indikatoren Fehler: {e}", "INDICATORS")
-            self.advanced_indicators = None
-            self.integration = None
-            self.has_extended_indicators = False
-    
+
+        # INITIALIZE CORE MODULES
+        self.log("DEBUG", "Initialisiere MT5Broker, AIAnalyzer, MarketAnalyzer...", "SYSTEM")
+        self.broker = MT5Broker(logger=self.logger)
+        self.ai = AIAnalyzer(logger=self.logger)
+        self.market = MarketAnalyzer(broker=self.broker, logger=self.logger)
+        self.cli = CLIMenu(main_app=self, logger=self.logger)
+        
+        # Backward compatibility for existing code that checks these flags
+        self.mt5_connected = False # Managed by broker mostly now
+        self.selected_model = None # Managed by AI Analyzer
+
+        # TRADING COMPANION INTEGRATION
+        self.companion_process = None
+        self.companion_enabled = False
+        self.auto_start_companion = False
+
         # TIMEFRAME NAMES
         self.timeframe_names = {
             mt5.TIMEFRAME_M1: "M1",
@@ -99,24 +86,39 @@ class MT5FinGPT:
             mt5.TIMEFRAME_H1: "H1",
             mt5.TIMEFRAME_H4: "H4",
             mt5.TIMEFRAME_D1: "D1"
-        }
+        } if MT5_AVAILABLE else {}
+
+        # RISK MANAGER - NACH LOGGING!
+        try:
+            self.risk_manager = RiskManager(logger=self.logger)
+            self.log("INFO", "Risk Manager erfolgreich initialisiert", "RISK")
+        except Exception as e:
+            self.log("ERROR", f"Risk Manager Initialisierung Fehler: {e}", "RISK")
+            self.risk_manager = None
     
-        # TRADING COMPANION INTEGRATION
-        self.companion_process = None
-        self.companion_enabled = False
-        self.auto_start_companion = False
+        # ERWEITERTE INDIKATOREN - NACH LOGGING!
+        try:
+            self.advanced_indicators = AdvancedIndicators(logger=self.logger)
+            self.integration = IndicatorIntegration(self)
+            self.log("INFO", "✅ Erweiterte Indikatoren erfolgreich initialisiert", "INDICATORS")
+            self.has_extended_indicators = True
+        except Exception as e:
+            self.log("WARNING", f"Erweiterte Indikatoren nicht verfügbar: {e}", "INDICATORS")
+            self.advanced_indicators = None
+            self.integration = None
+            self.has_extended_indicators = False
     
-        # RSI SETTINGS
-        self.rsi_period = 14
+        # RSI SETTINGS (mapped to market analyzer context)
+        self.rsi_period = self.market.rsi_period
         self.rsi_timeframe = mt5.TIMEFRAME_M15 if MT5_AVAILABLE else None
-        self.rsi_overbought = 70
-        self.rsi_oversold = 30
+        self.rsi_overbought = self.market.rsi_overbought
+        self.rsi_oversold = self.market.rsi_oversold
     
         # SUPPORT/RESISTANCE SETTINGS
-        self.sr_lookback_period = 50
+        self.sr_lookback_period = self.market.sr_lookback_period
         self.sr_min_touches = 2
-        self.sr_tolerance = 0.0002
-        self.sr_strength_threshold = 3
+        self.sr_tolerance = self.market.sr_tolerance
+        self.sr_strength_threshold = self.market.sr_strength_threshold
     
         # MACD SETTINGS
         self.macd_fast_period = 12
@@ -128,8 +130,8 @@ class MT5FinGPT:
         self.mtf_enabled = True
         self.trend_timeframe = mt5.TIMEFRAME_H1 if MT5_AVAILABLE else None
         self.entry_timeframe = mt5.TIMEFRAME_M15 if MT5_AVAILABLE else None
-        self.trend_ema_period = 50
-        self.trend_strength_threshold = 0.0010  # 10 Pips Mindest-Trendbewegung
+        self.trend_ema_period = self.market.trend_ema_period
+        self.trend_strength_threshold = self.market.trend_strength_threshold
         self.require_trend_confirmation = True
     
         # PARTIAL CLOSE SETTINGS
@@ -150,77 +152,16 @@ class MT5FinGPT:
         self.trailing_stop_distance_pips = 20
         self.trailing_stop_step_pips = 5
         self.trailing_stop_start_profit_pips = 15
-    
-        # CURRENCY PAIRS CONFIGURATION
-        self.currency_pairs = {
-            "major": {
-                "name": "Majors (Hauptwährungspaare)",
-                "pairs": ["EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD", "USDCAD", "NZDUSD"],
-                "description": "Die 7 wichtigsten Forex-Paare mit höchster Liquidität"
-            },
-            "eur_cross": {
-                "name": "EUR Cross-Paare", 
-                "pairs": ["EURUSD", "EURGBP", "EURJPY", "EURCHF", "EURAUD", "EURCAD", "EURNZD"],
-                "description": "Euro-basierte Währungspaare"
-            },
-            "gbp_cross": {
-                "name": "GBP Cross-Paare",
-                "pairs": ["GBPUSD", "EURGBP", "GBPJPY", "GBPCHF", "GBPAUD", "GBPCAD", "GBPNZD"],
-                "description": "Pfund-basierte Währungspaare"
-            },
-            "jpy_cross": {
-                "name": "JPY Cross-Paare",
-                "pairs": ["USDJPY", "EURJPY", "GBPJPY", "AUDJPY", "CADJPY", "CHFJPY", "NZDJPY"],
-                "description": "Yen-basierte Währungspaare"
-            },
-            "commodity": {
-                "name": "Rohstoff-Währungen",
-                "pairs": ["AUDUSD", "NZDUSD", "USDCAD", "AUDCAD", "AUDNZD", "CADJPY", "NZDCAD"],
-                "description": "Währungen von rohstoffexportierenden Ländern"
-            },
-            "safe_haven": {
-                "name": "Safe Haven",
-                "pairs": ["USDCHF", "USDJPY", "CHFJPY", "XAUUSD", "XAGUSD"],
-                "description": "Sichere Häfen in unsicheren Zeiten"
-            },
-            "volatile": {
-                "name": "Volatile Paare",
-                "pairs": ["GBPJPY", "GBPAUD", "EURJPY", "AUDJPY", "GBPNZD", "EURNZD"],
-                "description": "Hochvolatile Paare für erfahrene Trader"
-            },
-            "conservative": {
-                "name": "Konservative Auswahl",
-                "pairs": ["EURUSD", "GBPUSD", "USDCHF"],
-                "description": "Stabile, gut vorhersagbare Paare"
-            }
-        }
 
-        # BENUTZERDEFINIERTE LISTEN
-        self.custom_pairs = {
-            "user_favorites": {
-                "name": "Meine Favoriten",
-                "pairs": [],
-                "description": "Ihre persönlichen Lieblings-Paare"
-            },
-            "high_performance": {
-                "name": "High Performance",
-                "pairs": [],
-                "description": "Paare mit bester Performance in letzter Zeit"
-            }
-        }
+        self.trading_enabled = False
 
         # RL INTEGRATION - NACH LOGGING!
         try:
-            from trading.rl_trading_agent import RLTradingManager
             self.rl_manager = RLTradingManager(self)
             self.rl_enabled = True
             self.log("INFO", "✅ RL Manager erfolgreich initialisiert", "RL")
-        except ImportError as e:
-            self.log("WARNING", f"RL Manager nicht verfügbar: {e}", "RL")
-            self.rl_manager = None
-            self.rl_enabled = False
         except Exception as e:
-            self.log("ERROR", f"RL Manager Fehler: {e}", "RL")
+            self.log("WARNING", f"RL Manager nicht verfügbar: {e}", "RL")
             self.rl_manager = None
             self.rl_enabled = False
 
@@ -229,7 +170,7 @@ class MT5FinGPT:
         self.rl_recommendation_weight = 0.3  # Gewichtung der RL-Empfehlung (30%)
 
         # ABSCHLUSS UND STATUS
-        self.log("INFO", "FinGPT System mit Multi-Timeframe initialisiert")
+        self.log("INFO", "FinGPT System mit Core Modulen initialisiert")
     
         # STATUS CHECKS
         if self.risk_manager:
@@ -692,8 +633,10 @@ class MT5FinGPT:
                 action = input("Aktion (BUY/SELL): ").upper()
                 if symbol and action in ["BUY", "SELL"]:
                     self.log("INFO", f"Trade wird ausgeführt: {action} {symbol}", "TRADE")
-                    result = self.execute_trade(symbol, action)
-                    self.log_trade(symbol, action, result)
+                    # Placeholder for lot_size, as it's not requested in the input
+                    lot_size = self.default_lot_size 
+                    result = self.execute_trade(symbol, action, lot_size)
+                    self.log_trade(symbol, action, result, lot_size=lot_size)
                     print(result)
             input("\nDrücken Sie Enter zum Fortfahren...")
             return True
@@ -3317,112 +3260,7 @@ class MT5FinGPT:
         except Exception as e:
             return "NEUTRAL", f"MACD Analyse Fehler: {e}"
 
-    def get_higher_timeframe_trend(self, symbol):
-        """Analysiert den übergeordneten Trend auf höherem Timeframe"""
-        if not self.mt5_connected:
-            return None
-    
-        try:
-            # Hole Daten vom höheren Timeframe (H1)
-            required_bars = self.trend_ema_period + 10
-            rates = mt5.copy_rates_from_pos(symbol, self.trend_timeframe, 0, required_bars)
-        
-            if rates is None or len(rates) < required_bars:
-                return None
-        
-            # Extrahiere Schlusskurse
-            closes = np.array([rate['close'] for rate in rates])
-            highs = np.array([rate['high'] for rate in rates])
-            lows = np.array([rate['low'] for rate in rates])
-        
-            # Berechne EMA für Trendbestimmung
-            def calculate_ema(data, period):
-                alpha = 2 / (period + 1)
-                ema = np.zeros_like(data)
-                ema[0] = data[0]
-            
-                for i in range(1, len(data)):
-                    ema[i] = alpha * data[i] + (1 - alpha) * ema[i-1]
-            
-                return ema
-        
-            # EMA berechnen
-            ema = calculate_ema(closes, self.trend_ema_period)
-        
-            # Aktuelle Werte
-            current_price = closes[-1]
-            current_ema = ema[-1]
-            prev_ema = ema[-2] if len(ema) > 1 else current_ema
-            ema_slope = current_ema - prev_ema
-        
-            # EMA-Trend bestimmen
-            price_above_ema = current_price > current_ema
-            ema_rising = current_ema > prev_ema
-        
-            # Trendstärke berechnen (Abstand zwischen Preis und EMA)
-            trend_strength = abs(current_price - current_ema)
-        
-            # Zusätzliche Trend-Bestätigung durch Swing-Analyse
-            recent_bars = 10
-            recent_highs = highs[-recent_bars:]
-            recent_lows = lows[-recent_bars:]
-        
-            # Higher Highs / Lower Lows Pattern
-            higher_highs = len([i for i in range(1, len(recent_highs)) if recent_highs[i] > recent_highs[i-1]]) >= 6
-            lower_lows = len([i for i in range(1, len(recent_lows)) if recent_lows[i] < recent_lows[i-1]]) >= 6
-        
-            # Trend-Richtung bestimmen
-            if price_above_ema and ema_rising:
-                if trend_strength >= self.trend_strength_threshold:
-                    direction = "BULLISH"
-                else:
-                    direction = "WEAK_BULLISH"
-            elif not price_above_ema and not ema_rising:
-                if trend_strength >= self.trend_strength_threshold:
-                    direction = "BEARISH"
-                else:
-                    direction = "WEAK_BEARISH"
-            else:
-                direction = "NEUTRAL"
-        
-            # Zusätzliche Bestätigung durch Swing-Pattern
-            if direction == "BULLISH" and not higher_highs:
-                direction = "WEAK_BULLISH"
-            elif direction == "BEARISH" and not lower_lows:
-                direction = "WEAK_BEARISH"
-        
-            # Trend-Qualität bewerten
-            trend_quality = "STRONG" if trend_strength >= self.trend_strength_threshold * 2 else \
-                           "MODERATE" if trend_strength >= self.trend_strength_threshold else "WEAK"
-        
-            # Momentum berechnen (letzte 5 Bars)
-            momentum_bars = 5
-            if len(closes) >= momentum_bars:
-                momentum = closes[-1] - closes[-momentum_bars]
-                momentum_direction = "UP" if momentum > 0 else "DOWN" if momentum < 0 else "FLAT"
-            else:
-                momentum = 0
-                momentum_direction = "FLAT"
-        
-            return {
-                'direction': direction,
-                'strength': trend_strength,
-                'quality': trend_quality,
-                'current_price': current_price,
-                'ema_level': current_ema,
-                'ema_slope': ema_slope,
-                'price_above_ema': price_above_ema,
-                'ema_rising': ema_rising,
-                'momentum': momentum,
-                'momentum_direction': momentum_direction,
-                'higher_highs': higher_highs,
-                'lower_lows': lower_lows,
-                'timeframe': self.trend_timeframe
-            }
-        
-        except Exception as e:
-            print(f"Trend-Analyse Fehler: {e}")
-            return None
+
 
     def update_trailing_stops(self):
         """Aktualisiert alle Trailing Stops für offene Positionen"""
@@ -3952,11 +3790,11 @@ class MT5FinGPT:
             elif choice == "4":
                 self.show_daily_stats()
                 
-            elif choice == "5":
-                self.reset_risk_settings()
-                
             elif choice == "6":
                 break
+                
+            elif choice == "5":
+                self.reset_risk_settings()
                 
             else:
                 print("❌ Ungültige Auswahl")
@@ -4148,118 +3986,10 @@ class MT5FinGPT:
         
         print(f"\r✅ {text} - Abgeschlossen!    ")
 
-    def calculate_support_resistance(self, symbol, timeframe=None, lookback=None):
-        """Erkennt Support und Resistance Level"""
-        if not self.mt5_connected:
-            return None
-        
-        try:
-            if timeframe is None:
-                timeframe = self.rsi_timeframe
-            if lookback is None:
-                lookback = self.sr_lookback_period
-            
-            # Hole historische Daten
-            rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, lookback)
-            
-            if rates is None or len(rates) < 20:
-                return None
-            
-            highs = np.array([rate['high'] for rate in rates])
-            lows = np.array([rate['low'] for rate in rates])
-            closes = np.array([rate['close'] for rate in rates])
-            
-            # Finde lokale Maxima (Resistance) und Minima (Support)
-            resistance_levels = []
-            support_levels = []
-            
-            # Suche nach Pivot Points
-            for i in range(2, len(highs) - 2):
-                # Resistance: Lokales Maximum
-                if (highs[i] > highs[i-1] and highs[i] > highs[i-2] and 
-                    highs[i] > highs[i+1] and highs[i] > highs[i+2]):
-                    resistance_levels.append(highs[i])
-                
-                # Support: Lokales Minimum
-                if (lows[i] < lows[i-1] and lows[i] < lows[i-2] and 
-                    lows[i] < lows[i+1] and lows[i] < lows[i+2]):
-                    support_levels.append(lows[i])
-            
-            # Gruppiere ähnliche Levels
-            def group_levels(levels, tolerance):
-                if not levels:
-                    return []
-                
-                grouped = []
-                levels_sorted = sorted(levels)
-                
-                current_group = [levels_sorted[0]]
-                
-                for level in levels_sorted[1:]:
-                    if abs(level - current_group[-1]) <= tolerance:
-                        current_group.append(level)
-                    else:
-                        # Berechne Durchschnitt der Gruppe
-                        avg_level = sum(current_group) / len(current_group)
-                        strength = len(current_group)
-                        grouped.append((avg_level, strength))
-                        current_group = [level]
-                
-                # Letzte Gruppe hinzufügen
-                if current_group:
-                    avg_level = sum(current_group) / len(current_group)
-                    strength = len(current_group)
-                    grouped.append((avg_level, strength))
-                
-                return grouped
-            
-            # Gruppiere Levels
-            tolerance = self.sr_tolerance
-            grouped_resistance = group_levels(resistance_levels, tolerance)
-            grouped_support = group_levels(support_levels, tolerance)
-            
-            # Filtere nach Mindest-Stärke
-            strong_resistance = [(level, strength) for level, strength in grouped_resistance 
-                               if strength >= self.sr_strength_threshold]
-            strong_support = [(level, strength) for level, strength in grouped_support 
-                            if strength >= self.sr_strength_threshold]
-            
-            # Sortiere nach Stärke
-            strong_resistance.sort(key=lambda x: x[1], reverse=True)
-            strong_support.sort(key=lambda x: x[1], reverse=True)
-            
-            current_price = closes[-1]
-            
-            # Finde nächste Support/Resistance Levels
-            nearest_resistance = None
-            nearest_support = None
-            
-            for level, strength in strong_resistance:
-                if level > current_price:
-                    if nearest_resistance is None or level < nearest_resistance[0]:
-                        nearest_resistance = (level, strength)
-            
-            for level, strength in strong_support:
-                if level < current_price:
-                    if nearest_support is None or level > nearest_support[0]:
-                        nearest_support = (level, strength)
-            
-            return {
-                'current_price': current_price,
-                'nearest_resistance': nearest_resistance,
-                'nearest_support': nearest_support,
-                'all_resistance': strong_resistance[:5],  # Top 5
-                'all_support': strong_support[:5]  # Top 5
-            }
-            
-        except Exception as e:
-            print(f"S/R Berechnung Fehler: {e}")
-            return None
-    
     def get_sr_signal(self, sr_data, current_price):
-        """Interpretiert Support/Resistance für Trading-Signal"""
-        if not sr_data:
-            return "NEUTRAL", "S/R nicht verfügbar"
+        """Interpretiert S/R-Werte für Trading-Signal"""
+        if not sr_data or not sr_data['nearest_support'] and not sr_data['nearest_resistance']:
+            return "NEUTRAL", "Keine signifikanten S/R Levels gefunden"
         
         try:
             signals = []
@@ -4403,80 +4133,24 @@ class MT5FinGPT:
             return None
 
     # ==========================================
-    # 10. MT5 CONNECTION & BASIC INDICATORS
+    # KERN-FUNKTIONEN (Delegated to MT5Broker)
     # ==========================================
+
     def connect_mt5(self):
-        if not MT5_AVAILABLE:
-            self.log("ERROR", "MT5 nicht verfügbar", "MT5")
-            return False
-
-        try:
-            self.log("INFO", "Verbinde zu MT5…", "MT5")
-            mt5.shutdown()          # clear any stale state first
-            if not mt5.initialize():
-                err = mt5.last_error()
-                self.log("ERROR", f"MT5 initialize() fehlgeschlagen: {err}", "MT5")
-                return False
-
-            account_info = mt5.account_info()
-            if account_info is None:
-                self.log("ERROR", "Keine Account-Info nach initialize()", "MT5")
-                return False
-
-            self.log("INFO", f"MT5 verbunden: {account_info.company} | Balance: {account_info.balance:.2f}", "MT5")
-            self.mt5_connected = True
-            self._reconnect_in_progress = False
-            return True
-
-        except Exception as e:
-            self.log("ERROR", f"MT5 connect Fehler: {e}", "MT5")
-            return False
+        """Stellt eine Verbindung zu MetaTrader 5 her"""
+        return self.broker.connect_mt5()
 
     def disconnect_mt5(self):
-        if MT5_AVAILABLE and self.mt5_connected:
-            mt5.shutdown()
-            self.log("INFO", "MT5 getrennt", "MT5")
-            self.mt5_connected = False
+        """Trennt die Verbindung zu MetaTrader 5"""
+        self.broker.disconnect_mt5()
+
+    def reconnect_mt5(self, max_retries: int = 10, base_delay: float = 5.0):
+        """Versucht die MT5 Verbindung wiederherzustellen"""
+        return self.broker.reconnect_mt5(max_retries, base_delay)
 
     def is_mt5_alive(self) -> bool:
-        """Quick health probe — returns True if MT5 is connected and responding."""
-        if not MT5_AVAILABLE or not self.mt5_connected:
-            return False
-        try:
-            return mt5.account_info() is not None
-        except Exception:
-            return False
-
-    def reconnect_mt5(self, max_retries: int = 10, base_delay: float = 5.0) -> bool:
-        """Reconnect loop with exponential back-off.
-
-        Retries up to *max_retries* times. Delay doubles each attempt, capped at 300 s.
-        Returns True as soon as a connection succeeds, False if all retries are exhausted.
-        """
-        if getattr(self, '_reconnect_in_progress', False):
-            self.log("WARNING", "Reconnect bereits aktiv – überspringe", "MT5")
-            return False
-
-        self._reconnect_in_progress = True
-        self.mt5_connected = False
-        self.log("WARNING", "MT5 Verbindung verloren – starte Auto-Reconnect…", "MT5")
-
-        delay = base_delay
-        for attempt in range(1, max_retries + 1):
-            self.log("INFO", f"Reconnect-Versuch {attempt}/{max_retries} (warte {delay:.0f}s)…", "MT5")
-            time.sleep(delay)
-
-            if self.connect_mt5():
-                self.log("INFO", f"✅ MT5 Reconnect erfolgreich nach {attempt} Versuch(en)", "MT5")
-                return True
-
-            # Exponential back-off, cap at 5 minutes
-            delay = min(delay * 2, 300.0)
-
-        self.log("ERROR", f"MT5 Reconnect nach {max_retries} Versuchen fehlgeschlagen – Auto-Trading gestoppt", "MT5")
-        self._reconnect_in_progress = False
-        return False
-
+        """Prüft ob die MT5 Verbindung noch aktiv ist"""
+        return self.broker.is_mt5_alive()
 
     def get_mt5_live_data(self, symbol):
         if not self.mt5_connected:
@@ -4549,30 +4223,12 @@ class MT5FinGPT:
             return f"Daten-Fehler: {e}"
     
     def check_ollama_status(self):
-        """Überprüft die Verfügbarkeit des Ollama-Servers"""
-        try:
-            response = requests.get(f"{self.ollama_url}/api/tags", timeout=5)
-            if response.status_code == 200:
-                print("Ollama läuft")
-                return True
-            print("Ollama nicht erreichbar")
-            return False
-        except Exception as e:
-            print(f"Ollama-Verbindungsfehler: {e}")
-            return False
+        """Überprüft die Verfügbarkeit des Ollama-Servers via ai module"""
+        return self.ai.check_ollama_status()
     
     def get_available_models(self):
-        try:
-            response = requests.get(f"{self.ollama_url}/api/tags")
-            if response.status_code == 200:
-                data = response.json()
-                self.available_models = [model['name'] for model in data.get('models', [])]
-                print(f"{len(self.available_models)} Modelle gefunden")
-                return True
-            return False
-        except Exception as e:
-            print(f"Modell-Fehler: {e}")
-            return False
+        """Holt die Liste der installierten Ollama-Modelle via ai module"""
+        return self.ai.get_available_models()
     
     def mtf_settings_menu(self):
         """Multi-Timeframe Einstellungen Menü"""
@@ -4738,66 +4394,12 @@ class MT5FinGPT:
     # 11. AI INTEGRATION & EXECUTOR
     # ==========================================
     def select_finance_model(self):
-        finance_models = ["fingpt", "llama3.1:8b", "llama3.2:3b", "mistral:7b"]
-        
-        for model in finance_models:
-            if any(model in available for available in self.available_models):
-                self.selected_model = next(m for m in self.available_models if model in m)
-                print(f"Modell: {self.selected_model}")
-                return True
-        
-        if self.available_models:
-            self.selected_model = self.available_models[0]
-            print(f"Standard: {self.selected_model}")
-            return True
-        return False
+        """Wählt automatisch das beste finanzspezifische Modell (z.B. Llama3) via ai module"""
+        return self.ai.select_finance_model()
     
     def chat_with_model(self, message, context=""):
-        if not self.selected_model:
-            return "Kein Modell"
-        
-        system_prompt = f"""Du bist FinGPT für Trading-Analyse mit RSI- und Support/Resistance-Integration.
-
-LIVE-DATEN:
-{context}
-
-Berücksichtige bei deiner Analyse:
-- RSI-Werte und Signale
-- Überkauft/Überverkauft Zonen
-- RSI-Divergenzen
-- Support und Resistance Levels
-- Stärke der S/R Levels
-- Abstand zu wichtigen S/R Levels
-- Breakout-Potential
-
-Gib klare Trading-Empfehlungen:
-- BUY/SELL/WARTEN
-- Entry-Preis
-- Stop-Loss (unter Support/über Resistance)
-- Take-Profit (an nächstem S/R Level)
-- RSI- und S/R-Begründung
-
-Antworte auf Deutsch und konkret."""
-        
-        try:
-            payload = {
-                "model": self.selected_model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": message}
-                ],
-                "stream": False,
-                "options": {"temperature": 0.3}
-            }
-            
-            response = requests.post(f"{self.ollama_url}/api/chat", json=payload, timeout=60)
-            
-            if response.status_code == 200:
-                return response.json()['message']['content']
-            return f"KI-Fehler: {response.status_code}"
-                
-        except Exception as e:
-            return f"Chat-Fehler: {e}"
+        """Sendet einen Prompt an Ollama und gibt die Antwort zurück via ai module"""
+        return self.ai.chat_with_model(message, context)
     
     def enable_trading(self):
         print("\nTRADING AKTIVIEREN")
@@ -4820,197 +4422,38 @@ Antworte auf Deutsch und konkret."""
     
     def execute_trade(self, symbol, action, lot_size=None, stop_loss=None, take_profit=None):
         """Verbesserte execute_trade Methode mit Risk Management"""
-        if not self.trading_enabled:
-            return "Trading deaktiviert"
-        
-        try:
-            # Symbol und Tick Info holen
-            symbol_info = mt5.symbol_info(symbol)
-            if not symbol_info:
-                return f"Symbol {symbol} nicht verfügbar"
-            
-            tick = mt5.symbol_info_tick(symbol)
-            if not tick:
-                return f"Keine Preise für {symbol}"
-            
-            # Standard Lot Size
-            if lot_size is None:
-                lot_size = self.default_lot_size
-            
-            # RISK MANAGEMENT CHECK
-            can_trade, reason = self.risk_manager.can_open_position(symbol, action, lot_size)
-            if not can_trade:
-                self.log("WARNING", f"Trade abgelehnt: {reason}", "RISK")
-                return f"❌ Trade abgelehnt: {reason}"
-            
-            # Automatische Position Size Berechnung falls gewünscht
-            if stop_loss:
-                current_price = tick.ask if action.upper() == "BUY" else tick.bid
-                sl_distance_pips = abs(current_price - stop_loss) / symbol_info.point
-                if symbol_info.digits == 3 or symbol_info.digits == 5:
-                    sl_distance_pips /= 10
-                
-                # Berechne optimale Lot Size
-                optimal_lot_size = self.risk_manager.calculate_position_size(symbol, sl_distance_pips)
-                lot_size = min(lot_size, optimal_lot_size)  # Nimm das kleinere
-                
-                self.log("INFO", f"Optimierte Lot Size: {optimal_lot_size}, Verwendete: {lot_size}", "RISK")
-            
-            if action.upper() == "BUY":
-                order_type = mt5.ORDER_TYPE_BUY
-                price = tick.ask
-                # ... deine SL/TP Logik ...
-            elif action.upper() == "SELL":
-                order_type = mt5.ORDER_TYPE_SELL
-                price = tick.bid
-                # ... deine SL/TP Logik ...
-            else:
-                return f"Ungültige Aktion: {action}"
-            
-            # Trade Request erstellen
-            request = {
-                "action": mt5.TRADE_ACTION_DEAL,
-                "symbol": symbol,
-                "volume": lot_size,
-                "type": order_type,
-                "price": price,
-                "deviation": 20,
-                "magic": 234000,
-                "comment": "FinGPT+Risk",
-                "type_time": mt5.ORDER_TIME_GTC,
-                "type_filling": mt5.ORDER_FILLING_IOC
-            }
-            
-            if stop_loss and stop_loss > 0:
-                request["sl"] = round(stop_loss, 5)
-            
-            if take_profit and take_profit > 0:
-                request["tp"] = round(take_profit, 5)
-            
-            print(f"{action} {lot_size} {symbol} @ {price:.5f}")
-            
-            # Trade ausführen
-            result = mt5.order_send(request)
-            
-            if result.retcode == mt5.TRADE_RETCODE_DONE:
-                success_msg = f"✅ {action} {lot_size} {symbol} @ {price:.5f} (#{result.order})"
-                
-                # Trade beim Risk Manager registrieren
-                self.risk_manager.register_trade(symbol, action, lot_size, "SUCCESS")
-                
-                return success_msg
-            else:
-                error_msg = f"❌ Trade failed: {result.retcode} - {result.comment}"
-                self.risk_manager.register_trade(symbol, action, lot_size, "FAILED")
-                return error_msg
-                
-        except Exception as e:
-            error_msg = f"Trade-Fehler: {e}"
-            self.log_error("execute_trade", e)
-            return error_msg
-    
+
+    # ==========================================
+    # KERN-TRADING LOGIK (Delegated to MT5Broker)
+    # ==========================================
+
+    def get_open_positions(self, symbol=None):
+        return self.broker.get_open_positions(symbol)
+
+    def execute_trade(self, symbol, action, lot_size=None, stop_loss=None, take_profit=None, comment="FinGPT Trade"):
+        return self.broker.execute_trade(symbol, action, lot_size or self.default_lot_size, stop_loss, take_profit, comment)
+
+    def close_position(self, ticket, comment="FinGPT Close"):
+        return self.broker.close_position(ticket, comment)
+
     def partial_close_position(self, position, close_percentage):
-        try:
-            close_volume = round(position.volume * (close_percentage / 100), 2)
-            
-            symbol_info = mt5.symbol_info(position.symbol)
-            if close_volume < symbol_info.volume_min:
-                print(f"Volumen zu klein: {close_volume}")
-                return False
-            
-            remaining_volume = round(position.volume - close_volume, 2)
-            if remaining_volume < symbol_info.volume_min:
-                print("Schließe komplette Position")
-                close_volume = position.volume
-            
-            close_request = {
-                "action": mt5.TRADE_ACTION_DEAL,
-                "symbol": position.symbol,
-                "volume": close_volume,
-                "type": mt5.ORDER_TYPE_SELL if position.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY,
-                "position": position.ticket,
-                "deviation": 20,
-                "magic": 234000,
-                "comment": f"Partial Close {close_percentage}%"
-            }
-            
-            result = mt5.order_send(close_request)
-            
-            if result.retcode == mt5.TRADE_RETCODE_DONE:
-                print(f"{close_percentage}% geschlossen ({close_volume} Lots)")
-                return True
-            else:
-                print(f"Partial Close fehlgeschlagen: {result.comment}")
-                return False
-                
-        except Exception as e:
-            print(f"Partial Close Fehler: {e}")
-            return False
-    
-    def manage_open_positions(self):
-        try:
-            positions = mt5.positions_get()
-            if not positions:
-                print("Keine offenen Positionen")
-                return
-        
-            print(f"Position Management - {len(positions)} Positionen")
-        
-            for position in positions:
-                if position.price_open > 0:
-                    profit_percent = (position.profit / (position.price_open * position.volume * 1000)) * 100
-                
-                    print(f"{position.symbol}: {profit_percent:+.1f}% P&L")
-                
-                    # Partial Close Logik
-                    if profit_percent >= self.profit_target_1 and profit_percent < self.profit_target_2:
-                        if position.volume > self.default_lot_size * 0.8:
-                            print(f"Target 1 erreicht für {position.symbol}")
-                            self.partial_close_position(position, self.first_target_percent)
-                
-                    elif profit_percent >= self.profit_target_2:
-                        if position.volume > self.default_lot_size * 0.4:
-                            print(f"Target 2 erreicht für {position.symbol}")
-                            self.partial_close_position(position, self.second_target_percent)
-        
-            # Trailing Stop Update nach Partial Close Prüfung
-            if self.trailing_stop_enabled:
-                print("Aktualisiere Trailing Stops...")
-                self.update_trailing_stops()
-                        
-        except Exception as e:
-            print(f"Position Management Fehler: {e}")
-    
-    def get_open_positions(self):
-        if not self.mt5_connected:
-            return "MT5 nicht verbunden"
-        
-        try:
-            positions = mt5.positions_get()
-            if not positions:
-                return "Keine offenen Positionen"
-            
-            result = "OFFENE POSITIONEN:\n\n"
-            total = 0
-            
-            for pos in positions:
-                emoji = "🟢" if pos.profit > 0 else "🔴"
-                type_str = "BUY" if pos.type == 0 else "SELL"
-                result += f"{emoji} {pos.symbol} {type_str} {pos.volume} | P&L: {pos.profit:.2f}\n"
-                total += pos.profit
-            
-            emoji = "🟢" if total > 0 else "🔴"
-            result += f"\n{emoji} GESAMT: {total:.2f}"
-            return result
-            
-        except Exception as e:
-            return f"Position-Fehler: {e}"
-    
-    def enable_auto_trading(self):
-        if not self.trading_enabled:
-            print("Erst Trading aktivieren!")
-            return False
-        
+        return self.broker.partial_close_position(position, close_percentage)
+
+    def modify_position(self, ticket, stop_loss=None, take_profit=None):
+        return self.broker.modify_position(ticket, stop_loss, take_profit)
+
+    def manage_open_positions(self, symbol=None):
+        return self.broker.manage_open_positions(symbol)
+
+    def close_all_positions(self, symbol=None):
+        return self.broker.close_all_positions(symbol)
+
+    def close_profitable_positions(self, symbol=None, min_profit=0):
+        return self.broker.close_profitable_positions(symbol, min_profit)
+
+    def close_losing_positions(self, symbol=None, max_loss=0):
+        return self.broker.close_losing_positions(symbol, max_loss)
+
         print("\nVOLLAUTOMATISCHES TRADING")
         print("EXTREM RISKANT!")
         
