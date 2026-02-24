@@ -261,7 +261,14 @@ class MT5FinGPT:
     
     def log_trade(self, symbol, action, result, reasoning="", confidence="", indicators=None, lot_size=0.0, profit=0.0, ticket=0):
         """Spezielle Logging-Funktion für Trades — schreibt auch ins Trade Journal."""
-        trade_info = f"{action} {symbol} - {result}"
+        if ticket == 0 and isinstance(result, str) and "Ticket:" in result:
+            import re
+            m = re.search(r"Ticket:\s*(\d+)", result)
+            if m:
+                ticket = int(m.group(1))
+
+        display_result = result.split('\n')[0] if isinstance(result, str) else result
+        trade_info = f"{action} {symbol} - {display_result}"
         if reasoning:
             trade_info += f" | Grund: {reasoning}"
         self.log("TRADE", trade_info, "TRADE")
@@ -4881,6 +4888,18 @@ class MT5FinGPT:
 
             # 12. ERGEBNIS UND BEGRÜNDUNG ANZEIGEN
             if "✅" in result:
+                inds_used = []
+                if rsi_value: inds_used.append("RSI")
+                if macd_data: inds_used.append("MACD")
+                if sr_data: inds_used.append("S/R")
+                if self.mtf_enabled: inds_used.append("MTF Trend")
+                
+                self.log_trade(symbol, action, result, 
+                               reasoning=reasoning, 
+                               confidence="AutoTrade", 
+                               indicators=inds_used,
+                               lot_size=self.default_lot_size)
+                               
                 print(f"📊 Begründung: {reasoning}")
                 if self.mtf_enabled and 'trend_data' in locals():
                     print(f"📈 H1-Trend: {trend_data['direction']} (Stärke: {trend_data['strength']:.5f})")

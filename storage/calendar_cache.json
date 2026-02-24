@@ -164,7 +164,7 @@
 		<title>ADP Weekly Employment Change</title>
 		<country>USD</country>
 		<date><![CDATA[02-24-2026]]></date>
-		<time><![CDATA[1:20pm]]></time>
+		<time><![CDATA[1:15pm]]></time>
 		<impact><![CDATA[Low]]></impact>
 		<forecast />
 		<previous><![CDATA[10.3K]]></previous>
@@ -371,16 +371,6 @@
 		<url><![CDATA[https://www.forexfactory.com/calendar/645-us-president-trump-speaks]]></url>
 	</event>
 	<event>
-		<title>NAB Quarterly Business Confidence</title>
-		<country>AUD</country>
-		<date><![CDATA[02-25-2026]]></date>
-		<time><![CDATA[4:59am]]></time>
-		<impact><![CDATA[Low]]></impact>
-		<forecast />
-		<previous><![CDATA[2]]></previous>
-		<url><![CDATA[https://www.forexfactory.com/calendar/248-au-nab-quarterly-business-confidence]]></url>
-	</event>
-	<event>
 		<title>BOJ Core CPI y/y</title>
 		<country>JPY</country>
 		<date><![CDATA[02-25-2026]]></date>
@@ -496,7 +486,7 @@
 		<date><![CDATA[02-25-2026]]></date>
 		<time><![CDATA[3:30pm]]></time>
 		<impact><![CDATA[Low]]></impact>
-		<forecast />
+		<forecast><![CDATA[1.8M]]></forecast>
 		<previous><![CDATA[-9.0M]]></previous>
 		<url><![CDATA[https://www.forexfactory.com/calendar/10-us-crude-oil-inventories]]></url>
 	</event>
@@ -551,6 +541,16 @@
 		<url><![CDATA[https://www.forexfactory.com/calendar/333-au-rba-bulletin]]></url>
 	</event>
 	<event>
+		<title>NAB Quarterly Business Confidence</title>
+		<country>AUD</country>
+		<date><![CDATA[02-26-2026]]></date>
+		<time><![CDATA[4:59am]]></time>
+		<impact><![CDATA[Low]]></impact>
+		<forecast />
+		<previous><![CDATA[2]]></previous>
+		<url><![CDATA[https://www.forexfactory.com/calendar/248-au-nab-quarterly-business-confidence]]></url>
+	</event>
+	<event>
 		<title>ECB President Lagarde Speaks</title>
 		<country>EUR</country>
 		<date><![CDATA[02-26-2026]]></date>
@@ -597,7 +597,7 @@
 		<time><![CDATA[10:33am]]></time>
 		<impact><![CDATA[Low]]></impact>
 		<forecast />
-		<previous />
+		<previous><![CDATA[3.44|1.6]]></previous>
 		<url><![CDATA[https://www.forexfactory.com/calendar/524-it-10-y-bond-auction]]></url>
 	</event>
 	<event>
@@ -606,7 +606,7 @@
 		<date><![CDATA[02-26-2026]]></date>
 		<time><![CDATA[1:30pm]]></time>
 		<impact><![CDATA[Low]]></impact>
-		<forecast><![CDATA[-8.1B]]></forecast>
+		<forecast><![CDATA[-8.2B]]></forecast>
 		<previous><![CDATA[-9.7B]]></previous>
 		<url><![CDATA[https://www.forexfactory.com/calendar/196-ca-current-account]]></url>
 	</event>
@@ -636,7 +636,7 @@
 		<date><![CDATA[02-26-2026]]></date>
 		<time><![CDATA[3:30pm]]></time>
 		<impact><![CDATA[Low]]></impact>
-		<forecast />
+		<forecast><![CDATA[-36B]]></forecast>
 		<previous><![CDATA[-144B]]></previous>
 		<url><![CDATA[https://www.forexfactory.com/calendar/26-us-natural-gas-storage]]></url>
 	</event>
@@ -656,7 +656,7 @@
 		<date><![CDATA[02-26-2026]]></date>
 		<time><![CDATA[11:50pm]]></time>
 		<impact><![CDATA[Low]]></impact>
-		<forecast><![CDATA[5.4%]]></forecast>
+		<forecast><![CDATA[5.5%]]></forecast>
 		<previous><![CDATA[-0.1%]]></previous>
 		<url><![CDATA[https://www.forexfactory.com/calendar/225-jn-prelim-industrial-production-mm]]></url>
 	</event>
@@ -666,7 +666,7 @@
 		<date><![CDATA[02-26-2026]]></date>
 		<time><![CDATA[11:50pm]]></time>
 		<impact><![CDATA[Low]]></impact>
-		<forecast><![CDATA[0.2%]]></forecast>
+		<forecast><![CDATA[0.1%]]></forecast>
 		<previous><![CDATA[-0.9%]]></previous>
 		<url><![CDATA[https://www.forexfactory.com/calendar/115-jn-retail-sales-yy]]></url>
 	</event>
@@ -726,7 +726,7 @@
 		<date><![CDATA[02-27-2026]]></date>
 		<time><![CDATA[7:45am]]></time>
 		<impact><![CDATA[Low]]></impact>
-		<forecast><![CDATA[0.2%]]></forecast>
+		<forecast><![CDATA[0.4%]]></forecast>
 		<previous><![CDATA[-0.6%]]></previous>
 		<url><![CDATA[https://www.forexfactory.com/calendar/357-fr-consumer-spending-mm]]></url>
 	</event>
@@ -846,7 +846,7 @@
 		<date><![CDATA[02-27-2026]]></date>
 		<time><![CDATA[2:45pm]]></time>
 		<impact><![CDATA[Low]]></impact>
-		<forecast><![CDATA[52.3]]></forecast>
+		<forecast><![CDATA[52.2]]></forecast>
 		<previous><![CDATA[54.0]]></previous>
 		<url><![CDATA[https://www.forexfactory.com/calendar/189-us-chicago-pmi]]></url>
 	</event>

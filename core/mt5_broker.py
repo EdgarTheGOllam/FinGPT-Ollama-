@@ -182,7 +182,7 @@ class MT5Broker:
         sl_pips = abs(price - stop_loss) / point if stop_loss else 0
         tp_pips = abs(take_profit - price) / point if take_profit else 0
 
-        msg = (f"Erfolgreich! Position eröffnet:\n"
+        msg = (f"✅ Erfolgreich! Position eröffnet:\n"
                f"Ticket: {result.order}\n"
                f"Volumen: {result.volume}\n"
                f"Preis: {result.price}")

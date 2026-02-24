@@ -1998,43 +1998,152 @@ class ModernFinGPTGUI(ctk.CTk):
 
         # ── TAB 2: Trading Style ─────────────────
         style_tab = self.config_sub_tabs.tab("📊 Trading Style")
-        style_tab.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(style_tab, text="📊 Trading Strategie & Stil", font=ctk.CTkFont(size=16, weight="bold"), text_color="#E67E22").grid(row=0, column=0, columnspan=2, sticky="w", padx=20, pady=(15, 10))
-        ctk.CTkLabel(style_tab, text="Trading Style:").grid(row=1, column=0, sticky="w", padx=20, pady=10)
+        style_tab.grid_columnconfigure(0, weight=1)
+        style_tab.grid_rowconfigure(0, weight=1)
+        style_scroll = ctk.CTkScrollableFrame(style_tab, fg_color="transparent")
+        style_scroll.grid(row=0, column=0, sticky="nsew")
+        style_scroll.grid_columnconfigure(1, weight=1)
+
+        # ── Abschnitt: Strategie ──────────────────────────────────────
+        ctk.CTkLabel(style_scroll, text="📊 Trading Strategie & Stil", font=ctk.CTkFont(size=16, weight="bold"), text_color="#E67E22").grid(row=0, column=0, columnspan=2, sticky="w", padx=20, pady=(15, 5))
+        ctk.CTkFrame(style_scroll, height=1, fg_color="#333").grid(row=1, column=0, columnspan=2, sticky="ew", padx=20, pady=(0, 10))
+
+        ctk.CTkLabel(style_scroll, text="Trading Style:").grid(row=2, column=0, sticky="w", padx=20, pady=8)
         self.trading_style_var = ctk.StringVar(value="Swing Trading")
-        ctk.CTkComboBox(style_tab, values=["Scalping", "Day Trading", "Swing Trading", "Position Trading"], variable=self.trading_style_var, width=250).grid(row=1, column=1, sticky="w", padx=20, pady=10)
-        ctk.CTkLabel(style_tab, text="Signal-Strategie:").grid(row=2, column=0, sticky="w", padx=20, pady=10)
+        ctk.CTkComboBox(style_scroll, values=["Scalping", "Day Trading", "Swing Trading", "Position Trading"], variable=self.trading_style_var, width=250, command=self._trigger_autosave).grid(row=2, column=1, sticky="w", padx=20, pady=8)
+
+        ctk.CTkLabel(style_scroll, text="Signal-Strategie:").grid(row=3, column=0, sticky="w", padx=20, pady=8)
         self.signal_strategy_var = ctk.StringVar(value="KI-gesteuert (Ollama)")
-        ctk.CTkComboBox(style_tab, values=["KI-gesteuert (Ollama)", "Technische Indikatoren", "Hybrid (KI + Indikatoren)"], variable=self.signal_strategy_var, width=280).grid(row=2, column=1, sticky="w", padx=20, pady=10)
-        ctk.CTkLabel(style_tab, text="Favorisierte Sitzungen:").grid(row=3, column=0, sticky="w", padx=20, pady=10)
-        sessions_frame = ctk.CTkFrame(style_tab, fg_color="transparent")
-        sessions_frame.grid(row=3, column=1, sticky="w", padx=20, pady=10)
-        self.session_london = ctk.CTkCheckBox(sessions_frame, text="London")
+        ctk.CTkComboBox(style_scroll, values=["KI-gesteuert (Ollama)", "Technische Indikatoren", "Hybrid (KI + Indikatoren)"], variable=self.signal_strategy_var, width=280, command=self._trigger_autosave).grid(row=3, column=1, sticky="w", padx=20, pady=8)
+
+        ctk.CTkLabel(style_scroll, text="Risikoprofil:").grid(row=4, column=0, sticky="w", padx=20, pady=8)
+        self.risk_profile_var = ctk.StringVar(value="Moderat")
+        ctk.CTkComboBox(style_scroll, values=["Konservativ", "Moderat", "Aggressiv"], variable=self.risk_profile_var, width=200, command=self._trigger_autosave).grid(row=4, column=1, sticky="w", padx=20, pady=8)
+
+        ctk.CTkLabel(style_scroll, text="Max Risiko pro Trade (%):").grid(row=5, column=0, sticky="w", padx=20, pady=8)
+        self.risk_trade_entry = ctk.CTkEntry(style_scroll, width=80)
+        self.risk_trade_entry.insert(0, "1.0")
+        self.risk_trade_entry.bind("<KeyRelease>", self._trigger_autosave)
+        self.risk_trade_entry.grid(row=5, column=1, sticky="w", padx=20, pady=8)
+
+        ctk.CTkLabel(style_scroll, text="Max Daily Loss (%):").grid(row=6, column=0, sticky="w", padx=20, pady=8)
+        self.risk_daily_entry = ctk.CTkEntry(style_scroll, width=80)
+        self.risk_daily_entry.insert(0, "3.0")
+        self.risk_daily_entry.bind("<KeyRelease>", self._trigger_autosave)
+        self.risk_daily_entry.grid(row=6, column=1, sticky="w", padx=20, pady=8)
+
+        ctk.CTkLabel(style_scroll, text="Max Offene Positionen:").grid(row=7, column=0, sticky="w", padx=20, pady=8)
+        self.max_pos_entry = ctk.CTkEntry(style_scroll, width=80)
+        self.max_pos_entry.insert(0, "3")
+        self.max_pos_entry.bind("<KeyRelease>", self._trigger_autosave)
+        self.max_pos_entry.grid(row=7, column=1, sticky="w", padx=20, pady=8)
+
+        self.trading_active_switch = ctk.CTkSwitch(style_scroll, text="Auto-Trading Global Erlauben", progress_color="#5EBA7D", command=self._trigger_autosave)
+        self.trading_active_switch.select()
+        self.trading_active_switch.grid(row=8, column=0, columnspan=2, sticky="w", padx=20, pady=(10, 5))
+
+        # ── Abschnitt: Trading Zeiten ─────────────────────────────────
+        ctk.CTkLabel(style_scroll, text="⏰ Trading Zeiten", font=ctk.CTkFont(size=16, weight="bold"), text_color="#2E86AB").grid(row=9, column=0, columnspan=2, sticky="w", padx=20, pady=(20, 5))
+        ctk.CTkFrame(style_scroll, height=1, fg_color="#333").grid(row=10, column=0, columnspan=2, sticky="ew", padx=20, pady=(0, 10))
+
+        ctk.CTkLabel(style_scroll, text="Favorisierte Sitzungen:").grid(row=11, column=0, sticky="w", padx=20, pady=8)
+        sessions_frame = ctk.CTkFrame(style_scroll, fg_color="transparent")
+        sessions_frame.grid(row=11, column=1, sticky="w", padx=20, pady=8)
+        self.session_london = ctk.CTkCheckBox(sessions_frame, text="London", command=self._trigger_autosave)
         self.session_london.select()
         self.session_london.pack(side="left", padx=5)
-        self.session_ny = ctk.CTkCheckBox(sessions_frame, text="New York")
+        self.session_ny = ctk.CTkCheckBox(sessions_frame, text="New York", command=self._trigger_autosave)
         self.session_ny.select()
         self.session_ny.pack(side="left", padx=5)
-        self.session_asia = ctk.CTkCheckBox(sessions_frame, text="Asian")
+        self.session_asia = ctk.CTkCheckBox(sessions_frame, text="Asian", command=self._trigger_autosave)
         self.session_asia.pack(side="left", padx=5)
-        ctk.CTkLabel(style_tab, text="Risikoprofil:").grid(row=4, column=0, sticky="w", padx=20, pady=10)
-        self.risk_profile_var = ctk.StringVar(value="Moderat")
-        ctk.CTkComboBox(style_tab, values=["Konservativ", "Moderat", "Aggressiv"], variable=self.risk_profile_var, width=200).grid(row=4, column=1, sticky="w", padx=20, pady=10)
-        ctk.CTkLabel(style_tab, text="Max Risiko pro Trade (%):").grid(row=5, column=0, sticky="w", padx=20, pady=10)
-        self.risk_trade_entry = ctk.CTkEntry(style_tab, width=80)
-        self.risk_trade_entry.insert(0, "1.0")
-        self.risk_trade_entry.grid(row=5, column=1, sticky="w", padx=20, pady=10)
-        ctk.CTkLabel(style_tab, text="Max Daily Loss (%):").grid(row=6, column=0, sticky="w", padx=20, pady=10)
-        self.risk_daily_entry = ctk.CTkEntry(style_tab, width=80)
-        self.risk_daily_entry.insert(0, "3.0")
-        self.risk_daily_entry.grid(row=6, column=1, sticky="w", padx=20, pady=10)
-        ctk.CTkLabel(style_tab, text="Max Offene Positionen:").grid(row=7, column=0, sticky="w", padx=20, pady=10)
-        self.max_pos_entry = ctk.CTkEntry(style_tab, width=80)
-        self.max_pos_entry.insert(0, "3")
-        self.max_pos_entry.grid(row=7, column=1, sticky="w", padx=20, pady=10)
-        self.trading_active_switch = ctk.CTkSwitch(style_tab, text="Auto-Trading Global Erlauben", progress_color="#5EBA7D")
-        self.trading_active_switch.select()
-        self.trading_active_switch.grid(row=8, column=0, columnspan=2, sticky="w", padx=20, pady=20)
+
+        ctk.CTkLabel(style_scroll, text="Aktive Handelstage:").grid(row=12, column=0, sticky="w", padx=20, pady=8)
+        days_frame = ctk.CTkFrame(style_scroll, fg_color="transparent")
+        days_frame.grid(row=12, column=1, sticky="w", padx=20, pady=8)
+        self.day_mon = ctk.CTkCheckBox(days_frame, text="Mo", width=55, command=self._trigger_autosave); self.day_mon.select(); self.day_mon.pack(side="left", padx=3)
+        self.day_tue = ctk.CTkCheckBox(days_frame, text="Di", width=55, command=self._trigger_autosave); self.day_tue.select(); self.day_tue.pack(side="left", padx=3)
+        self.day_wed = ctk.CTkCheckBox(days_frame, text="Mi", width=55, command=self._trigger_autosave); self.day_wed.select(); self.day_wed.pack(side="left", padx=3)
+        self.day_thu = ctk.CTkCheckBox(days_frame, text="Do", width=55, command=self._trigger_autosave); self.day_thu.select(); self.day_thu.pack(side="left", padx=3)
+        self.day_fri = ctk.CTkCheckBox(days_frame, text="Fr", width=55, command=self._trigger_autosave); self.day_fri.select(); self.day_fri.pack(side="left", padx=3)
+
+        ctk.CTkLabel(style_scroll, text="Trading-Fenster (UTC):").grid(row=13, column=0, sticky="w", padx=20, pady=8)
+        time_frame = ctk.CTkFrame(style_scroll, fg_color="transparent")
+        time_frame.grid(row=13, column=1, sticky="w", padx=20, pady=8)
+        ctk.CTkLabel(time_frame, text="Von:", text_color="gray60").pack(side="left")
+        self.trade_time_from = ctk.CTkEntry(time_frame, width=65, placeholder_text="07:00")
+        self.trade_time_from.insert(0, "07:00")
+        self.trade_time_from.bind("<KeyRelease>", self._trigger_autosave)
+        self.trade_time_from.pack(side="left", padx=(5, 15))
+        ctk.CTkLabel(time_frame, text="Bis:", text_color="gray60").pack(side="left")
+        self.trade_time_to = ctk.CTkEntry(time_frame, width=65, placeholder_text="22:00")
+        self.trade_time_to.insert(0, "22:00")
+        self.trade_time_to.bind("<KeyRelease>", self._trigger_autosave)
+        self.trade_time_to.pack(side="left", padx=(5, 0))
+        ctk.CTkLabel(time_frame, text="  (HH:MM Format)", text_color="gray50", font=ctk.CTkFont(size=11)).pack(side="left", padx=5)
+
+        self.time_filter_switch = ctk.CTkSwitch(style_scroll, text="Trading-Fenster aktiv (außerhalb keine neuen Trades)", progress_color="#2E86AB", command=self._trigger_autosave)
+        self.time_filter_switch.select()
+        self.time_filter_switch.grid(row=14, column=0, columnspan=2, sticky="w", padx=20, pady=(5, 5))
+
+        # ── Abschnitt: Nachrichten-Filter ─────────────────────────────
+        ctk.CTkLabel(style_scroll, text="📰 Nachrichten & Events", font=ctk.CTkFont(size=16, weight="bold"), text_color="#8E44AD").grid(row=15, column=0, columnspan=2, sticky="w", padx=20, pady=(20, 5))
+        ctk.CTkFrame(style_scroll, height=1, fg_color="#333").grid(row=16, column=0, columnspan=2, sticky="ew", padx=20, pady=(0, 10))
+
+        self.news_filter_switch = ctk.CTkSwitch(style_scroll, text="Kein Trading bei Hochrisiko-Nachrichten (NFP, CPI, FOMC...)", progress_color="#8E44AD", command=self._trigger_autosave)
+        self.news_filter_switch.select()
+        self.news_filter_switch.grid(row=17, column=0, columnspan=2, sticky="w", padx=20, pady=5)
+
+        ctk.CTkLabel(style_scroll, text="Vorab-Sperrzeit (Min):").grid(row=18, column=0, sticky="w", padx=20, pady=8)
+        news_before_frame = ctk.CTkFrame(style_scroll, fg_color="transparent")
+        news_before_frame.grid(row=18, column=1, sticky="w", padx=20, pady=8)
+        self.news_before_slider = ctk.CTkSlider(news_before_frame, from_=5, to=60, number_of_steps=11, width=180, command=lambda v: (self.news_before_lbl.configure(text=f"{int(v)} Min"), self._trigger_autosave()))
+        self.news_before_slider.set(30)
+        self.news_before_slider.pack(side="left")
+        self.news_before_lbl = ctk.CTkLabel(news_before_frame, text="30 Min", width=55)
+        self.news_before_lbl.pack(side="left", padx=8)
+
+        ctk.CTkLabel(style_scroll, text="Nachher-Sperrzeit (Min):").grid(row=19, column=0, sticky="w", padx=20, pady=8)
+        news_after_frame = ctk.CTkFrame(style_scroll, fg_color="transparent")
+        news_after_frame.grid(row=19, column=1, sticky="w", padx=20, pady=8)
+        self.news_after_slider = ctk.CTkSlider(news_after_frame, from_=5, to=60, number_of_steps=11, width=180, command=lambda v: (self.news_after_lbl.configure(text=f"{int(v)} Min"), self._trigger_autosave()))
+        self.news_after_slider.set(15)
+        self.news_after_slider.pack(side="left")
+        self.news_after_lbl = ctk.CTkLabel(news_after_frame, text="15 Min", width=55)
+        self.news_after_lbl.pack(side="left", padx=8)
+
+        ctk.CTkLabel(style_scroll, text="Nachrichten-Stärke filtern:").grid(row=20, column=0, sticky="w", padx=20, pady=8)
+        news_impact_frame = ctk.CTkFrame(style_scroll, fg_color="transparent")
+        news_impact_frame.grid(row=20, column=1, sticky="w", padx=20, pady=8)
+        self.news_high = ctk.CTkCheckBox(news_impact_frame, text="🔴 Hoch", command=self._trigger_autosave); self.news_high.select(); self.news_high.pack(side="left", padx=5)
+        self.news_medium = ctk.CTkCheckBox(news_impact_frame, text="🟡 Mittel", command=self._trigger_autosave); self.news_medium.pack(side="left", padx=5)
+        self.news_low = ctk.CTkCheckBox(news_impact_frame, text="⚪ Niedrig", command=self._trigger_autosave); self.news_low.pack(side="left", padx=5)
+
+        # ── Abschnitt: Ausführungsqualität ─────────────────────────────
+        ctk.CTkLabel(style_scroll, text="⚡ Ausführungsqualität", font=ctk.CTkFont(size=16, weight="bold"), text_color="#5EBA7D").grid(row=21, column=0, columnspan=2, sticky="w", padx=20, pady=(20, 5))
+        ctk.CTkFrame(style_scroll, height=1, fg_color="#333").grid(row=22, column=0, columnspan=2, sticky="ew", padx=20, pady=(0, 10))
+
+        ctk.CTkLabel(style_scroll, text="Max. Spread (Pips):").grid(row=23, column=0, sticky="w", padx=20, pady=8)
+        spread_frame = ctk.CTkFrame(style_scroll, fg_color="transparent")
+        spread_frame.grid(row=23, column=1, sticky="w", padx=20, pady=8)
+        self.max_spread_slider = ctk.CTkSlider(spread_frame, from_=1, to=20, number_of_steps=19, width=180, command=lambda v: (self.max_spread_lbl.configure(text=f"{int(v)} pips"), self._trigger_autosave()))
+        self.max_spread_slider.set(3)
+        self.max_spread_slider.pack(side="left")
+        self.max_spread_lbl = ctk.CTkLabel(spread_frame, text="3 pips", width=60)
+        self.max_spread_lbl.pack(side="left", padx=8)
+
+        ctk.CTkLabel(style_scroll, text="Max. Slippage (Pips):").grid(row=24, column=0, sticky="w", padx=20, pady=8)
+        slip_frame = ctk.CTkFrame(style_scroll, fg_color="transparent")
+        slip_frame.grid(row=24, column=1, sticky="w", padx=20, pady=8)
+        self.max_slippage_slider = ctk.CTkSlider(slip_frame, from_=1, to=10, number_of_steps=9, width=180, command=lambda v: (self.max_slippage_lbl.configure(text=f"{int(v)} pips"), self._trigger_autosave()))
+        self.max_slippage_slider.set(2)
+        self.max_slippage_slider.pack(side="left")
+        self.max_slippage_lbl = ctk.CTkLabel(slip_frame, text="2 pips", width=60)
+        self.max_slippage_lbl.pack(side="left", padx=8)
+
+        self.spread_check_switch = ctk.CTkSwitch(style_scroll, text="Trade ablehnen wenn Spread zu hoch", progress_color="#5EBA7D", command=self._trigger_autosave)
+        self.spread_check_switch.select()
+        self.spread_check_switch.grid(row=25, column=0, columnspan=2, sticky="w", padx=20, pady=(5, 20))
 
         # ── TAB 3: Reinforcement Learning ──────────
         rl_tab = self.config_sub_tabs.tab("🧠 Reinforcement Learning")
@@ -2122,18 +2231,16 @@ class ModernFinGPTGUI(ctk.CTk):
         self.pairs_entry.bind("<KeyRelease>", self._trigger_autosave)
         self.pairs_entry.grid(row=3, column=1, sticky="ew", padx=20, pady=(2, 10))
         ctk.CTkLabel(mt5_tab, text="Konto Typ:").grid(row=4, column=0, sticky="w", padx=20, pady=10)
-        self.account_type_var = ctk.StringVar(value="Demo")
-        ctk.CTkComboBox(mt5_tab, values=["Demo", "Live", "Cent"], variable=self.account_type_var, width=150, command=self._trigger_autosave).grid(row=4, column=1, sticky="w", padx=20, pady=10)
-        ctk.CTkLabel(mt5_tab, text="Magic Number:").grid(row=5, column=0, sticky="w", padx=20, pady=10)
-        self.magic_number_entry = ctk.CTkEntry(mt5_tab, width=120)
-        self.magic_number_entry.insert(0, "42069")
-        self.magic_number_entry.bind("<KeyRelease>", self._trigger_autosave)
-        self.magic_number_entry.grid(row=5, column=1, sticky="w", padx=20, pady=10)
-        ctk.CTkLabel(mt5_tab, text="Logging Level:").grid(row=6, column=0, sticky="w", padx=20, pady=10)
-        self.log_level_var = ctk.StringVar(value="INFO")
-        ctk.CTkComboBox(mt5_tab, values=["DEBUG", "INFO", "WARNING", "ERROR"], variable=self.log_level_var, width=150, command=self._trigger_autosave).grid(row=6, column=1, sticky="w", padx=20, pady=10)
+        self._account_type_lbl = ctk.CTkLabel(
+            mt5_tab, text="🔍 Wird ermittelt...",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color="gray60"
+        )
+        self._account_type_lbl.grid(row=4, column=1, sticky="w", padx=20, pady=10)
         self.debug_mode_switch = ctk.CTkSwitch(mt5_tab, text="Debug-Modus (mehr Terminal-Output)", progress_color="#E74C3C", command=self._trigger_autosave)
-        self.debug_mode_switch.grid(row=7, column=0, columnspan=2, sticky="w", padx=20, pady=15)
+        self.debug_mode_switch.grid(row=5, column=0, columnspan=2, sticky="w", padx=20, pady=15)
+        # Trigger auto-detection after UI is ready
+        self.after(800, self._detect_account_type)
 
         # Removed explicit Save Button since auto-save handles it now
         tab.grid_rowconfigure(1, weight=0)
@@ -2192,10 +2299,35 @@ class ModernFinGPTGUI(ctk.CTk):
         except requests.exceptions.RequestException as e:
             messagebox.showerror("Verbindungsfehler", f"Ollama Daemon konnte nicht erreicht werden:\n{e}")
 
+    def _detect_account_type(self):
+        """Auto-detect MT5 account type and update the read-only label."""
+        try:
+            if mt5.initialize():
+                info = mt5.account_info()
+                if info is not None:
+                    trade_mode = getattr(info, 'trade_mode', None)
+                    # trade_mode: 0=Demo, 2=Real/Live, 1=Contest
+                    type_map = {
+                        0: ("🟡  Demo",    "#F1C40F"),
+                        2: ("🔴  Live",    "#E74C3C"),
+                        1: ("🟠  Contest", "#E67E22"),
+                    }
+                    text, color = type_map.get(trade_mode, (f"Unbekannt ({trade_mode})", "gray60"))
+                    # Cent accounts often use a currency code with CENT
+                    currency = getattr(info, 'currency', '')
+                    if 'CENT' in currency.upper():
+                        text, color = "🪙  Cent", "#8E44AD"
+                    self._account_type_lbl.configure(text=text, text_color=color)
+                    return
+        except Exception:
+            pass
+        self._account_type_lbl.configure(text="⚠️  Nicht verbunden", text_color="gray50")
+
     def test_mt5_connection(self):
         if mt5.initialize():
             messagebox.showinfo("Erfolg", "MetaTrader 5 erfolgreich verbunden!")
             self.write_terminal(">> MT5 Connection re-initialized successfully.\n")
+            self._detect_account_type()
         else:
             messagebox.showerror("Fehler", "MT5 Terminal konnte nicht gefunden oder verbunden werden.")
 
@@ -2260,6 +2392,26 @@ class ModernFinGPTGUI(ctk.CTk):
             "session_london":   bool(self.session_london.get()),
             "session_ny":       bool(self.session_ny.get()),
             "session_asia":     bool(self.session_asia.get()),
+            # Trading Zeiten
+            "trade_time_from":  self.trade_time_from.get(),
+            "trade_time_to":    self.trade_time_to.get(),
+            "time_filter":      bool(self.time_filter_switch.get()),
+            "day_mon":          bool(self.day_mon.get()),
+            "day_tue":          bool(self.day_tue.get()),
+            "day_wed":          bool(self.day_wed.get()),
+            "day_thu":          bool(self.day_thu.get()),
+            "day_fri":          bool(self.day_fri.get()),
+            # Nachrichten-Filter
+            "news_filter":      bool(self.news_filter_switch.get()),
+            "news_before_min":  int(self.news_before_slider.get()),
+            "news_after_min":   int(self.news_after_slider.get()),
+            "news_high":        bool(self.news_high.get()),
+            "news_medium":      bool(self.news_medium.get()),
+            "news_low":         bool(self.news_low.get()),
+            # Ausführungsqualität
+            "max_spread":       int(self.max_spread_slider.get()),
+            "max_slippage":     int(self.max_slippage_slider.get()),
+            "spread_check":     bool(self.spread_check_switch.get()),
             # Reinforcement Learning
             "rl_algo":          self.rl_algo_var.get(),
             "rl_learning_rate": round(self.rl_lr_slider.get(), 4),
@@ -2270,9 +2422,6 @@ class ModernFinGPTGUI(ctk.CTk):
             "rl_live_enabled":  bool(self.rl_live_switch.get()),
             # MT5 & System
             "pairs":            self.pairs_entry.get(),
-            "account_type":     self.account_type_var.get(),
-            "magic_number":     self.magic_number_entry.get(),
-            "log_level":        self.log_level_var.get(),
             "debug_mode":       bool(self.debug_mode_switch.get()),
         }
         try:
@@ -2340,6 +2489,26 @@ class ModernFinGPTGUI(ctk.CTk):
             _set_switch(self.session_london, "session_london")
             _set_switch(self.session_ny, "session_ny")
             _set_switch(self.session_asia, "session_asia")
+            # Trading Zeiten
+            _set_entry(self.trade_time_from, "trade_time_from")
+            _set_entry(self.trade_time_to, "trade_time_to")
+            _set_switch(self.time_filter_switch, "time_filter")
+            _set_switch(self.day_mon, "day_mon")
+            _set_switch(self.day_tue, "day_tue")
+            _set_switch(self.day_wed, "day_wed")
+            _set_switch(self.day_thu, "day_thu")
+            _set_switch(self.day_fri, "day_fri")
+            # Nachrichten-Filter
+            _set_switch(self.news_filter_switch, "news_filter")
+            _set_slider(self.news_before_slider, self.news_before_lbl, "news_before_min", fmt="{:.0f} Min")
+            _set_slider(self.news_after_slider, self.news_after_lbl, "news_after_min", fmt="{:.0f} Min")
+            _set_switch(self.news_high, "news_high")
+            _set_switch(self.news_medium, "news_medium")
+            _set_switch(self.news_low, "news_low")
+            # Ausführungsqualität
+            _set_slider(self.max_spread_slider, self.max_spread_lbl, "max_spread", fmt="{:.0f} pips")
+            _set_slider(self.max_slippage_slider, self.max_slippage_lbl, "max_slippage", fmt="{:.0f} pips")
+            _set_switch(self.spread_check_switch, "spread_check")
 
             # Reinforcement Learning
             _set_combo(self.rl_algo_var, "rl_algo")
@@ -2352,9 +2521,6 @@ class ModernFinGPTGUI(ctk.CTk):
 
             # MT5 & System
             _set_entry(self.pairs_entry, "pairs")
-            _set_combo(self.account_type_var, "account_type")
-            _set_entry(self.magic_number_entry, "magic_number")
-            _set_combo(self.log_level_var, "log_level")
             _set_switch(self.debug_mode_switch, "debug_mode")
 
             # Auto-apply saved pairs to dashboard immediately
@@ -2693,6 +2859,11 @@ class ModernFinGPTGUI(ctk.CTk):
             # Start Background AI Speech Bubble Worker
             threading.Thread(target=self._ai_analysis_worker, daemon=True).start()
             
+            # Start Auto-Trading Engine (if enabled by the user)
+            if hasattr(self, 'trading_active_switch') and self.trading_active_switch.get():
+                self.write_terminal(">> [AUTO] Auto-Trading Engine gestartet.\n")
+                threading.Thread(target=self._auto_trading_loop, daemon=True).start()
+            
             self.write_terminal(">> MT5 Live-Stream gestartet. Empfange Ticks...\n")
             self.start_live_stream_thread()
 
@@ -2754,9 +2925,10 @@ class ModernFinGPTGUI(ctk.CTk):
                 continue
                 
             symbol = random.choice(self.dashboard_symbols)[1]
-            _base_url = self.config.get("Ollama", "BaseURL", fallback="http://localhost:11434").rstrip("/")
-            url = _base_url
-            model = self.config.get("Ollama", "Model", fallback="llama3.2")
+            _base_url = getattr(self, 'url_entry', None)
+            url = (_base_url.get().strip().rstrip("/") if _base_url else "http://localhost:11434")
+            _model = getattr(self, 'model_combo', None)
+            model = (_model.get() if _model else "llama3.2")
             
             prompt = f"Du bist ein FinGPT Agent. Schreibe eine extrem kurze (max 6 Worte) und spannende Feststellung zum {symbol} Chart. Zum Beispiel 'RSI stark überverkauft bei {symbol}' oder 'Volatilitäts-Spike bei {symbol} registriert.'. Antworte nur mit diesem einen Satz, keine Einleitung."
             
@@ -2788,6 +2960,326 @@ class ModernFinGPTGUI(ctk.CTk):
                         })
             except Exception:
                 pass
+
+
+    def _auto_trading_loop(self):
+        """
+        Real auto-trading engine.
+        Runs in a background daemon thread while is_live_running is True.
+        Reads ALL GUI settings and executes trades via MT5/AI accordingly.
+        """
+        import time, re, requests
+        import MetaTrader5 as mt5
+        import numpy as np
+
+        # ── Helpers ────────────────────────────────────────────────
+        def _g(widget, default):
+            """Safely read a GUI widget value."""
+            try:
+                return widget.get()
+            except Exception:
+                return default
+
+        def _to_float(v, default=0.0):
+            try:
+                return float(v)
+            except Exception:
+                return default
+
+        def _rsi(closes, period=14):
+            if len(closes) < period + 1:
+                return None
+            deltas = np.diff(closes)
+            gains  = np.where(deltas > 0, deltas, 0.0)
+            losses = np.where(deltas < 0, -deltas, 0.0)
+            avg_g  = np.mean(gains[-period:])
+            avg_l  = np.mean(losses[-period:])
+            if avg_l == 0:
+                return 100.0
+            return round(100 - 100 / (1 + avg_g / avg_l), 2)
+
+        def _ema(arr, period):
+            alpha = 2 / (period + 1)
+            ema   = arr[0]
+            for v in arr[1:]:
+                ema = alpha * v + (1 - alpha) * ema
+            return ema
+
+        def _macd_signal(closes):
+            if len(closes) < 35:
+                return "NEUTRAL"
+            e12 = _ema(closes, 12)
+            e26 = _ema(closes, 26)
+            diff = e12 - e26
+            return "BUY" if diff > 0 else "SELL"
+
+        # ── Trading Style → Timeframe + SL/TP map ──────────────────
+        STYLE_MAP = {
+            "Scalping":         {"tf": mt5.TIMEFRAME_M5,  "sl": 10, "tp": 15, "pause": 30},
+            "Day Trading":      {"tf": mt5.TIMEFRAME_M15, "sl": 30, "tp": 45, "pause": 120},
+            "Swing Trading":    {"tf": mt5.TIMEFRAME_H1,  "sl": 60, "tp": 90, "pause": 300},
+            "Position Trading": {"tf": mt5.TIMEFRAME_H4,  "sl":100, "tp":150, "pause": 300},
+        }
+
+        # ── Day name map (weekday() index → checkbox attr) ──────────
+        DAY_ATTRS = ["day_mon", "day_tue", "day_wed", "day_thu", "day_fri"]
+
+        self.write_terminal(">> [AUTO] Engine aktiv. Warte auf erste Analyse...\n")
+
+        while self.is_live_running:
+            try:
+                # ── Read GUI settings ────────────────────────────────
+                auto_on     = hasattr(self, 'trading_active_switch') and self.trading_active_switch.get()
+                if not auto_on:
+                    time.sleep(5)
+                    continue
+
+                style       = _g(getattr(self, 'trading_style_var',    None), "Day Trading")
+                strategy    = _g(getattr(self, 'signal_strategy_var',  None), "KI-Entscheidung")
+                max_risk_pct= _to_float(_g(getattr(self, 'risk_trade_entry',  None), "1.0"), 1.0)
+                max_daily   = _to_float(_g(getattr(self, 'risk_daily_entry',  None), "50"), 50.0)
+                max_pos     = int(_to_float(_g(getattr(self, 'max_pos_entry',        None), "3"), 3))
+                max_spread  = int(_to_float(_g(getattr(self, 'max_spread_slider',    None), "3"), 3))
+                max_slip    = int(_to_float(_g(getattr(self, 'max_slippage_slider',  None), "2"), 2))
+                spread_chk  = hasattr(self, 'spread_check_switch')  and self.spread_check_switch.get()
+                time_filt   = hasattr(self, 'time_filter_switch')   and self.time_filter_switch.get()
+                news_filt   = hasattr(self, 'news_filter_switch')   and self.news_filter_switch.get()
+                tf_from     = _g(getattr(self, 'trade_time_from', None), "07:00")
+                tf_to       = _g(getattr(self, 'trade_time_to',   None), "22:00")
+
+                cfg         = STYLE_MAP.get(style, STYLE_MAP["Day Trading"])
+                timeframe   = cfg["tf"]
+                sl_pips     = cfg["sl"]
+                tp_pips     = cfg["tp"]
+                pause_secs  = cfg["pause"]
+
+                # ── 1. Day-of-week filter ─────────────────────────────
+                today_idx   = datetime.now().weekday()  # 0=Mon
+                if today_idx < 5:
+                    day_attr = DAY_ATTRS[today_idx]
+                    day_widget = getattr(self, day_attr, None)
+                    if day_widget is not None and not day_widget.get():
+                        self.write_terminal(f">> [AUTO] Handelstag {['Mo','Di','Mi','Do','Fr'][today_idx]} deaktiviert.\n")
+                        time.sleep(pause_secs)
+                        continue
+                else:
+                    # Weekend – never trade
+                    self.write_terminal(">> [AUTO] Wochenende – kein Trading.\n")
+                    time.sleep(300)
+                    continue
+
+                # ── 2. Time-window filter (UTC) ───────────────────────
+                if time_filt:
+                    now_utc = datetime.utcnow()
+                    now_str = now_utc.strftime("%H:%M")
+                    if not (tf_from <= now_str <= tf_to):
+                        self.write_terminal(f">> [AUTO] Außerhalb Trading-Fenster ({tf_from}–{tf_to} UTC). Jetzt: {now_str}\n")
+                        time.sleep(60)
+                        continue
+
+                # ── 3. Daily-loss check ───────────────────────────────
+                acc = mt5.account_info()
+                if acc is None:
+                    time.sleep(10)
+                    continue
+                today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+                deals_today = mt5.history_deals_get(today_start, datetime.now())
+                daily_pnl   = sum(d.profit for d in deals_today) if deals_today else 0.0
+                daily_pnl  += acc.profit  # add floating
+                if daily_pnl <= -abs(max_daily):
+                    self.write_terminal(f">> [AUTO] Tages-Verlustlimit erreicht ({daily_pnl:.2f}€ / -{max_daily:.2f}€). Pause bis Mitternacht.\n")
+                    time.sleep(3600)
+                    continue
+
+                # ── 4. Max open positions check ───────────────────────
+                open_pos = mt5.positions_total()
+                if open_pos >= max_pos:
+                    self.write_terminal(f">> [AUTO] Max. Positionen ({open_pos}/{max_pos}). Warte...\n")
+                    time.sleep(pause_secs)
+                    continue
+
+                # ── Symbols to analyse ────────────────────────────────
+                symbols = [sym for _, sym in getattr(self, 'dashboard_symbols', [])]
+                if not symbols:
+                    symbols = ["EURUSD"]
+
+                # ── 5. Analyse each symbol ────────────────────────────
+                for symbol in symbols:
+                    if not self.is_live_running:
+                        break
+
+                    tick = mt5.symbol_info_tick(symbol)
+                    if tick is None:
+                        continue
+
+                    info = mt5.symbol_info(symbol)
+                    if info is None:
+                        continue
+
+                    # ── 5a. Spread check ──────────────────────────────
+                    point     = info.point
+                    pip_size  = point * 10 if info.digits in (3, 5) else point
+                    spread_pts = tick.ask - tick.bid
+                    spread_pips = spread_pts / pip_size if pip_size > 0 else 99
+                    if spread_chk and spread_pips > max_spread:
+                        self.write_terminal(
+                            f">> [AUTO] {symbol}: Spread {spread_pips:.1f} Pips > Max {max_spread} Pips. Übersprungen.\n"
+                        )
+                        continue
+
+                    # ── 5b. Indicators ────────────────────────────────
+                    rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, 50)
+                    if rates is None or len(rates) < 20:
+                        continue
+                    closes  = np.array([r['close'] for r in rates], dtype=float)
+                    rsi_val = _rsi(closes)
+                    macd_sig = _macd_signal(closes)
+                    price   = closes[-1]
+
+                    # Higher-timeframe trend (one TF above)
+                    htf_map = {
+                        mt5.TIMEFRAME_M5:  mt5.TIMEFRAME_M15,
+                        mt5.TIMEFRAME_M15: mt5.TIMEFRAME_H1,
+                        mt5.TIMEFRAME_H1:  mt5.TIMEFRAME_H4,
+                        mt5.TIMEFRAME_H4:  mt5.TIMEFRAME_D1,
+                    }
+                    htf_rates = mt5.copy_rates_from_pos(symbol, htf_map.get(timeframe, mt5.TIMEFRAME_H1), 0, 10)
+                    if htf_rates is not None and len(htf_rates) >= 5:
+                        htf_trend = "BULLISH" if htf_rates[-1]['close'] > htf_rates[0]['close'] else "BEARISH"
+                    else:
+                        htf_trend = "NEUTRAL"
+
+                    # ── 5c. AI signal ─────────────────────────────────
+                    ollama_url   = getattr(self, 'url_entry',   None)
+                    model_combo  = getattr(self, 'model_combo', None)
+                    base_url     = (ollama_url.get().strip().rstrip("/") if ollama_url else "http://localhost:11434")
+                    model        = (model_combo.get() if model_combo else "llama3.2")
+
+                    # Adapt prompt by signal strategy
+                    if "RSI" in strategy:
+                        signal_hint = f"RSI={rsi_val}. RSI<30=BUY, RSI>70=SELL."
+                    elif "MACD" in strategy:
+                        signal_hint = f"MACD-Signal={macd_sig}."
+                    else:
+                        signal_hint = (
+                            f"RSI={rsi_val}, MACD={macd_sig}, Übergeordneter Trend={htf_trend}. "
+                            f"Spread={spread_pips:.1f} Pips. Preis={price:.5f}."
+                        )
+
+                    style_instruction = {
+                        "Scalping":         "Kurze schnelle Bewegungen, sehr enge SL/TP.",
+                        "Day Trading":      "Intraday-Bewegung, klare Trendrichtung bevorzugen.",
+                        "Swing Trading":    "Mehrstündige Bewegungen, nur starke Setups.",
+                        "Position Trading": "Strategische Trendfolge, viel Geduld.",
+                    }.get(style, "")
+
+                    prompt = (
+                        f"Du bist FinGPT, ein professioneller Forex Bot. Analysiere: {symbol}. "
+                        f"Stil: {style}. {style_instruction} "
+                        f"Marktdaten: {signal_hint} "
+                        f"Antworte NUR mit: BUY, SELL, oder WARTEN. Keine Erklärung."
+                    )
+
+                    ai_signal = "WARTEN"
+                    try:
+                        resp = requests.post(
+                            f"{base_url}/api/generate",
+                            json={"model": model, "prompt": prompt, "stream": False},
+                            timeout=20,
+                        )
+                        if resp.status_code == 200:
+                            raw = resp.json().get("response", "").strip().upper()
+                            if re.search(r'\bBUY\b|\bKAUF\b|\bLONG\b', raw):
+                                ai_signal = "BUY"
+                            elif re.search(r'\bSELL\b|\bVERKAUF\b|\bSHORT\b', raw):
+                                ai_signal = "SELL"
+                    except Exception as e:
+                        self.write_terminal(f">> [AUTO] Ollama Fehler für {symbol}: {e}\n")
+                        continue
+
+                    self.write_terminal(
+                        f">> [AUTO] {symbol} | RSI:{rsi_val} | MACD:{macd_sig} | Trend:{htf_trend} "
+                        f"| Spread:{spread_pips:.1f}p | Signal: {ai_signal}\n"
+                    )
+
+                    if ai_signal == "WARTEN":
+                        continue
+
+                    # ── 5d. Check existing position on this symbol ────
+                    sym_positions = mt5.positions_get(symbol=symbol)
+                    if sym_positions and len(sym_positions) > 0:
+                        # Already have a position on this symbol – skip
+                        continue
+
+                    # ── 5e. Calculate SL/TP in price ────────────────
+                    pip_dist_sl = sl_pips * pip_size
+                    pip_dist_tp = tp_pips * pip_size
+                    if ai_signal == "BUY":
+                        entry = tick.ask
+                        stop_loss   = round(entry - pip_dist_sl, info.digits)
+                        take_profit = round(entry + pip_dist_tp, info.digits)
+                    else:
+                        entry = tick.bid
+                        stop_loss   = round(entry + pip_dist_sl, info.digits)
+                        take_profit = round(entry - pip_dist_tp, info.digits)
+
+                    # ── 5f. Lot size (risk-based) ─────────────────────
+                    try:
+                        account_balance = acc.balance
+                        risk_amount     = account_balance * (max_risk_pct / 100.0)
+                        tick_value      = info.trade_tick_value or 1.0
+                        pip_val         = (pip_size / info.trade_tick_size) * tick_value if info.trade_tick_size > 0 else 1.0
+                        lot_raw         = risk_amount / (sl_pips * pip_val) if sl_pips > 0 and pip_val > 0 else 0.01
+                        lot_step        = info.volume_step or 0.01
+                        lot_size        = round(round(lot_raw / lot_step) * lot_step, 2)
+                        lot_size        = max(info.volume_min or 0.01, min(lot_size, info.volume_max or 1.0))
+                    except Exception:
+                        lot_size = 0.01
+
+                    # ── 5g. slippage deviation from GUI ───────────────
+                    deviation = max(5, max_slip * 10)  # convert pips to points roughly
+
+                    # ── 5h. Execute trade ─────────────────────────────
+                    order_type = mt5.ORDER_TYPE_BUY if ai_signal == "BUY" else mt5.ORDER_TYPE_SELL
+                    request = {
+                        "action":       mt5.TRADE_ACTION_DEAL,
+                        "symbol":       symbol,
+                        "volume":       float(lot_size),
+                        "type":         order_type,
+                        "price":        entry,
+                        "sl":           stop_loss,
+                        "tp":           take_profit,
+                        "deviation":    deviation,
+                        "magic":        234001,
+                        "comment":      f"FinGPT {style}",
+                        "type_time":    mt5.ORDER_TIME_GTC,
+                        "type_filling": mt5.ORDER_FILLING_IOC,
+                    }
+
+                    check = mt5.order_check(request)
+                    # order_check() retcode=0 means OK (NOT TRADE_RETCODE_DONE which is for order_send)
+                    if check is None or check.retcode != 0:
+                        err = f"{check.comment} (code {check.retcode})" if check else str(mt5.last_error())
+                        self.write_terminal(f">> [AUTO] {symbol} Pre-Check fehlgeschlagen: {err}\n")
+                        continue
+
+                    result = mt5.order_send(request)
+                    if result.retcode == mt5.TRADE_RETCODE_DONE:
+                        self.write_terminal(
+                            f">> [TRADE] ✅ {ai_signal} {lot_size} {symbol} @ {result.price:.5f} "
+                            f"| SL:{stop_loss:.5f} TP:{take_profit:.5f} | Ticket:{result.order}\n"
+                        )
+                    else:
+                        self.write_terminal(
+                            f">> [TRADE] ❌ {symbol} {ai_signal} fehlgeschlagen: {result.comment} ({result.retcode})\n"
+                        )
+
+            except Exception as e:
+                self.write_terminal(f">> [AUTO] Loop-Fehler: {e}\n")
+
+            time.sleep(pause_secs)
+
+        self.write_terminal(">> [AUTO] Auto-Trading Engine gestoppt.\n")
 
 
     def animate_status_dot(self):
@@ -3075,59 +3567,101 @@ class ModernFinGPTGUI(ctk.CTk):
                 row.update_trend(*trend_colors)
 
     def _draw_pnl_chart(self):
-        """Draws a smooth line chart on the pnl_canvas."""
+        """Draws a smooth, gradient-colored P&L line chart on the pnl_canvas."""
         if not hasattr(self, 'pnl_canvas') or not self.pnl_history:
             return
-            
+
         self.pnl_canvas.delete("all")
-        width = self.pnl_canvas.winfo_width()
+        width  = self.pnl_canvas.winfo_width()
         height = self.pnl_canvas.winfo_height()
-        
-        # Can be 1x1 if canvas isn't mapped yet
+
         if width < 10 or height < 10:
             return
-            
+
         data = self.pnl_history
-        max_val = max(data) if max(data) > 0 else 0.01  # don't divide by 0
-        min_val = min(data) if min(data) < 0 else -0.01
-        
-        # Add padding
-        pad_y = 10
-        range_val = (max_val - min_val) if (max_val - min_val) != 0 else 1
-        scale_y = (height - 2*pad_y) / range_val
-        
-        # Find 0 line
-        zero_y = height - pad_y - (0 - min_val) * scale_y
-        
-        # Color based on current profit
-        line_color = "#5EBA7D" if data[-1] >= 0 else "#E74C3C"
-        
-        # Draw 0 line
-        self.pnl_canvas.create_line(0, zero_y, width, zero_y, fill="#3A3A3A", dash=(4, 2))
-        
-        if len(data) == 1:
+        n    = len(data)
+
+        # Value range (ensure no division by zero)
+        max_val   = max(max(data), 0.01)
+        min_val   = min(min(data), -0.01)
+        range_val = max_val - min_val or 1
+
+        pad_x, pad_y = 6, 12
+        draw_w = width  - 2 * pad_x
+        draw_h = height - 2 * pad_y
+
+        # Zero-line Y
+        zero_y = pad_y + draw_h * (1 - (0 - min_val) / range_val)
+
+        # ── Zero reference line ──────────────────────────────────────
+        self.pnl_canvas.create_line(
+            pad_x, zero_y, width - pad_x, zero_y,
+            fill="#3A3A3A", dash=(3, 4), width=1
+        )
+
+        if n < 2:
             return
-            
-        points = []
-        step_x = width / (max(len(data)-1, 1))
-        
-        for i, val in enumerate(data):
-            x = i * step_x
-            y = height - pad_y - (val - min_val) * scale_y
-            points.extend([x, y])
-            
-        # Draw line
-        self.pnl_canvas.create_line(points, fill=line_color, width=3, smooth=True)
-        
-        # Draw fill polygon (down to minimum visible y or zero line)
-        poly_points = [0, height] + points + [width, height] 
-        # Note: tkinter canvas doesn't easily support gradient fills natively,
-        # but a solid transparent-ish fill can be simulated with stipple (though stipple is ugly on windows).
-        # We'll just stick to a clean, bright line since it looks more modern.
-        
-        # Add glow effect (draw wider faint line underneath)
-        self.pnl_canvas.create_line(points, fill=line_color, width=8, stipple="gray50", smooth=True)
-        self.pnl_canvas.create_line(points, fill=line_color, width=3, smooth=True)
+
+        # ── Coordinate calculation ───────────────────────────────────
+        def _xy(i, v):
+            x = pad_x + i * draw_w / (n - 1)
+            y = pad_y + draw_h * (1 - (v - min_val) / range_val)
+            return x, y
+
+        coords = [_xy(i, v) for i, v in enumerate(data)]
+
+        # ── Helper: lerp between two RGB tuples ──────────────────────
+        def _lerp_color(c1, c2, t):
+            """t=0 → c1, t=1 → c2"""
+            t = max(0.0, min(1.0, t))
+            r = int(c1[0] + (c2[0] - c1[0]) * t)
+            g = int(c1[1] + (c2[1] - c1[1]) * t)
+            b = int(c1[2] + (c2[2] - c1[2]) * t)
+            return f"#{r:02x}{g:02x}{b:02x}"
+
+        RED    = (231,  76,  60)   # #E74C3C
+        YELLOW = (241, 196,  15)   # #F1C40F
+        GREEN  = ( 94, 186, 125)   # #5EBA7D
+
+        def _pnl_color(value):
+            """Map a P&L value to a smooth red→yellow→green color."""
+            if value >= 0:
+                # 0..max_val → yellow..green
+                t = value / max_val if max_val > 0 else 1.0
+                return _lerp_color(YELLOW, GREEN, t)
+            else:
+                # min_val..0 → red..yellow
+                t = (value - min_val) / (-min_val) if min_val < 0 else 0.0
+                return _lerp_color(RED, YELLOW, t)
+
+        # ── Draw subtle fill area (stipple for transparency effect) ──
+        # Build polygon per-segment from the zero-line down
+        for i in range(n - 1):
+            x0, y0 = coords[i]
+            x1, y1 = coords[i + 1]
+            mid_v   = (data[i] + data[i + 1]) / 2
+            fill_c  = _pnl_color(mid_v)
+            self.pnl_canvas.create_polygon(
+                x0, y0, x1, y1, x1, zero_y, x0, zero_y,
+                fill=fill_c, outline="", stipple="gray25"
+            )
+
+        # ── Draw gradient line segment by segment ────────────────────
+        for i in range(n - 1):
+            x0, y0 = coords[i]
+            x1, y1 = coords[i + 1]
+            mid_v   = (data[i] + data[i + 1]) / 2
+            seg_col = _pnl_color(mid_v)
+            self.pnl_canvas.create_line(
+                x0, y0, x1, y1,
+                fill=seg_col, width=1.5, smooth=False, capstyle="round", joinstyle="round"
+            )
+
+        # ── Draw a subtle dot at the latest value ────────────────────
+        lx, ly  = coords[-1]
+        dot_col = _pnl_color(data[-1])
+        r = 3
+        self.pnl_canvas.create_oval(lx - r, ly - r, lx + r, ly + r, fill=dot_col, outline="")
 
     def start_simulated_data(self):
         def bg_simulator():
