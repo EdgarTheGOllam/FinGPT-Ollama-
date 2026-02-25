@@ -261,26 +261,84 @@ class ModernFinGPTGUI(ctk.CTk):
         box.insert("end", text)
         box.configure(state="disabled", text_color=color)
 
-    def _ollama_debate_call(self, system_prompt: str, user_prompt: str) -> str:
-        """Single Ollama API call with a system role prompt."""
+    def _call_llm_api(self, system_prompt: str, user_prompt: str, max_tokens: int = 1024, stream: bool = False) -> str:
+        """Unified LLM API call supporting Ollama, OpenAI, Anthropic, and DeepSeek."""
         try:
-            url = self.url_entry.get().strip()
-            model = self.model_combo.get().strip() or "llama3"
-            payload = {
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user",   "content": user_prompt},
-                ],
-                "stream": False,
-                "options": {"temperature": 0.7, "num_predict": 400},
-            }
-            resp = requests.post(f"{url}/api/chat", json=payload, timeout=120)
-            if resp.status_code == 200:
-                return resp.json().get("message", {}).get("content", "").strip()
-            return f"[Fehler: HTTP {resp.status_code}]"
+            import requests, json
+            provider = self.ki_provider_var.get()
+            url_base = self.url_entry.get().strip()
+            api_key = self.api_key_entry.get().strip()
+            model = self.model_combo.get().strip()
+            temp = float(self.ai_temp_slider.get())
+
+            if "Ollama" in provider:
+                url_base = url_base.rstrip('/')
+                payload = {
+                    "model": model or "llama3",
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user",   "content": user_prompt},
+                    ],
+                    "stream": stream,
+                    "options": {"temperature": temp, "num_predict": max_tokens},
+                }
+                resp = requests.post(f"{url_base}/api/chat", json=payload, timeout=120)
+                if resp.status_code == 200:
+                    return resp.json().get("message", {}).get("content", "").strip()
+                return f"[Fehler: HTTP {resp.status_code}]"
+
+            elif "OpenAI" in provider:
+                headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+                api_url = url_base if url_base else "https://api.openai.com/v1/chat/completions"
+                payload = {
+                    "model": model or "gpt-4o",
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    "temperature": temp,
+                    "max_tokens": max_tokens,
+                }
+                resp = requests.post(api_url, headers=headers, json=payload, timeout=60)
+                if resp.status_code == 200:
+                    return resp.json()["choices"][0]["message"]["content"].strip()
+                return f"[Fehler: OpenAI HTTP {resp.status_code} - {resp.text}]"
+
+            elif "Anthropic" in provider:
+                headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"}
+                api_url = url_base if url_base else "https://api.anthropic.com/v1/messages"
+                payload = {
+                    "model": model or "claude-3-5-sonnet-20241022",
+                    "system": system_prompt,
+                    "messages": [{"role": "user", "content": user_prompt}],
+                    "temperature": temp,
+                    "max_tokens": max_tokens,
+                }
+                resp = requests.post(api_url, headers=headers, json=payload, timeout=60)
+                if resp.status_code == 200:
+                    return resp.json()["content"][0]["text"].strip()
+                return f"[Fehler: Anthropic HTTP {resp.status_code} - {resp.text}]"
+
+            elif "DeepSeek" in provider:
+                headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+                api_url = url_base if url_base else "https://api.deepseek.com/chat/completions"
+                payload = {
+                    "model": model or "deepseek-chat",
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    "temperature": temp,
+                    "max_tokens": max_tokens,
+                }
+                resp = requests.post(api_url, headers=headers, json=payload, timeout=60)
+                if resp.status_code == 200:
+                    return resp.json()["choices"][0]["message"]["content"].strip()
+                return f"[Fehler: DeepSeek HTTP {resp.status_code} - {resp.text}]"
+
+            return "[Provider nicht implementiert]"
         except Exception as e:
-            return f"[Verbindungsfehler: {e}]"
+            return f"[API Fehler: {e}]"
 
     def _run_debate_bg(self, symbol: str):
         """Background thread: fetch market data → 3 Ollama calls → update UI."""
@@ -314,7 +372,7 @@ class ModernFinGPTGUI(ctk.CTk):
                 "Nenne konkrete technische und fundamentale Gründe, warum jetzt ein KAUF sinnvoll ist. "
                 "Sei überzeugend und zeige mögliche Gewinnziele."
             )
-            bull_text = self._ollama_debate_call(bull_sys, user_msg)
+            bull_text = self._call_llm_api(system_prompt=bull_sys, user_prompt=user_msg, max_tokens=1024)
             self.after(0, lambda t=bull_text: self._write_debate_box(self._bull_box, t, "#4ADE80"))
 
             # ── Step 2: BEAR ─────────────────────────────────────────
@@ -326,7 +384,7 @@ class ModernFinGPTGUI(ctk.CTk):
                 "Nenne konkrete technische und fundamentale Gründe, warum jetzt ein VERKAUF sinnvoll ist. "
                 "Sei überzeugend und zeige mögliche Verlustrisiken beim Kauf."
             )
-            bear_text = self._ollama_debate_call(bear_sys, user_msg)
+            bear_text = self._call_llm_api(system_prompt=bear_sys, user_prompt=user_msg, max_tokens=1024)
             self.after(0, lambda t=bear_text: self._write_debate_box(self._bear_box, t, "#F87171"))
 
             # ── Step 3: JUDGE ────────────────────────────────────────
@@ -346,7 +404,7 @@ class ModernFinGPTGUI(ctk.CTk):
                 f"BEAR-Argumente:\n{bear_text}\n\n"
                 "Was ist dein Urteil?"
             )
-            verdict = self._ollama_debate_call(judge_sys, judge_msg)
+            verdict = self._call_llm_api(system_prompt=judge_sys, user_prompt=judge_msg, max_tokens=1024)
 
             # Parse verdict colour
             v_upper = verdict.upper()
@@ -802,19 +860,15 @@ class ModernFinGPTGUI(ctk.CTk):
                 f"und was das System beim nächsten Mal besser machen sollte."
             )
             
-            # Load URL and Model from config
-            base_url = self.config.get("Ollama", "BaseURL", fallback="http://localhost:11434").rstrip('/')
-            model = self.config.get("Ollama", "Model", fallback="llama3.2")
-            url = f"{base_url}/api/generate"
-            
             try:
-                response = requests.post(url, json={"model": model, "prompt": prompt, "stream": False}, timeout=45)
-                if response.status_code == 200:
-                    result_text = response.json().get("response", "Keine vernünftige Antwort erhalten.")
+                sys_prompt = "Du bist ein professioneller Trading-Coach."
+                result = self._call_llm_api(system_prompt=sys_prompt, user_prompt=prompt, max_tokens=300)
+                if result and not result.startswith("[Fehler") and not result.startswith("[API Fehler"):
+                    result_text = result
                 else:
-                    result_text = f"Fehler bei der Analyse: HTTP {response.status_code}"
+                    result_text = result if result else "Keine vernünftige Antwort erhalten."
             except Exception as e:
-                result_text = f"Verbindungsfehler zu Ollama: {str(e)}"
+                result_text = f"KI Fehler: {str(e)}"
                 
             def on_done():
                 trade["reflection_analysis"] = result_text.strip()
@@ -1129,27 +1183,23 @@ class ModernFinGPTGUI(ctk.CTk):
         self._news_analyzing = False
 
     def _ollama_analyze_news(self, title, summary, pairs):
-        """Ask Ollama to rate the news as BULLISH / BEARISH / NEUTRAL per detected currency."""
+        """Ask AI to rate the news as BULLISH / BEARISH / NEUTRAL per detected currency."""
         try:
-            url   = self.url_entry.get().strip()
             model = self.model_combo.get()
-            if not url or "Verbindung" in model or "Lade" in model:
+            if "Verbindung" in model or "Lade" in model:
                 return {}
 
             pairs_str = ", ".join(pairs) if pairs else "EUR, USD"
-            prompt = (
-                f"Du bist ein erfahrener Forex-Analyst. Bewerte die folgende Finanznachricht "
-                f"kurz und präzise für diese Währungen: {pairs_str}.\n\n"
+            sys_prompt = "Du bist ein erfahrener Forex-Analyst. Antworte AUSSCHLIESSLICH im JSON Format ohne Markdown."
+            user_prompt = (
+                f"Bewerte die folgende Finanznachricht kurz für diese Währungen: {pairs_str}.\n\n"
                 f"Überschrift: {title}\n"
                 f"Zusammenfassung: {summary}\n\n"
                 f"Antworte NUR mit einem JSON-Objekt im Format:\n"
-                f'{{"EUR": "BULLISH", "USD": "BEARISH", "GBP": "NEUTRAL", ...}}\n'
+                f'{{"EUR": "BULLISH", "USD": "BEARISH", "GBP": "NEUTRAL"}}\n'
                 f"Verwende ausschließlich: BULLISH, BEARISH oder NEUTRAL. Kein weiterer Text."
             )
-            payload = {"model": model, "prompt": prompt, "stream": False,
-                       "options": {"temperature": 0.1, "num_predict": 120}}
-            resp = requests.post(f"{url}/api/generate", json=payload, timeout=20)
-            raw  = resp.json().get("response", "").strip()
+            raw = self._call_llm_api(system_prompt=sys_prompt, user_prompt=user_prompt, max_tokens=150)
 
             import json as _json, re as _re
             match = _re.search(r'\{[^}]+\}', raw)
@@ -1473,25 +1523,21 @@ class ModernFinGPTGUI(ctk.CTk):
         """Ask Ollama for a hawkish/dovish/neutral verdict on a single calendar event."""
         def run():
             try:
-                url   = self.url_entry.get().strip()
                 model = self.model_combo.get()
-                if not url or "Verbindung" in model or "Lade" in model:
-                    event["ai"] = "Ollama offline"
+                if "Verbindung" in model or "Lade" in model:
+                    event["ai"] = "KI offline"
                     self.after(0, lambda: self._render_calendar_rows(self._cal_items))
                     return
 
-                prompt = (
-                    f"Du bist ein erfahrener Forex-Makroanalyst.\n"
+                sys_prompt = "Du bist ein erfahrener Forex-Makroanalyst."
+                user_prompt = (
                     f"Event: {event['title']} ({event['currency']})\n"
                     f"Impact: {event['impact']}\n"
                     f"Prognose: {event['forecast']}  Vorherig: {event['previous']}  Aktuell: {event['actual']}\n\n"
                     f"Bewerte dieses Event in 1 Satz als BULLISH, BEARISH oder NEUTRAL für {event['currency']} "
                     f"und erkläre kurz warum. Beginne mit dem Wort BULLISH, BEARISH oder NEUTRAL."
                 )
-                payload = {"model": model, "prompt": prompt, "stream": False,
-                           "options": {"temperature": 0.2, "num_predict": 80}}
-                resp = requests.post(f"{url}/api/generate", json=payload, timeout=25)
-                raw  = resp.json().get("response", "").strip()
+                raw = self._call_llm_api(system_prompt=sys_prompt, user_prompt=user_prompt, max_tokens=100)
                 event["ai"] = raw[:120] + ("…" if len(raw) > 120 else "")
             except Exception as e:
                 event["ai"] = f"Fehler: {str(e)[:50]}"
@@ -1967,34 +2013,85 @@ class ModernFinGPTGUI(ctk.CTk):
         self.config_sub_tabs.add("🧠 Reinforcement Learning")
         self.config_sub_tabs.add("⚙️ MT5 & System")
 
-        # ── TAB 1: KI & Ollama ───────────────────────
+        # Now actually populate them
+        self._populate_config_tabs(tab)
+
+    def _on_provider_change(self, choice=None):
+        if choice is None:
+            choice = self.ki_provider_var.get()
+            
+        if "Ollama" in choice:
+            self.url_lbl.configure(text="Ollama URL:")
+            self.api_key_entry.configure(state="normal") # Enable to allow clearing or just let it be
+            self.api_key_entry.configure(fg_color=("gray85", "gray25"))
+            # Optionally disable entirely but grey out is nice
+            threading.Thread(target=self.fetch_ollama_models_silently, daemon=True).start()
+        elif "OpenAI" in choice:
+            self.url_lbl.configure(text="Base URL (opt):")
+            self.api_key_entry.configure(state="normal", fg_color=("white", "gray15"))
+            self.model_combo.configure(values=["gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"])
+            if self.model_combo.get() not in ["gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"]:
+                self.model_combo.set("gpt-4o")
+        elif "Anthropic" in choice:
+            self.url_lbl.configure(text="Base URL (opt):")
+            self.api_key_entry.configure(state="normal", fg_color=("white", "gray15"))
+            self.model_combo.configure(values=["claude-3-5-sonnet-20241022", "claude-3-opus-20240229", "claude-3-haiku-20240307"])
+            if self.model_combo.get() not in ["claude-3-5-sonnet-20241022", "claude-3-opus-20240229", "claude-3-haiku-20240307"]:
+                self.model_combo.set("claude-3-5-sonnet-20241022")
+        elif "DeepSeek" in choice:
+            self.url_lbl.configure(text="Base URL (opt):")
+            self.api_key_entry.configure(state="normal", fg_color=("white", "gray15"))
+            self.model_combo.configure(values=["deepseek-chat", "deepseek-coder"])
+            if self.model_combo.get() not in ["deepseek-chat", "deepseek-coder"]:
+                self.model_combo.set("deepseek-chat")
+            
+        self._trigger_autosave()
+
+    # ── TAB 1: KI & Ollama ───────────────────────
+    def _populate_config_tabs(self, tab):
         ki_tab = self.config_sub_tabs.tab("🤖 KI & Ollama")
         ki_tab.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(ki_tab, text="🤖 KI & Ollama Einstellungen", font=ctk.CTkFont(size=16, weight="bold"), text_color="#2E86AB").grid(row=0, column=0, columnspan=3, sticky="w", padx=20, pady=(15, 10))
-        ctk.CTkLabel(ki_tab, text="Ollama URL:").grid(row=1, column=0, sticky="w", padx=20, pady=10)
+        ctk.CTkLabel(ki_tab, text="🤖 KI & API Einstellungen", font=ctk.CTkFont(size=16, weight="bold"), text_color="#2E86AB").grid(row=0, column=0, columnspan=3, sticky="w", padx=20, pady=(15, 10))
+
+        ctk.CTkLabel(ki_tab, text="KI Provider:").grid(row=1, column=0, sticky="w", padx=20, pady=10)
+        self.ki_provider_var = ctk.StringVar(value="Ollama (Lokal)")
+        self.ki_provider_combo = ctk.CTkComboBox(ki_tab, values=["Ollama (Lokal)", "OpenAI (ChatGPT)", "Anthropic (Claude)", "DeepSeek"], variable=self.ki_provider_var, width=300, command=self._on_provider_change)
+        self.ki_provider_combo.grid(row=1, column=1, sticky="w", padx=20, pady=10)
+
+        self.url_lbl = ctk.CTkLabel(ki_tab, text="Ollama URL:")
+        self.url_lbl.grid(row=2, column=0, sticky="w", padx=20, pady=10)
         self.url_entry = ctk.CTkEntry(ki_tab, placeholder_text="http://localhost:11434", width=300)
         self.url_entry.insert(0, "http://localhost:11434")
-        self.url_entry.grid(row=1, column=1, sticky="w", padx=20, pady=10)
-        ctk.CTkLabel(ki_tab, text="LLM Modell:").grid(row=2, column=0, sticky="w", padx=20, pady=10)
+        self.url_entry.grid(row=2, column=1, sticky="w", padx=20, pady=10)
+
+        self.api_key_lbl = ctk.CTkLabel(ki_tab, text="API Key:")
+        self.api_key_lbl.grid(row=3, column=0, sticky="w", padx=20, pady=10)
+        self.api_key_entry = ctk.CTkEntry(ki_tab, placeholder_text="sk-...", width=300, show="*")
+        self.api_key_entry.grid(row=3, column=1, sticky="w", padx=20, pady=10)
+
+        ctk.CTkLabel(ki_tab, text="LLM Modell:").grid(row=4, column=0, sticky="w", padx=20, pady=10)
         self.model_combo = ctk.CTkComboBox(ki_tab, values=["Lade Modelle..."], width=300)
-        self.model_combo.grid(row=2, column=1, sticky="w", padx=20, pady=10)
-        ctk.CTkLabel(ki_tab, text="Auto-Trading Intervall (sek):").grid(row=3, column=0, sticky="w", padx=20, pady=10)
+        self.model_combo.grid(row=4, column=1, sticky="w", padx=20, pady=10)
+
+        ctk.CTkLabel(ki_tab, text="Auto-Trading Intervall (sek):").grid(row=5, column=0, sticky="w", padx=20, pady=10)
         self.interval_slider = ctk.CTkSlider(ki_tab, from_=1, to=30, number_of_steps=29)
         self.interval_slider.set(5)
-        self.interval_slider.grid(row=3, column=1, sticky="ew", padx=20, pady=10)
+        self.interval_slider.grid(row=5, column=1, sticky="ew", padx=20, pady=10)
         self.interval_lbl = ctk.CTkLabel(ki_tab, text="5s")
-        self.interval_lbl.grid(row=3, column=2, padx=(0, 20))
+        self.interval_lbl.grid(row=5, column=2, padx=(0, 20))
         self.interval_slider.configure(command=lambda val: self.interval_lbl.configure(text=f"{int(val)}s"))
-        ctk.CTkLabel(ki_tab, text="KI Temperatur:").grid(row=4, column=0, sticky="w", padx=20, pady=10)
+
+        ctk.CTkLabel(ki_tab, text="KI Temperatur:").grid(row=6, column=0, sticky="w", padx=20, pady=10)
         self.ai_temp_slider = ctk.CTkSlider(ki_tab, from_=0.0, to=1.0, number_of_steps=10)
         self.ai_temp_slider.set(0.3)
-        self.ai_temp_slider.grid(row=4, column=1, sticky="ew", padx=20, pady=10)
+        self.ai_temp_slider.grid(row=6, column=1, sticky="ew", padx=20, pady=10)
         self.ai_temp_lbl = ctk.CTkLabel(ki_tab, text="0.3")
-        self.ai_temp_lbl.grid(row=4, column=2, padx=(0, 20))
+        self.ai_temp_lbl.grid(row=6, column=2, padx=(0, 20))
         self.ai_temp_slider.configure(command=lambda val: self.ai_temp_lbl.configure(text=f"{val:.1f}"))
-        ctk.CTkLabel(ki_tab, text="Prompt-Sprache:").grid(row=5, column=0, sticky="w", padx=20, pady=10)
+
+        ctk.CTkLabel(ki_tab, text="Prompt-Sprache:").grid(row=7, column=0, sticky="w", padx=20, pady=10)
         self.prompt_lang_var = ctk.StringVar(value="Deutsch")
-        ctk.CTkComboBox(ki_tab, values=["Deutsch", "Englisch", "Gemischt"], variable=self.prompt_lang_var).grid(row=5, column=1, sticky="w", padx=20, pady=10)
+        ctk.CTkComboBox(ki_tab, values=["Deutsch", "Englisch", "Gemischt"], variable=self.prompt_lang_var).grid(row=7, column=1, sticky="w", padx=20, pady=10)
 
         # ── TAB 2: Trading Style ─────────────────
         style_tab = self.config_sub_tabs.tab("📊 Trading Style")
@@ -2230,23 +2327,42 @@ class ModernFinGPTGUI(ctk.CTk):
         self.pairs_entry.insert(0, self._pair_presets["🏆 Majors (6 Paare)"])
         self.pairs_entry.bind("<KeyRelease>", self._trigger_autosave)
         self.pairs_entry.grid(row=3, column=1, sticky="ew", padx=20, pady=(2, 10))
-        ctk.CTkLabel(mt5_tab, text="Konto Typ:").grid(row=4, column=0, sticky="w", padx=20, pady=10)
-        self._account_type_lbl = ctk.CTkLabel(
-            mt5_tab, text="🔍 Wird ermittelt...",
-            font=ctk.CTkFont(size=13, weight="bold"),
-            text_color="gray60"
+        ctk.CTkLabel(mt5_tab, text="Konto:").grid(row=4, column=0, sticky="w", padx=20, pady=10)
+        
+        self.account_combo_var = ctk.StringVar(value="🔍 Wird ermittelt...")
+        self.account_combo = ctk.CTkComboBox(
+            mt5_tab,
+            variable=self.account_combo_var,
+            values=["Wird geladen..."],
+            width=350,
+            command=self._on_account_switch
         )
-        self._account_type_lbl.grid(row=4, column=1, sticky="w", padx=20, pady=10)
+        self.account_combo.grid(row=4, column=1, sticky="w", padx=20, pady=10)
+        
+        # Container for extended Broker/Account Info
+        broker_info_frame = ctk.CTkFrame(mt5_tab, fg_color="transparent")
+        broker_info_frame.grid(row=5, column=1, sticky="w", padx=20, pady=(0, 10))
+        
+        self._account_type_lbl = ctk.CTkLabel(broker_info_frame, text="Typ: --", font=ctk.CTkFont(size=12))
+        self._account_type_lbl.pack(side="left", padx=(0, 15))
+        
+        self._broker_name_lbl = ctk.CTkLabel(broker_info_frame, text="Broker: --", font=ctk.CTkFont(size=12))
+        self._broker_name_lbl.pack(side="left", padx=(0, 15))
+        
+        self._prop_firm_lbl = ctk.CTkLabel(broker_info_frame, text="Prop Firm: --", font=ctk.CTkFont(size=12))
+        self._prop_firm_lbl.pack(side="left")
+
         self.debug_mode_switch = ctk.CTkSwitch(mt5_tab, text="Debug-Modus (mehr Terminal-Output)", progress_color="#E74C3C", command=self._trigger_autosave)
-        self.debug_mode_switch.grid(row=5, column=0, columnspan=2, sticky="w", padx=20, pady=15)
+        self.debug_mode_switch.grid(row=6, column=0, columnspan=2, sticky="w", padx=20, pady=15)
         # Trigger auto-detection after UI is ready
         self.after(800, self._detect_account_type)
 
         # Removed explicit Save Button since auto-save handles it now
-        tab.grid_rowconfigure(1, weight=0)
+        parent_tab = self.tabview.tab("⚙️ Konfiguration")
+        parent_tab.grid_rowconfigure(1, weight=0)
         
         # Auto-saved hint
-        self.autosave_hint = ctk.CTkLabel(tab, text="✅ Alle Änderungen werden automatisch gespeichert.", text_color="gray50", font=ctk.CTkFont(size=11, slant="italic"))
+        self.autosave_hint = ctk.CTkLabel(parent_tab, text="✅ Alle Änderungen werden automatisch gespeichert.", text_color="gray50", font=ctk.CTkFont(size=11, slant="italic"))
         self.autosave_hint.grid(row=1, column=0, sticky="e", padx=20, pady=(10, 15))
 
         self.after(500, self.fetch_ollama_models_silently)
@@ -2259,6 +2375,28 @@ class ModernFinGPTGUI(ctk.CTk):
             self.pairs_entry.insert(0, pairs)
             self._trigger_autosave()
         # If "Custom" → entry stays empty and user types freely
+
+    def _on_account_switch(self, selected_account_str):
+        self.write_terminal(f">> Wechsel zu Konto: {selected_account_str}...\n")
+        try:
+            # Extract login from string (e.g. "12345678 - FTMO")
+            login = int(selected_account_str.split(" - ")[0].strip())
+            
+            # Use mt5.login to switch
+            if mt5.initialize():
+                # We often need server and password, but passing just login works if 
+                # MT5 remembers the credentials, otherwise it might just open the prompt.
+                result = mt5.login(login)
+                if result:
+                    self.write_terminal(">> ✅ Konto erfolgreich gewechselt.\n")
+                    self._update_broker_labels()
+                    # Trigger a dashboard refresh
+                    self.dashboard_view.update_dashboard_data()
+                else:
+                    self.write_terminal(f">> ❌ Fehler beim Kontowechsel. MT5 Fehlercode: {mt5.last_error()}\n", "ERROR")
+                    messagebox.showwarning("Login fehlgeschlagen", "MT5 benötigt eventuell Passwort/Server. Bitte einmalig manuell im MT5 Terminal einloggen.")
+        except Exception as e:
+            self.write_terminal(f">> ❌ Fehler beim Parsen des Kontos: {e}\n", "ERROR")
 
     def fetch_ollama_models_silently(self):
 
@@ -2299,29 +2437,71 @@ class ModernFinGPTGUI(ctk.CTk):
         except requests.exceptions.RequestException as e:
             messagebox.showerror("Verbindungsfehler", f"Ollama Daemon konnte nicht erreicht werden:\n{e}")
 
+    def _update_broker_labels(self):
+        info = mt5.account_info()
+        if info is not None:
+            trade_mode = getattr(info, 'trade_mode', None)
+            type_map = {
+                0: ("🟡 Demo",    "#F1C40F"),
+                2: ("🔴 Live",    "#E74C3C"),
+                1: ("🟠 Contest", "#E67E22"),
+            }
+            text, color = type_map.get(trade_mode, (f"Unbekannt ({trade_mode})", "gray60"))
+            
+            currency = getattr(info, 'currency', '')
+            if 'CENT' in currency.upper():
+                text, color = "🪙 Cent", "#8E44AD"
+                
+            self._account_type_lbl.configure(text=f"Typ: {text}", text_color=color)
+            
+            # Broker / Server
+            company = getattr(info, 'company', 'Unbekannt')
+            server = getattr(info, 'server', 'Unbekannt')
+            self._broker_name_lbl.configure(text=f"Broker: {company}", text_color="gray80")
+            
+            # Prop Firm Detection (heuristic based on common names)
+            company_upper = company.upper()
+            server_upper = server.upper()
+            prop_keywords = ["FTMO", "FUNDED", "TFF", "EIGHTCAP", "TRUEFOREX", "MYFOREX", "MFF", "ALPHA", "SURGE", "BESPOKE", "FUNDING"]
+            is_prop = any(hint in company_upper or hint in server_upper for hint in prop_keywords)
+            
+            if is_prop:
+                self._prop_firm_lbl.configure(text="Prop Firm: ✅ Ja", text_color="#5EBA7D")
+            else:
+                self._prop_firm_lbl.configure(text="Prop Firm: ❌ Nein", text_color="gray50")
+        else:
+            self._account_type_lbl.configure(text="Typ: ⚠️ Không verbunden", text_color="gray50")
+            self._broker_name_lbl.configure(text="Broker: --", text_color="gray50")
+            self._prop_firm_lbl.configure(text="Prop Firm: --", text_color="gray50")
+
     def _detect_account_type(self):
-        """Auto-detect MT5 account type and update the read-only label."""
+        """Auto-detect MT5 account type, find multiple accounts, and update UI."""
         try:
             if mt5.initialize():
-                info = mt5.account_info()
-                if info is not None:
-                    trade_mode = getattr(info, 'trade_mode', None)
-                    # trade_mode: 0=Demo, 2=Real/Live, 1=Contest
-                    type_map = {
-                        0: ("🟡  Demo",    "#F1C40F"),
-                        2: ("🔴  Live",    "#E74C3C"),
-                        1: ("🟠  Contest", "#E67E22"),
-                    }
-                    text, color = type_map.get(trade_mode, (f"Unbekannt ({trade_mode})", "gray60"))
-                    # Cent accounts often use a currency code with CENT
-                    currency = getattr(info, 'currency', '')
-                    if 'CENT' in currency.upper():
-                        text, color = "🪙  Cent", "#8E44AD"
-                    self._account_type_lbl.configure(text=text, text_color=color)
-                    return
-        except Exception:
-            pass
-        self._account_type_lbl.configure(text="⚠️  Nicht verbunden", text_color="gray50")
+                # Get current active account details
+                self._update_broker_labels()
+                
+                # Unfortunately mt5 python library does *not* offer an API to list all logged in/saved accounts directly.
+                # However, we can display the CURRENT account and offer a refresh mechanism if they switch in MT5.
+                # Let's populate the combo box with the current account for now, and check if we can read accounts from config.
+                
+                current_info = mt5.account_info()
+                if current_info:
+                    current_str = f"{current_info.login} - {current_info.company}"
+                    self.account_combo.configure(values=[current_str])
+                    self.account_combo_var.set(current_str)
+                    
+                # To actually make multi-account work, we would need the user to have stored credentials or just
+                # show them what's currently active. Since we can't fetch all passwords easily from MT5 via python,
+                # we'll build a basic "Current Active" view, and prompt them that they can swap in MT5 terminal 
+                # and click 'Test Connection' to refresh.
+                
+                return
+        except Exception as e:
+            self.write_terminal(f">> ❌ Fehler beim Lesen der Konten: {e}\n", "ERROR")
+            
+        self.account_combo_var.set("⚠️ Nicht verbunden")
+        self._update_broker_labels()
 
     def test_mt5_connection(self):
         if mt5.initialize():
@@ -2376,7 +2556,9 @@ class ModernFinGPTGUI(ctk.CTk):
         import json
         cfg = {
             # KI & Ollama
+            "ki_provider":      self.ki_provider_var.get(),
             "ollama_url":       self.url_entry.get().strip(),
+            "api_key":          self.api_key_entry.get().strip(),
             "llm_model":        self.model_combo.get(),
             "interval":         int(self.interval_slider.get()),
             "ai_temperature":   round(self.ai_temp_slider.get(), 1),
@@ -2471,12 +2653,18 @@ class ModernFinGPTGUI(ctk.CTk):
                     switch.select() if v else switch.deselect()
 
             # KI & Ollama
+            if cfg.get("ki_provider"):
+                self.ki_provider_var.set(cfg["ki_provider"])
             _set_entry(self.url_entry, "ollama_url")
+            _set_entry(self.api_key_entry, "api_key")
             if cfg.get("llm_model"):
                 self.model_combo.set(cfg["llm_model"])
             _set_slider(self.interval_slider, self.interval_lbl, "interval", fmt="{:.0f}s")
             _set_slider(self.ai_temp_slider, self.ai_temp_lbl, "ai_temperature", fmt="{:.1f}")
             _set_combo(self.prompt_lang_var, "prompt_lang")
+            
+            # trigger UI updates based on loaded provider
+            self.after(200, lambda: self._on_provider_change())
 
             # Trading Style
             _set_combo(self.trading_style_var, "trading_style")
@@ -2539,73 +2727,84 @@ class ModernFinGPTGUI(ctk.CTk):
     def setup_faq_tab(self):
         tab = self.tabview.tab("❓ FAQ")
         tab.grid_columnconfigure(0, weight=1)
+        tab.grid_columnconfigure(1, weight=4) # New right column for content
         tab.grid_rowconfigure(1, weight=1)
         
-        # Header
+        # Header (spans both columns)
         header = ctk.CTkFrame(tab, fg_color="transparent")
-        header.grid(row=0, column=0, sticky="ew", padx=20, pady=(20, 10))
+        header.grid(row=0, column=0, columnspan=2, sticky="ew", padx=20, pady=(20, 10))
         
         ctk.CTkLabel(header, text="Häufig gestellte Fragen (FAQ)", 
                      font=ctk.CTkFont(size=24, weight="bold")).pack(side="left")
         ctk.CTkLabel(header, text="Hilfe zur Software & Trading-Plattform", 
                      font=ctk.CTkFont(size=14), text_color="gray60").pack(side="left", padx=(15, 0), pady=(8, 0))
+
+        # Dataset mapped by category
+        self.faq_dataset = {
+            "🤖 KI & Ollama": [
+                ("Muss Ollama im Hintergrund laufen?", "Ja! FinGPT greift auf ein lokales KI-Modell (z.B. llama3.2) über die Ollama API zu. Ohne gestarteten Ollama-Service (meist http://localhost:11434) funktioniert die KI-Analyse, das Journal-Reasoning und das Setup-Finden nicht."),
+                ("Wie funktioniert der AI Trade Coach (Reflexion) im Journal?", "Wenn ein Trade im Minus geschlossen wird, taucht im '📝 Journal' Tab beim Anklicken des Trades im KI-Panel unten rechts der Button '🧠 System-Analyse anfordern' auf. Darüber schickt FinGPT rückwirkend die Indikatordaten nochmals an Ollama, um aus dem Fehler zu lernen (z.B. Fakeouts, gegen den Trend gehandelt etc.)."),
+                ("Unterstützt FinGPT andere KI-Modelle außer Ollama?", "Ja! Wechsle in den '⚙️ Konfiguration' Tab unter '🤖 KI & Ollama'. Dort kannst du auch OpenAI (ChatGPT), Anthropic (Claude) oder DeepSeek auswählen und deinen API-Key hinterlegen."),
+                ("Wie liest FinGPT die Charts?", "Die Software nutzt die MetaTrader 5 Schnittstelle, um Preisdaten (Open, High, Low, Close) für verschiedene Zeitfenster (z.B. M15, H1, H4) direkt im Hintergrund abzufragen. Die Python-Engine berechnet daraus Indikatoren (RSI, MACD, Bollinger Bänder) und gibt diese textuell an das lokale Ollama-Modell oder die Cloud APIs weiter.")
+            ],
+            "📈 MetaTrader 5": [
+                ("Wie verbinde ich MetaTrader 5?", "Wechsle in den Tab '⚙️ Konfiguration' und überprüfe, ob der MT5-Pfad korrekt ist. Wenn alles stimmt, klicke oben rechts auf '▶ Live Starten'. Achte darauf, dass im MetaTrader 5 oben der Button 'Algo-Trading' aktiviert (grün) ist!"),
+                ("Warum tradet die KI nicht, obwohl Live gestartet ist?", "1. Ist 'Algo-Trading' im MT5 an?\n2. Ist im '⚙️ Konfiguration' Tab -> '⚙️ System' der Schalter 'Trading Erlaubt' aktiv?\n3. Findet die KI gerade überhaupt ein Setup? FinGPT erzwingt keine Trades. Schau im '💻 Terminal' Tab nach Log-Ausgaben oder nutze den '🤖 KI Trade-Berater' in der Live Markt-Übersicht für manuelle Setups.")
+            ],
+            "🧠 RL Engine": [
+                ("Was bedeutet der rote Punkt bei RL Engine unten rechts?", "Die RL (Reinforcement Learning) Engine sucht nach fertig trainierten KI-Agenten im Ordner 'storage/rl_agents'. Der rote Punkt bedeutet, dass das System momentan im Basis-Modus läuft, weil noch keine Modelle trainiert und gespeichert wurden. FinGPT funktioniert auch ohne diese Agenten einwandfrei.")
+            ]
+        }
+
+        # Sidebar for categories
+        sidebar = ctk.CTkFrame(tab, corner_radius=10, fg_color=("gray85", "#181818"))
+        sidebar.grid(row=1, column=0, sticky="nsew", padx=(20, 10), pady=(0, 20))
         
-        # Scrollable Content
-        scroll = ctk.CTkScrollableFrame(tab, fg_color="transparent")
-        scroll.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 20))
-        
-        # FAQ Daten
-        faqs = [
-            ("Wie verbinde ich MetaTrader 5?", 
-             "Wechsle in den Tab '⚙️ Konfiguration' und überprüfe, ob der MT5-Pfad korrekt ist. "
-             "Wenn alles stimmt, klicke oben rechts auf '▶ Live Starten'. Achte darauf, dass im MetaTrader 5 "
-             "oben der Button 'Algo-Trading' aktiviert (grün) ist!"),
-             
-            ("Was bedeutet der rote Punkt bei RL Engine unten rechts?", 
-             "Die RL (Reinforcement Learning) Engine sucht nach fertig trainierten KI-Agenten im Ordner 'storage/rl_agents'. "
-             "Der rote Punkt bedeutet, dass das System momentan im Basis-Modus läuft, weil noch keine Modelle "
-             "trainiert und gespeichert wurden. FinGPT funktioniert auch ohne diese Agenten einwandfrei."),
-             
-            ("Warum tradet die KI nicht, obwohl Live gestartet ist?", 
-             "1. Ist 'Algo-Trading' im MT5 an?\n"
-             "2. Ist im '⚙️ Konfiguration' Tab -> '⚙️ System' der Schalter 'Trading Erlaubt' aktiv?\n"
-             "3. Findet die KI gerade überhaupt ein Setup? FinGPT erzwingt keine Trades. "
-             "Schau im '💻 Terminal' Tab nach Log-Ausgaben oder nutze den '🤖 KI Trade-Berater' in der Live Markt-Übersicht für manuelle Setups."),
-             
-            ("Wie funktioniert der AI Trade Coach (Reflexion) im Journal?", 
-             "Wenn ein Trade im Minus geschlossen wird, taucht im '📝 Journal' Tab beim Anklicken "
-             "des Trades im KI-Panel unten rechts der Button '🧠 System-Analyse anfordern' auf. "
-             "Darüber schickt FinGPT rückwirkend die Indikatordaten nochmals an Ollama, um aus "
-             "dem Fehler zu lernen (z.B. Fakeouts, gegen den Trend gehandelt etc.)."),
-             
-            ("Wie liest FinGPT die Charts?", 
-             "Die Software nutzt die MetaTrader 5 Schnittstelle, um Preisdaten (Open, High, Low, Close) für "
-             "verschiedene Zeitfenster (z.B. M15, H1, H4) direkt im Hintergrund abzufragen. "
-             "Die Python-Engine berechnet daraus Indikatoren (RSI, MACD, Bollinger Bänder) und gibt "
-             "diese textuell an das lokale Ollama-Modell weiter."),
-             
-            ("Muss Ollama im Hintergrund laufen?", 
-             "Ja! FinGPT greift auf ein lokales KI-Modell (z.B. llama3.2) über die Ollama API zu. "
-             "Ohne gestarteten Ollama-Service (meist http://localhost:11434) funktioniert die "
-             "KI-Analyse, das Journal-Reasoning und das Setup-Finden nicht.")
-        ]
-        
-        # Rendere FAQ Cards
-        for idx, (question, answer) in enumerate(faqs):
-            card = ctk.CTkFrame(scroll, fg_color=("gray90", "gray13"), corner_radius=12)
-            card.pack(fill="x", padx=10, pady=(0, 15))
+        ctk.CTkLabel(sidebar, text="Themen", font=ctk.CTkFont(size=14, weight="bold"), text_color="gray50").pack(anchor="w", padx=15, pady=(15, 10))
+
+        # Content area for questions
+        self.faq_content_area = ctk.CTkScrollableFrame(tab, fg_color="transparent")
+        self.faq_content_area.grid(row=1, column=1, sticky="nsew", padx=(10, 20), pady=(0, 20))
+
+        # Render Category Buttons
+        self.faq_buttons = []
+        for cat in self.faq_dataset.keys():
+            btn = ctk.CTkButton(sidebar, text=cat, fg_color="transparent", text_color="gray70", anchor="w",
+                                hover_color="#2A2A2A", command=lambda c=cat: self._render_faq_category(c))
+            btn.pack(fill="x", padx=10, pady=2)
+            self.faq_buttons.append((cat, btn))
+
+        # Load first category
+        if self.faq_dataset:
+            first_cat = list(self.faq_dataset.keys())[0]
+            self._render_faq_category(first_cat)
+
+    def _render_faq_category(self, category_name):
+        """Updates the FAQ content area with items matching the selected category."""
+        # Update button highlighting
+        for name, btn in self.faq_buttons:
+            if name == category_name:
+                btn.configure(fg_color="#333333", text_color="#5EBA7D", font=ctk.CTkFont(weight="bold"))
+            else:
+                btn.configure(fg_color="transparent", text_color="gray70", font=ctk.CTkFont(weight="normal"))
+
+        # Clear existing cards
+        for widget in self.faq_content_area.winfo_children():
+            widget.destroy()
+
+        # Render new cards
+        faqs = self.faq_dataset.get(category_name, [])
+        for question, answer in faqs:
+            card = ctk.CTkFrame(self.faq_content_area, fg_color=("gray90", "gray13"), corner_radius=12)
+            card.pack(fill="x", padx=5, pady=(0, 15))
             card.grid_columnconfigure(0, weight=1)
             
-            # Question (Bold)
-            q_lbl = ctk.CTkLabel(card, text=f"Q: {question}", 
-                                 font=ctk.CTkFont(size=14, weight="bold"), 
-                                 text_color="#5EBA7D", justify="left", anchor="w")
+            q_lbl = ctk.CTkLabel(card, text=f"Q: {question}", font=ctk.CTkFont(size=14, weight="bold"), 
+                                 text_color="#5EBA7D", justify="left", anchor="w", wraplength=650)
             q_lbl.grid(row=0, column=0, sticky="ew", padx=20, pady=(15, 5))
             
-            # Answer
-            a_lbl = ctk.CTkLabel(card, text=answer, 
-                                 font=ctk.CTkFont(size=13), 
-                                 text_color="gray70", justify="left", anchor="w", wraplength=900)
+            a_lbl = ctk.CTkLabel(card, text=answer, font=ctk.CTkFont(size=13), 
+                                 text_color="gray70", justify="left", anchor="w", wraplength=650)
             a_lbl.grid(row=1, column=0, sticky="ew", padx=20, pady=(0, 15))
 
     # ==========================================
@@ -2925,22 +3124,13 @@ class ModernFinGPTGUI(ctk.CTk):
                 continue
                 
             symbol = random.choice(self.dashboard_symbols)[1]
-            _base_url = getattr(self, 'url_entry', None)
-            url = (_base_url.get().strip().rstrip("/") if _base_url else "http://localhost:11434")
-            _model = getattr(self, 'model_combo', None)
-            model = (_model.get() if _model else "llama3.2")
-            
-            prompt = f"Du bist ein FinGPT Agent. Schreibe eine extrem kurze (max 6 Worte) und spannende Feststellung zum {symbol} Chart. Zum Beispiel 'RSI stark überverkauft bei {symbol}' oder 'Volatilitäts-Spike bei {symbol} registriert.'. Antworte nur mit diesem einen Satz, keine Einleitung."
+            sys_prompt = "Du bist ein FinGPT Agent. Antworte in maximal einem Satz und maximal 10 Worten."
+            prompt = f"Schreibe eine extrem kurze und spannende Feststellung zum {symbol} Chart. Zum Beispiel 'RSI stark überverkauft bei {symbol}' oder 'Volatilitäts-Spike bei {symbol} registriert.'. Keine Einleitung."
             
             try:
-                resp = requests.post(f"{url}/api/generate", json={
-                    "model": model,
-                    "prompt": prompt,
-                    "stream": False
-                }, timeout=10)
-                
-                if resp.status_code == 200:
-                    text = resp.json().get("response", "").strip().replace('"', '')
+                text_raw = self._call_llm_api(system_prompt=sys_prompt, user_prompt=prompt, max_tokens=30)
+                if text_raw and not text_raw.startswith("[Fehler") and not text_raw.startswith("[API Fehler"):
+                    text = text_raw.strip().replace('"', '')
                     if text:
                         if not hasattr(self, 'ai_bubbles'):
                             self.ai_bubbles = []
@@ -3173,8 +3363,9 @@ class ModernFinGPTGUI(ctk.CTk):
                         "Position Trading": "Strategische Trendfolge, viel Geduld.",
                     }.get(style, "")
 
+                    sys_prompt = "Du bist FinGPT, ein professioneller Forex Bot."
                     prompt = (
-                        f"Du bist FinGPT, ein professioneller Forex Bot. Analysiere: {symbol}. "
+                        f"Analysiere: {symbol}. "
                         f"Stil: {style}. {style_instruction} "
                         f"Marktdaten: {signal_hint} "
                         f"Antworte NUR mit: BUY, SELL, oder WARTEN. Keine Erklärung."
@@ -3182,19 +3373,13 @@ class ModernFinGPTGUI(ctk.CTk):
 
                     ai_signal = "WARTEN"
                     try:
-                        resp = requests.post(
-                            f"{base_url}/api/generate",
-                            json={"model": model, "prompt": prompt, "stream": False},
-                            timeout=20,
-                        )
-                        if resp.status_code == 200:
-                            raw = resp.json().get("response", "").strip().upper()
-                            if re.search(r'\bBUY\b|\bKAUF\b|\bLONG\b', raw):
-                                ai_signal = "BUY"
-                            elif re.search(r'\bSELL\b|\bVERKAUF\b|\bSHORT\b', raw):
-                                ai_signal = "SELL"
+                        raw = self._call_llm_api(system_prompt=sys_prompt, user_prompt=prompt, max_tokens=20).strip().upper()
+                        if re.search(r'\bBUY\b|\bKAUF\b|\bLONG\b', raw):
+                            ai_signal = "BUY"
+                        elif re.search(r'\bSELL\b|\bVERKAUF\b|\bSHORT\b', raw):
+                            ai_signal = "SELL"
                     except Exception as e:
-                        self.write_terminal(f">> [AUTO] Ollama Fehler für {symbol}: {e}\n")
+                        self.write_terminal(f">> [AUTO] KI API Fehler für {symbol}: {e}\n")
                         continue
 
                     self.write_terminal(
@@ -3507,28 +3692,29 @@ class ModernFinGPTGUI(ctk.CTk):
             self._update_mvp_trade()
 
     def _update_mvp_trade(self):
-        journal_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "storage", "trade_journal")
-        today_str = datetime.now().strftime("%Y-%m-%d")
+        if not mt5.initialize():
+            self.mvp_trade_lbl.configure(text="Noch keine Gewinne", text_color="gray50")
+            return
+            
+        today_start = datetime.now().replace(hour=0, minute=0, second=0)
+        deals = mt5.history_deals_get(today_start, datetime.now())
         
         best_profit = -float('inf')
-        best_trade = None
+        best_deal = None
         
-        if os.path.exists(journal_dir):
-            for file in os.listdir(journal_dir):
-                if file.endswith(f"_{today_str}.json"):
-                    try:
-                        with open(os.path.join(journal_dir, file), "r") as f:
-                            data = json.load(f)
-                            p = float(data.get("profit", 0))
-                            if p > best_profit:
-                                best_profit = p
-                                best_trade = data
-                    except: pass
-                    
-        if best_trade and best_profit > 0:
-            sym = best_trade.get("symbol", "N/A")
-            act = best_trade.get("action", "")
-            self.mvp_trade_lbl.configure(text=f"{sym} {act} (€{best_profit:.2f})", text_color="#5EBA7D")
+        if deals:
+            for deal in deals:
+                if deal.entry == mt5.DEAL_ENTRY_OUT and deal.profit > 0:
+                    if deal.profit > best_profit:
+                        best_profit = deal.profit
+                        best_deal = deal
+                        
+        if best_deal and best_profit > 0:
+            sym = best_deal.symbol if best_deal.symbol else "N/A"
+            # If DEAL_ENTRY_OUT is a SELL deal, it closed a LONG position. 
+            # If it's a BUY deal, it closed a SHORT position.
+            action = "LONG" if best_deal.type == mt5.DEAL_TYPE_SELL else "SHORT"
+            self.mvp_trade_lbl.configure(text=f"{sym} {action} (€{best_profit:.2f})", text_color="#5EBA7D")
         else:
             self.mvp_trade_lbl.configure(text="Noch keine Gewinne", text_color="gray50")
 
@@ -3552,8 +3738,8 @@ class ModernFinGPTGUI(ctk.CTk):
                 trend_colors = []
                 for tf in [mt5.TIMEFRAME_M15, mt5.TIMEFRAME_H1, mt5.TIMEFRAME_H4]:
                     tf_rates = mt5.copy_rates_from_pos(symbol, tf, 0, 5)
-                    if tf_rates is not None and len(tf_rates) >= 5:
-                        # Simple trend: current close vs close 4 periods ago
+                    if tf_rates is not None and len(tf_rates) >= 2:
+                        # Simple trend: current close vs oldest available close (up to 4 periods ago)
                         if tf_rates[-1]['close'] > tf_rates[0]['close']:
                             trend_colors.append("#5EBA7D") # Green / Bull
                         elif tf_rates[-1]['close'] < tf_rates[0]['close']:
@@ -3951,10 +4137,80 @@ class ModernFinGPTGUI(ctk.CTk):
         self.after(2000, feedback.destroy)
 
 
-def main():
-    try:
+class SplashScreen(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+        
+        self.title("FinGPT Startup")
+        
+        # Center the splash screen
+        window_width = 500
+        window_height = 300
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        x_cordinate = int((screen_width/2) - (window_width/2))
+        y_cordinate = int((screen_height/2) - (window_height/2))
+        self.geometry(f"{window_width}x{window_height}+{x_cordinate}+{y_cordinate}")
+        
+        self.overrideredirect(True) # Remove windows borders/titlebar for clean look
+        self.configure(fg_color="#121212")
+        
+        # UI Elements
+        self.logo_lbl = ctk.CTkLabel(self, text="FinGPT", font=ctk.CTkFont(size=42, weight="bold"), text_color="#5EBA7D")
+        self.logo_lbl.pack(pady=(60, 10))
+        
+        self.sub_lbl = ctk.CTkLabel(self, text="AI Trading Assistant", font=ctk.CTkFont(size=16), text_color="gray70")
+        self.sub_lbl.pack(pady=(0, 30))
+        
+        self.progress = ctk.CTkProgressBar(self, width=350, height=10, progress_color="#5EBA7D", fg_color="#1E1E1E", corner_radius=5)
+        self.progress.pack(pady=10)
+        self.progress.set(0)
+        
+        self.status_lbl = ctk.CTkLabel(self, text="Initialisiere System...", font=ctk.CTkFont(size=12), text_color="gray50")
+        self.status_lbl.pack(pady=5)
+        
+        # Startup variables
+        self.step = 0
+        self.max_steps = 100
+        self.loading_texts = [
+            "Lade Metatrader 5 Module...",
+            "Initialisiere KI Trading Modus...",
+            "Verbinde zu Ollama / Cloud APIs...",
+            "Lade historische Marktdaten...",
+            "Kalibriere Neuronale Netze...",
+            "Lese Konfigurationsdateien...",
+            "Prüfe Handelssignale...",
+            "Starte FinGPT Dashboard..."
+        ]
+        
+        # Start animation loop (total duration ~10s -> 100 steps * 100ms)
+        self.after(200, self._animate)
+
+    def _animate(self):
+        if self.step < self.max_steps:
+            self.step += 1
+            progress_val = self.step / self.max_steps
+            self.progress.set(progress_val)
+            
+            # Change status text dynamically based on progress
+            idx = int(progress_val * len(self.loading_texts))
+            if idx >= len(self.loading_texts):
+                idx = len(self.loading_texts) - 1
+            self.status_lbl.configure(text=self.loading_texts[idx])
+            
+            self.after(100, self._animate) # 100ms per step * 100 = 10 seconds
+        else:
+            self._launch_main_app()
+
+    def _launch_main_app(self):
+        self.destroy() # Close splash
         app = ModernFinGPTGUI()
         app.mainloop()
+
+def main():
+    try:
+        splash = SplashScreen()
+        splash.mainloop()
     except Exception as e:
         import traceback
         traceback.print_exc()

@@ -44,3 +44,15 @@ class LiveDataRow(ctk.CTkFrame):
         self.trend_m15.configure(text_color=m15_color)
         self.trend_h1.configure(text_color=h1_color)
         self.trend_h4.configure(text_color=h4_color)
+        
+        # Calculate dynamic signal based on the three trend dots
+        green = "#5EBA7D"
+        red = "#E74C3C"
+        
+        colors = [m15_color, h1_color, h4_color]
+        if all(c == green for c in colors):
+            self.signal_btn.configure(text="BUY", fg_color="#5EBA7D", hover_color="#5EBA7D")
+        elif all(c == red for c in colors):
+            self.signal_btn.configure(text="SELL", fg_color="#E74C3C", hover_color="#E74C3C")
+        else:
+            self.signal_btn.configure(text="WAIT", fg_color="#F39C12", hover_color="#F39C12")

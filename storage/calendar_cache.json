@@ -401,16 +401,6 @@
 		<url><![CDATA[https://www.forexfactory.com/calendar/335-ge-gfk-consumer-climate]]></url>
 	</event>
 	<event>
-		<title>Foreign Direct Investment ytd/y</title>
-		<country>CNY</country>
-		<date><![CDATA[02-25-2026]]></date>
-		<time><![CDATA[7:02am]]></time>
-		<impact><![CDATA[Low]]></impact>
-		<forecast />
-		<previous><![CDATA[-9.5%]]></previous>
-		<url><![CDATA[https://www.forexfactory.com/calendar/457-ch-foreign-direct-investment-ytdy]]></url>
-	</event>
-	<event>
 		<title>RBA Gov Bullock Speaks</title>
 		<country>AUD</country>
 		<date><![CDATA[02-25-2026]]></date>
@@ -541,14 +531,14 @@
 		<url><![CDATA[https://www.forexfactory.com/calendar/333-au-rba-bulletin]]></url>
 	</event>
 	<event>
-		<title>NAB Quarterly Business Confidence</title>
-		<country>AUD</country>
+		<title>Foreign Direct Investment ytd/y</title>
+		<country>CNY</country>
 		<date><![CDATA[02-26-2026]]></date>
-		<time><![CDATA[4:59am]]></time>
+		<time><![CDATA[7:02am]]></time>
 		<impact><![CDATA[Low]]></impact>
 		<forecast />
-		<previous><![CDATA[2]]></previous>
-		<url><![CDATA[https://www.forexfactory.com/calendar/248-au-nab-quarterly-business-confidence]]></url>
+		<previous><![CDATA[-9.5%]]></previous>
+		<url><![CDATA[https://www.forexfactory.com/calendar/457-ch-foreign-direct-investment-ytdy]]></url>
 	</event>
 	<event>
 		<title>ECB President Lagarde Speaks</title>
@@ -689,6 +679,16 @@
 		<forecast><![CDATA[0.7%]]></forecast>
 		<previous><![CDATA[0.8%]]></previous>
 		<url><![CDATA[https://www.forexfactory.com/calendar/344-au-private-sector-credit-mm]]></url>
+	</event>
+	<event>
+		<title>NAB Quarterly Business Confidence</title>
+		<country>AUD</country>
+		<date><![CDATA[02-27-2026]]></date>
+		<time><![CDATA[4:59am]]></time>
+		<impact><![CDATA[Low]]></impact>
+		<forecast />
+		<previous><![CDATA[2]]></previous>
+		<url><![CDATA[https://www.forexfactory.com/calendar/248-au-nab-quarterly-business-confidence]]></url>
 	</event>
 	<event>
 		<title>Housing Starts y/y</title>
