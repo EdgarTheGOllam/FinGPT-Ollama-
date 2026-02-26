@@ -531,16 +531,6 @@
 		<url><![CDATA[https://www.forexfactory.com/calendar/333-au-rba-bulletin]]></url>
 	</event>
 	<event>
-		<title>Foreign Direct Investment ytd/y</title>
-		<country>CNY</country>
-		<date><![CDATA[02-26-2026]]></date>
-		<time><![CDATA[7:02am]]></time>
-		<impact><![CDATA[Low]]></impact>
-		<forecast />
-		<previous><![CDATA[-9.5%]]></previous>
-		<url><![CDATA[https://www.forexfactory.com/calendar/457-ch-foreign-direct-investment-ytdy]]></url>
-	</event>
-	<event>
 		<title>ECB President Lagarde Speaks</title>
 		<country>EUR</country>
 		<date><![CDATA[02-26-2026]]></date>
@@ -584,7 +574,7 @@
 		<title>Italian 10-y Bond Auction</title>
 		<country>EUR</country>
 		<date><![CDATA[02-26-2026]]></date>
-		<time><![CDATA[10:33am]]></time>
+		<time><![CDATA[10:06am]]></time>
 		<impact><![CDATA[Low]]></impact>
 		<forecast />
 		<previous><![CDATA[3.44|1.6]]></previous>
@@ -679,16 +669,6 @@
 		<forecast><![CDATA[0.7%]]></forecast>
 		<previous><![CDATA[0.8%]]></previous>
 		<url><![CDATA[https://www.forexfactory.com/calendar/344-au-private-sector-credit-mm]]></url>
-	</event>
-	<event>
-		<title>NAB Quarterly Business Confidence</title>
-		<country>AUD</country>
-		<date><![CDATA[02-27-2026]]></date>
-		<time><![CDATA[4:59am]]></time>
-		<impact><![CDATA[Low]]></impact>
-		<forecast />
-		<previous><![CDATA[2]]></previous>
-		<url><![CDATA[https://www.forexfactory.com/calendar/248-au-nab-quarterly-business-confidence]]></url>
 	</event>
 	<event>
 		<title>Housing Starts y/y</title>
@@ -799,6 +779,16 @@
 		<forecast><![CDATA[2K]]></forecast>
 		<previous><![CDATA[0K]]></previous>
 		<url><![CDATA[https://www.forexfactory.com/calendar/60-ge-unemployment-change]]></url>
+	</event>
+	<event>
+		<title>Foreign Direct Investment ytd/y</title>
+		<country>CNY</country>
+		<date><![CDATA[02-27-2026]]></date>
+		<time><![CDATA[10:02am]]></time>
+		<impact><![CDATA[Low]]></impact>
+		<forecast />
+		<previous><![CDATA[-9.5%]]></previous>
+		<url><![CDATA[https://www.forexfactory.com/calendar/457-ch-foreign-direct-investment-ytdy]]></url>
 	</event>
 	<event>
 		<title>MPC Member Pill Speaks</title>
