@@ -1,115 +1,132 @@
-# 🤖 FinGPT – KI‑gestütztes Trading‑System für MetaTrader 5
+# 🤖 FinGPT — Lokales KI-Trading-System für MetaTrader 5
 
-> "Der Markt kann länger irrational bleiben, als du liquide bleiben kannst." – John Maynard Keynes
+> "Der Markt kann länger irrational bleiben, als du liquide bleiben kannst." — John Maynard Keynes
 
-Ein vollständig lokales, Python‑basiertes Trading‑System, das klassische technische Indikatoren mit großen Sprachmodellen (LLMs) über **Ollama** kombiniert und über die MetaTrader 5‑API (MQL5‑Bridge) ausführt.
+**FinGPT-Ollama** ist ein vollkommen lokales, Privacy-First Trading-System. Es kombiniert klassische technische Analyse mit der Power moderner Large Language Models (LLMs) via **Ollama**, um datengestützte Handelsentscheidungen direkt in **MetaTrader 5** auszuführen.
 
-## 📌 Überblick
+---
 
-| Feature | Kurzbeschreibung |
-| ------- | ----------------- |
-| **Technische Indikatoren** | RSI, MACD, dynamische Support/Resistance, Multi‑Timeframe‑Analyse |
-| **Risikomanagement** | Lot‑Berechnung nach Risiko‑% → automatischer Lot‑Scaler, Trailing‑Stops, Partial‑Close, Magic‑Number |
-| **KI‑Integration (Ollama)** | Modelle: `fingpt`, `llama3`, `mistral` (Fallback). Analyse von Indikatoren + Chart‑Struktur, Ausgabe in Deutsch inkl. Confidence‑Score |
-| **Auto‑Trading Engine** | Pipeline: Trend → RSI → MACD → S/R → KI → Order‑Platzierung, Symbol‑Rotation, Fehlertoleranz |
-| **CLI‑Menü** | 16‑Punkte‑Menu für Daten, KI‑Analyse, Auto‑Trading, Indikatoren‑Einstellungen, Logging, … |
-| **Logging** | Strukturierte Logs (`SYSTEM`, `TRADE`, `AI`, `ERROR` …) mit Emojis, tägliche Log‑Dateien |
-| **Offline‑First** | Alles läuft **lokal** – keine Cloud‑Abhängigkeiten, nur Ollama & MetaTrader 5. |
+## 🌟 Kern-Philosophie
+- **100% Local-First:** Kein Datentransfer in die Cloud. Deine Strategien und Trades bleiben dein Geheimnis.
+- **Privacy-by-Design:** Volle Kontrolle über deine Finanzdaten.
+- **Hybrid-Analyse:** Symbiose aus harten mathematischen Indikatoren und KI-basierter Marktstimmungs-Auswertung.
 
-## 🚀 Installation
+---
 
-### 1. System‑Voraussetzungen
-- **Python** ≥ 3.9 (empfohlen 3.11)
-- **MetaTrader 5** (Demo‑ oder Live‑Konto)
-- **Ollama** – Modelle `fingpt`, `llama3`, `mistral` lokal installiert
-- **Git** für das Klonen des Repos
+## 🚀 Hauptmerkmale
+
+| Feature | Beschreibung |
+| :--- | :--- |
+| **💡 KI-Integration** | Nutzt lokale Modelle (z.B. `fingpt`, `qwen2.5-coder`) via Ollama für Marktprognosen. |
+| **📊 Chart-Analyse** | Echtzeit-Auswertung von RSI, MACD, Moving Averages und dynamischen S/R-Zonen. |
+| **🛡️ Risk Management** | Automatische Lot-Berechnung basierend auf Risk-Percentage, Trailing-Stops & Break-Even. |
+| **🖥️ Modern GUI / CLI** | Flexibilität zwischen einem mächtigen Terminal-Menü und einer modernen Benutzeroberfläche. |
+| **🌙 Asynchrone Engine** | Optimiert für stabile Ausführung, auch bei nächtlichen Workflows. |
+| **📝 Audit Logging** | Detaillierte Historie mit Kategorisierung (TRADE, AI, SYSTEM, ERROR). |
+
+---
+
+## 🛠️ Installation
+
+### 1. Voraussetzungen
+- **Windows 11** (empfohlen für volle MT5-Kompatibilität).
+- **Python 3.14+** (Nutzt modernste Syntax-Features).
+- **Ollama:** Installiert und konfiguriert (`OLLAMA_ORIGINS=*`).
+- **NVIDIA GPU:** Empfohlen (RTX 4080 Kapazitäten werden optimal genutzt).
 
 ### 2. Repository klonen
 ```bash
-git clone https://github.com/EdgarTomas2001/FinGPT-Ollama-.git
+git clone https://github.com/EdgarTheGOllam/FinGPT-Ollama-.git
 cd FinGPT-Ollama-
 ```
 
-### 3. Python‑Abhängigkeiten installieren
+### 3. Umgebung einrichten
+Wir empfehlen die manuelle Pfad-Konfiguration für maximale Kontrolle:
 ```bash
 python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install --upgrade pip
+.venv\Scripts\activate
 pip install -r requirements.txt
 ```
-> **Hinweis:** Alle Pakete sind bereits vorkonfiguriert – keine zusätzlichen Installationen nötig.
 
-### 4. Ollama‑Umgebung konfigurieren
+### 4. Modelle laden
+Stelle sicher, dass deine lokalen Modelle bereit sind:
 ```bash
 ollama pull fingpt
-ollama pull llama3
-ollama pull mistral
-```
-Falls du die Ollama‑API von einem anderen Prozess nutzt, setze:
-```bash
-export OLLAMA_ORIGINS=*   # Linux/macOS
-set OLLAMA_ORIGINS=*      # Windows CMD
+ollama pull qwen2.5-coder:32b # Oder dein bevorzugtes Model
 ```
 
-### 5. MetaTrader 5‑Verbindung prüfen
-```python
-import MetaTrader5 as mt5
-if not mt5.initialize():
-    print("MT5‑Initialisierung fehlgeschlagen")
-else:
-    print("MT5 erfolgreich verbunden")
-    mt5.shutdown()
-```
+---
 
-### 6. Konfigurationsdatei anlegen (`config.yaml`)
+## ⚙️ Konfiguration (`config.yaml`)
+
+Passe das System an deine Infrastruktur an. **Hinweis:** Nutze manuelle Pfade für volle Transparenz.
+
 ```yaml
 mt5:
   login: 12345678
-  password: "dein_passwort"
-  server: "Demo-Server"
+  password: "dein_sicheres_passwort"
+  server: "Dein-Broker-Server"
 
 ollama:
   model: "fingpt"
-  endpoint: "http://127.0.0.1:11434/api/generate"
+  host: "http://localhost:11434"
 
-risk:
+trading:
   risk_percent: 1.0
-  trailing_stop:
-    start: 20
-    step: 5
+  symbols: ["EURUSD", "BTCUSD", "XAUUSD"]
+  timeframes: ["M15", "H1"]
 
 paths:
-  logs: "./logs"
-  data: "./data"
+  logs: "C:/Users/edgar/FinGPT/logs"
+  data: "C:/Users/edgar/FinGPT/data"
 ```
-> Passe die Werte nach deinen Bedürfnissen an.
-
-## 📚 Nutzung
-```bash
-python main.py
-```
-Im interaktiven Menü kannst du Daten laden, KI‑Analysen starten, Auto‑Trading aktivieren und Einstellungen ändern. Vor dem Live‑Handel immer im Demo‑Modus testen – das Menü fragt explizit nach einer Bestätigung.
-
-## 🛠️ Weiterentwicklung
-- Modell‑Feintuning mit eigenen Finanz‑Datensätzen
-- Docker‑Support für schnelles Setup
-- Web‑UI (lokal, offline) via Flask + React
-- Back‑Testing‑Modul für historische Simulationen
-- CI/CD mit GitHub‑Actions (nur Lint & Tests, kein automatisches Deploy)
-
-## 🤝 Mitwirken
-1. Fork das Repository
-2. Feature‑Branch erstellen (`git checkout -b feature/mein‑feature`)
-3. Änderungen committen & Pushen
-4. Pull‑Request öffnen – bitte einen kurzen Überblick im PR‑Body geben
-
-*Bitte keine automatischen Pfad‑Ersetzungen im Code einbringen – verwende stattdessen Konfigurations‑Variablen.*
-
-## ⚠️ Disclaimer
-*FinGPT ist ein rein experimentelles, privates Projekt. Das System nutzt automatisierte Handelsentscheidungen und kann zu finanziellen Verlusten führen. Der Autor übernimmt keinerlei Haftung für Verluste, Schäden oder rechtliche Konsequenzen, die aus der Nutzung dieses Codes entstehen. Nutzer sind verpflichtet, das System zunächst in einer sicheren Umgebung (z. B. Demo‑Konto) zu testen und sämtliche regulatorischen Vorgaben sowie Risikomanagement‑Prinzipien eigenständig zu berücksichtigen.*
-
-## 📜 Lizenz
-MIT – du darfst das Projekt frei nutzen, modifizieren und kommerziell einsetzen, solange der Lizenz‑Hinweis erhalten bleibt.
 
 ---
-> **Tipp für nächtliche Arbeit:** Starte das Skript in einer `tmux`‑Session, damit du bei Verbindungsabbrüchen das Log weiter verfolgen kannst.
+
+## 📈 Nutzung
+
+### Start der Haupt-Engine
+```bash
+python FinGPT.py
+```
+
+### Start der Modernen GUI
+```bash
+python launch_gui.py
+```
+
+### Workflow-Empfehlung
+1. **Demo-Testing:** Nutze das System zuerst im Demo-Modus deines MT5-Kontos.
+2. **KI-Check:** Vergleiche die KI-Vorschläge mit deinem eigenen Chart-Audit.
+3. **Logging:** Überprüfe regelmäßig die Logs unter `C:\Users\edgar\FinGPT\logs`.
+
+---
+
+## 🗺️ Roadmap / Geplante Features
+- [ ] **Docker-Support:** Containerisierung für noch einfacheres Deployment.
+- [ ] **ComfyUI Integration:** Generierung von visuellen Chart-Reports via Stable Diffusion.
+- [ ] **Backtesting-Modul:** Simulation historischer Daten mit KI-Logik.
+- [ ] **3D-Druck-Alerts:** Integration von Status-Meldungen auf deinem Flashforge Adventurer 5M.
+
+---
+
+## 🤝 Mitwirken
+Beiträge sind willkommen! 
+1. Fork das Projekt.
+2. Erstelle einen Feature-Branch (`git checkout -b feature/AmazingFeature`).
+3. Commit deine Änderungen (`git commit -m 'Add some AmazingFeature'`).
+4. Push den Branch (`git push origin feature/AmazingFeature`).
+5. Öffne einen Pull Request.
+
+---
+
+## ⚠️ Disclaimer (Haftungsausschluss)
+**Der Handel mit Finanzinstrumenten ist mit erheblichen Risiken verbunden.** Dieses System ist ein experimentelles Tool. Es übernimmt keine Garantie für Gewinne. Der Autor übernimmt keine Haftung für finanzielle Verluste. Die Nutzung erfolgt auf eigene Gefahr. Teste das System **immer** zuerst in einer sicheren Umgebung (Demo-Konto).
+
+---
+
+## 📄 Lizenz
+Dieses Projekt ist unter der **MIT-Lizenz** lizenziert. Siehe die `LICENSE` Datei für Details.
+
+---
+*Entwickelt mit ❤️ für lokale KI und finanzielle Freiheit.*
