@@ -2,93 +2,71 @@
 
 > "Der Markt kann länger irrational bleiben, als du liquide bleiben kannst." – John Maynard Keynes
 
-Ein vollständig lokales, Python‑basiertes Trading‑System, das klassische technische Indikatoren mit großen Sprachmodellen (LLMs) über **Ollama** kombiniert und über die MetaTrader 5‑API (MQL5‑Bridge) ausführt.
+Ein professionelles, vollständig lokales Python‑basiertes Trading‑System, das klassische technische Indikatoren mit großen Sprachmodellen (LLMs) über **Ollama** kombiniert und über die MetaTrader 5‑API (MQL5‑Bridge) ausführt.
 
-## 📌 Überblick
+## 📌 Features
 
 | Feature | Kurzbeschreibung |
 | ------- | ----------------- |
-| **Technische Indikatoren** | RSI, MACD, dynamische Support/Resistance, Multi‑Timeframe‑Analyse |
-| **Risikomanagement** | Lot‑Berechnung nach Risiko‑% → automatischer Lot‑Scaler, Trailing‑Stops, Partial‑Close, Magic‑Number |
-| **KI‑Integration (Ollama)** | Modelle: `fingpt`, `llama3`, `mistral` (Fallback). Analyse von Indikatoren + Chart‑Struktur, Ausgabe in Deutsch inkl. Confidence‑Score |
-| **Auto‑Trading Engine** | Pipeline: Trend → RSI → MACD → S/R → KI → Order‑Platzierung, Symbol‑Rotation, Fehlertoleranz |
-| **CLI‑Menü** | 16‑Punkte‑Menu für Daten, KI‑Analyse, Auto‑Trading, Indikatoren‑Einstellungen, Logging, … |
-| **Logging** | Strukturierte Logs (`SYSTEM`, `TRADE`, `AI`, `ERROR` …) mit Emojis, tägliche Log‑Dateien |
-| **Offline‑First** | Alles läuft **lokal** – keine Cloud‑Abhängigkeiten, nur Ollama & MetaTrader 5. |
+| **Modernes GUI** | Hochwertiges Dashboard mit Dark Mode, Echtzeit-Metriken und Splash-Screen Animation. |
+| **KI‑Integration** | Nutzt **Ollama** (fingpt, llama3) für Marktanalysen mit Reasoning & Confidence-Score. |
+| **Auto‑Trading Engine** | Vollautomatische Pipeline: Trend-Analyse → Indikatoren → KI-Validierung → Order-Platzierung. |
+| **Risikomanagement** | Dynamische Lot-Berechnung (% Risiko), Trailing-Stops, Partial-Close und Schutzmechanismen. |
+| **Echtzeit-Charts** | Integration von Plotly für interaktive Markt-Visualisierungen direkt in der GUI. |
+| **Modularer Aufbau** | Saubere Trennung von Broker-Logik, Markt-Analyse, KI-Engine und UI-Komponenten. |
+| **Offline‑First** | Höchster Datenschutz: Alles läuft lokal – keine Cloud‑Abhängigkeiten notwendig. |
 
-## 🚀 Installation
+## � Projektstruktur
+
+Das System ist modular aufgebaut, um Wartbarkeit und Erweiterbarkeit zu gewährleisten:
+
+- `core/`: Das Herzstück – Enthält den `AIAnalyzer`, `MT5Broker` und Markt-Analyse-Logik.
+- `gui/`: Beinhaltet die moderne CustomTkinter-Oberfläche sowie klassische CLI-Menüs.
+- `trading/`: Logik für Indikatoren, Risikomanagement und Trading-Strategien.
+- `bridge/`: Die technische Schnittstelle (Receiver/Indicator) zu MetaTrader 5.
+- `config/`: Zentrale Verwaltung aller Parameter (KI-Modelle, Risiko, Pfade).
+- `storage/`: Persistente Speicherung von Trade-Logs, KI-Reasoning und Journalen.
+
+## �🚀 Installation
 
 ### 1. System‑Voraussetzungen
 - **Python** ≥ 3.9 (empfohlen 3.11)
-- **MetaTrader 5** (Demo‑ oder Live‑Konto)
-- **Ollama** – Modelle `fingpt`, `llama3`, `mistral` lokal installiert
-- **Git** für das Klonen des Repos
+- **MetaTrader 5** (Demo‑ oder Live‑Konto mit aktiviertem Algo-Handel)
+- **Ollama** – Modelle `fingpt`, `llama3` lokal installiert
 
-### 2. Repository klonen
+### 2. Setup
 ```bash
+# Repository klonen
 git clone https://github.com/EdgarTomas2001/FinGPT-Ollama-.git
 cd FinGPT-Ollama-
-```
 
-### 3. Python‑Abhängigkeiten installieren
-```bash
+# Virtuelle Umgebung erstellen
 python -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install --upgrade pip
+
+# Abhängigkeiten installieren
 pip install -r requirements.txt
 ```
-> **Hinweis:** Alle Pakete sind bereits vorkonfiguriert – keine zusätzlichen Installationen nötig.
 
-### 4. Ollama‑Umgebung konfigurieren
+### 3. Ollama Modells laden
 ```bash
 ollama pull fingpt
 ollama pull llama3
-ollama pull mistral
 ```
-Falls du die Ollama‑API von einem anderen Prozess nutzt, setze:
-```bash
-export OLLAMA_ORIGINS=*   # Linux/macOS
-set OLLAMA_ORIGINS=*      # Windows CMD
-```
-
-### 5. MetaTrader 5‑Verbindung prüfen
-```python
-import MetaTrader5 as mt5
-if not mt5.initialize():
-    print("MT5‑Initialisierung fehlgeschlagen")
-else:
-    print("MT5 erfolgreich verbunden")
-    mt5.shutdown()
-```
-
-### 6. Konfigurationsdatei anlegen (`config.yaml`)
-```yaml
-mt5:
-  login: 12345678
-  password: "dein_passwort"
-  server: "Demo-Server"
-
-ollama:
-  model: "fingpt"
-  endpoint: "http://127.0.0.1:11434/api/generate"
-
-risk:
-  risk_percent: 1.0
-  trailing_stop:
-    start: 20
-    step: 5
-
-paths:
-  logs: "./logs"
-  data: "./data"
-```
-> Passe die Werte nach deinen Bedürfnissen an.
 
 ## 📚 Nutzung
+
+Das System wird über den zentralen Launcher gestartet:
+
 ```bash
-python main.py
+python launch_gui.py
 ```
-Im interaktiven Menü kannst du Daten laden, KI‑Analysen starten, Auto‑Trading aktivieren und Einstellungen ändern. Vor dem Live‑Handel immer im Demo‑Modus testen – das Menü fragt explizit nach einer Bestätigung.
+
+### GUI Funktionen:
+- **Dashboard**: Live-Überblick über offene Positionen und Markt-Trends.
+- **AI Analysis**: Manuelle oder automatische Analyse von Symbolen durch das LLM.
+- **Settings**: Konfiguration von Risiko-Parametern, Trading-Zeiten und KI-Modellen direkt in der App.
+- **Log Viewer**: Echtzeit-Überwachung aller System- und Handelsaktivitäten.
 
 ## 🛠️ Weiterentwicklung
 - Modell‑Feintuning mit eigenen Finanz‑Datensätzen
