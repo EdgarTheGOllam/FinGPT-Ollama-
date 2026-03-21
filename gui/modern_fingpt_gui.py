@@ -9,12 +9,14 @@ import customtkinter as ctk
 import tkinter as tk
 from tkinter import messagebox
 import threading
+from core.app_config import app_config_manager
 import time
 import json
 import random
 from datetime import datetime
 import sys
 import os
+from PIL import Image
 
 # Ensure project root is on sys.path so gui.* imports resolve
 # whether this file is run directly or via launch_gui.py
@@ -41,10 +43,184 @@ try:
 except ImportError:
     CONFIG_MANAGER_AVAILABLE = False
 
+# Import Modernisierte Komponenten
 from gui.components.metric_card import MetricCard
 from gui.components.live_data_row import LiveDataRow
 from gui.views.dashboard_tab import DashboardView
+
+# Import Event Bus und Data Update Manager
+try:
+    from gui.controllers.event_bus import EventBus, DashboardEvents, DashboardEvent
+    EVENT_BUS_AVAILABLE = True
+except ImportError:
+    EVENT_BUS_AVAILABLE = False
+
+try:
+    from gui.utils.data_update_manager import DataUpdateManager
+    DATA_UPDATE_MANAGER_AVAILABLE = True
+except ImportError:
+    DATA_UPDATE_MANAGER_AVAILABLE = False
 from gui.views.charts_tab import ChartsView
+from gui.views.rl_settings_tab import RLSettingsView
+from gui.views.journal_tab import JournalView
+from gui.views.debate_tab import DebateView
+from gui.views.news_tab import NewsView
+from gui.views.backtest_tab import BacktestView
+from gui.views.terminal_tab import TerminalView
+from gui.views.config_tab import ConfigView
+from gui.views.faq_tab import FAQView
+from gui.views.heatmap_tab import HeatmapView
+
+# Advanced Indicators Import
+try:
+    from trading.advanced_indicators import AdvancedIndicators, IndicatorIntegration
+    ADVANCED_INDICATORS_AVAILABLE = True
+except ImportError:
+    ADVANCED_INDICATORS_AVAILABLE = False
+
+try:
+    from core.market_analyzer import MarketAnalyzer
+    MARKET_ANALYZER_AVAILABLE = True
+except ImportError:
+    MARKET_ANALYZER_AVAILABLE = False
+
+try:
+    from storage.experience_db import ExperienceDB
+    EXPERIENCE_DB_AVAILABLE = True
+except ImportError as e:
+    print(f"Experience DB nicht verfügbar: {e}")
+    EXPERIENCE_DB_AVAILABLE = False
+
+
+# ─────────────────────────────────────────────────────────────────
+# Modern Pill Navigation Bar (Native CTk)
+# ─────────────────────────────────────────────────────────────────
+class _ModernTabBar(ctk.CTkFrame):
+    """
+    Animierte, Apple-ähnliche "Segmented Control" Tab Bar.
+    Verwendet eine schwebendes "Pill" Element (`active_bg`), das sanft über die Tabs gleitet.
+    Korrigierte Z-Index Logik: Buttons liegen in einem transparenten Frame über der Pille.
+    """
+    def __init__(self, master, tabs: list[str], on_select, **kw):
+        super().__init__(master, fg_color="transparent", corner_radius=0, height=45, **kw)
+        self.pack_propagate(False)
+        self._tabs = tabs
+        self._on_select = on_select
+        self._buttons = {}
+        
+        # 1. Background layer for the sliding pill
+        self.bg_layer = ctk.CTkFrame(self, fg_color="transparent", corner_radius=15)
+        self.bg_layer.place(relx=0, rely=0, relwidth=1.0, relheight=1.0)
+        
+        # Die animierte, gleitende "Pille" im bg_layer (weiches helles Grau)
+        self.active_bg = ctk.CTkFrame(self.bg_layer, fg_color="#4B5563", corner_radius=12, height=35, width=0)
+        self.active_bg.place(x=0, y=5) # Initial width 0 hidden
+        
+        # 2. Foreground layer for the clickable buttons (transparent overlay)
+        self.fg_layer = ctk.CTkFrame(self, fg_color="transparent")
+        self.fg_layer.place(relx=0, rely=0, relwidth=1.0, relheight=1.0)
+        
+        self.num_tabs = len(tabs)
+        for i in range(self.num_tabs):
+            self.fg_layer.grid_columnconfigure(i, weight=1)
+            
+        for i, name in enumerate(tabs):
+            btn = ctk.CTkButton(
+                self.fg_layer,
+                text=name,
+                fg_color="transparent", # Immer transparent, Background macht das Pill
+                hover_color=("#D1D5DB", "#2A2D34"), # Leichter Hover-Effekt
+                text_color="#FFFFFF" if i == 0 else ("gray30", "#8B949E"),
+                font=ctk.CTkFont(family="Inter", size=13, weight="bold"),
+                corner_radius=12,
+                height=35,
+                width=10, # Auto-width by text
+                command=lambda n=name, idx=i: self._select(n, idx, notify=True)
+            )
+            btn.grid(row=0, column=i, sticky="ew", padx=3, pady=5)
+            self._buttons[name] = {"btn": btn, "index": i}
+            
+        # Startup variables
+        self._active_idx = 0
+        self._active_name = tabs[0]
+        self._current_x = 0
+        self._current_width = 0
+        self._animation_job = None
+        
+        # Give the GUI time to draw and calculate button sizes
+        self.after(100, lambda: self._select(self._tabs[0], 0, notify=False, snap=True))
+
+    def select(self, name: str):
+        if name in self._buttons:
+            self._select(name, self._buttons[name]["index"], notify=False)
+            
+    def _select(self, name: str, idx: int, notify: bool = True, snap: bool = False):
+        if self._animation_job:
+            self.after_cancel(self._animation_job)
+            
+        self._active_name = name
+        self._active_idx = idx
+        
+        # Update text colors immediately
+        for tab_name, data in self._buttons.items():
+            btn = data["btn"]
+            if tab_name == name:
+                btn.configure(text_color="#FFFFFF", hover=False) # White text on soft gray pill
+            else:
+                btn.configure(text_color=("gray30", "#8B949E"), hover=True, hover_color=("#D1D5DB", "#2A2D34"))
+                
+        # Calculate target position for the sliding pill
+        self.update_idletasks()
+        try:
+            target_btn = self._buttons[name]["btn"]
+            # To get relative X to the _ModernTabBar we need to account for fg_layer
+            # The safest way in Tkinter is to use rootx difference
+            target_x = target_btn.winfo_rootx() - self.winfo_rootx()
+            target_width = target_btn.winfo_width()
+            
+            if target_width <= 1: # Window not fully drawn yet
+                self.after(50, lambda: self._select(name, idx, notify, snap))
+                return
+                
+            if snap:
+                self._current_x = target_x
+                self._current_width = target_width
+                self.active_bg.configure(width=self._current_width)
+                self.active_bg.place(x=self._current_x, y=5, width=self._current_width, height=35)
+            else:
+                # Start Animation
+                self._animate_pill(target_x, target_width)
+                
+            if notify:
+                self._on_select(name)
+        except Exception as e:
+            pass
+
+    def _animate_pill(self, target_x, target_w):
+        """Easing Funktion für das sliden der Pille"""
+        try:
+            # Easing factor: higher is slower. 0.3 means move 30% of the remaining distance per frame
+            easing = 0.35 
+            
+            dx = target_x - self._current_x
+            dw = target_w - self._current_width
+            
+            # Stop condition (close enough)
+            if abs(dx) < 1.0 and abs(dw) < 1.0:
+                self._current_x = target_x
+                self._current_width = target_w
+                self.active_bg.configure(width=self._current_width)
+                self.active_bg.place(x=self._current_x, y=5, width=self._current_width, height=35)
+                return
+                
+            self._current_x += dx * easing
+            self._current_width += dw * easing
+            
+            self.active_bg.configure(width=self._current_width)
+            self.active_bg.place(x=self._current_x, y=5, width=self._current_width, height=35)
+            self._animation_job = self.after(16, lambda: self._animate_pill(target_x, target_w)) # ~60fps
+        except Exception:
+            pass
 
 
 class ModernFinGPTGUI(ctk.CTk):
@@ -54,14 +230,43 @@ class ModernFinGPTGUI(ctk.CTk):
     def __init__(self):
         super().__init__()
         
+        self.app_config = app_config_manager.load()
+        
+        # ============================================================
+        # MODERNISIERUNG: Event Bus und Data Update Manager
+        # ============================================================
+        self.event_bus = None
+        self.data_update_manager = None
+        
+        if EVENT_BUS_AVAILABLE:
+            try:
+                self.event_bus = EventBus()
+                self.event_bus.subscribe(DashboardEvents.ACCOUNT_DATA_UPDATED, self._on_data_updated)
+                self.event_bus.subscribe(DashboardEvents.TRADE_EXECUTED, self._on_trade_executed)
+                self.event_bus.subscribe(DashboardEvents.CONNECTION_STATUS_CHANGED, self._on_config_changed)
+                print(">> [GUI] Event Bus erfolgreich initialisiert")
+            except Exception as e:
+                print(f">> [GUI] Event Bus Initialisierung fehlgeschlagen: {e}")
+        
+        if DATA_UPDATE_MANAGER_AVAILABLE:
+            try:
+                self.data_update_manager = DataUpdateManager()
+                print(">> [GUI] Data Update Manager erfolgreich initialisiert")
+            except Exception as e:
+                print(f">> [GUI] Data Update Manager Initialisierung fehlgeschlagen: {e}")
+        # ============================================================
+        
         self.title("FinGPT Professional Dashboard")
-        self.geometry("1200x850")
-        self.minsize(900, 700)
+        
+        # Responsive Fenstergröße - verwende verfügbare Bildschirmgröße
+        self._setup_responsive_geometry()
+        
+        self.attributes("-alpha", 0.0)  # Start transparent for fade-in animation
         
         # Custom Apple-like Titlebar Setup
         self.overrideredirect(True)
-        # Set main background color directly
-        self.configure(fg_color=self._apply_appearance_mode(ctk.ThemeManager.theme["CTk"]["fg_color"]))
+        # Set main background color directly to TTG Deep Black
+        self.configure(fg_color="#0B0E14")
         
         # Hack to show window in Windows taskbar and apply native rounded corners
         self.after(200, self._set_appwindow)
@@ -72,30 +277,30 @@ class ModernFinGPTGUI(ctk.CTk):
         self.main_container.pack(fill="both", expand=True, padx=0, pady=0)
         
         # Custom Titlebar inside main_container
-        self.title_bar = ctk.CTkFrame(self.main_container, height=40, corner_radius=0, fg_color="transparent")
+        self.title_bar = ctk.CTkFrame(self.main_container, height=40, corner_radius=0, fg_color="#1A1D24")
         self.title_bar.pack(fill="x", side="top")
         self.title_bar.bind("<B1-Motion>", self._move_window)
         self.title_bar.bind("<Button-1>", self._get_pos)
         
         # Apple style buttons wrapper
         self.apple_buttons_frame = ctk.CTkFrame(self.title_bar, fg_color="transparent")
-        self.apple_buttons_frame.pack(side="left", padx=12, pady=0)
+        self.apple_buttons_frame.pack(side="left", padx=12, pady=(10, 0))
         
-        # Reduzierte Buttongröße, sanfterer Look
+        # TTG Style Buttons
         self.close_btn = ctk.CTkButton(self.apple_buttons_frame, width=12, height=12, corner_radius=6, text="", 
-                                       fg_color="#FF5F56", hover_color="#E0443E", command=self._close_window)
+                                       fg_color="#FF1744", hover_color="#FF5252", command=self._close_window)
         self.close_btn.pack(side="left", padx=4)
         
         self.min_btn = ctk.CTkButton(self.apple_buttons_frame, width=12, height=12, corner_radius=6, text="", 
-                                     fg_color="#FFBD2E", hover_color="#DEA121", command=self._minimize_window)
+                                     fg_color="#FFEA00", hover_color="#FFFF00", command=self._minimize_window)
         self.min_btn.pack(side="left", padx=4)
         
         self.max_btn = ctk.CTkButton(self.apple_buttons_frame, width=12, height=12, corner_radius=6, text="", 
-                                     fg_color="#27C93F", hover_color="#1AAB29", command=self._maximize_window)
+                                     fg_color="#00FF66", hover_color="#00E676", command=self._maximize_window)
         self.max_btn.pack(side="left", padx=4)
         
         # Title inside titlebar
-        self.title_lbl = ctk.CTkLabel(self.title_bar, text="FinGPT Professional Dashboard", font=ctk.CTkFont(size=12, weight="bold"), text_color="gray70")
+        self.title_lbl = ctk.CTkLabel(self.title_bar, text="FinGPT Professional Dashboard", font=ctk.CTkFont(family="Inter", size=12, weight="bold"), text_color="#FFFFFF")
         self.title_lbl.pack(side="left", padx=(10, 0))
         self.title_lbl.bind("<B1-Motion>", self._move_window)
         self.title_lbl.bind("<Button-1>", self._get_pos)
@@ -104,16 +309,44 @@ class ModernFinGPTGUI(ctk.CTk):
         self.content_frame = ctk.CTkFrame(self.main_container, fg_color="transparent")
         self.content_frame.pack(fill="both", expand=True, padx=0, pady=(0, 10))
         
+        # --- Add Resize Grip ---
+        self.sizegrip = ctk.CTkLabel(self.main_container, text="◢", text_color="gray40", font=ctk.CTkFont(family="Inter", size=14))
+        self.sizegrip.place(relx=1.0, rely=1.0, anchor="se", x=-5, y=-5)
+        self.sizegrip.bind("<B1-Motion>", self._resize_window)
+        self.sizegrip.configure(cursor="size_nw_se")
+        
         # State variables
         self.is_live_running = False
         self.live_data_rows = []
         self.pnl_history = []  # Stores recent P&L values for the Live Chart
         
+        # --- Advanced Indicators Initialization ---
+        self.market_analyzer = None
+        self.advanced_indicators = None
+        self.indicator_integration = None
+        
+        if MARKET_ANALYZER_AVAILABLE:
+            self.market_analyzer = MarketAnalyzer(broker=self, logger=None)
+            self.write_terminal(">> MarketAnalyzer erfolgreich geladen.\n")
+            
+        if ADVANCED_INDICATORS_AVAILABLE:
+            self.advanced_indicators = AdvancedIndicators(logger=None)
+            self.indicator_integration = IndicatorIntegration(self) # Pass 'self' as the bot/fingpt instance
+            self.write_terminal(">> Erweiterte Indikatoren (10+) erfolgreich geladen.\n")
+        
         # Konstruktor Aufruf für Layout
         self.setup_layout()
         self.start_simulated_data()
 
-    # --- Custom Titlebar Methods ---
+    # --- Custom Titlebar & Resize Methods ---
+    def _resize_window(self, event):
+        """Allows resizing of the frameless window from the bottom right corner."""
+        width = int(event.x_root - self.winfo_rootx())
+        height = int(event.y_root - self.winfo_rooty())
+        # Enforce minimum sizes manually
+        width = max(width, 900)
+        height = max(height, 700)
+        self.geometry(f"{width}x{height}")
     def _set_appwindow(self):
         try:
             import ctypes
@@ -151,78 +384,225 @@ class ModernFinGPTGUI(ctk.CTk):
         else:
             self.state("zoomed")
             
+    def _setup_responsive_geometry(self):
+        """
+        Richtet das Fenster responsive ein, basierend auf der Bildschirmgröße.
+        Verwendet die verfügbare Bildschirmgröße für eine optimale Darstellung.
+        """
+        try:
+            # Hole Bildschirmgröße
+            screen_width = self.winfo_screenwidth()
+            screen_height = self.winfo_screenheight()
+            
+            # Berechne optimale Fenstergröße (80% der Bildschirmgröße, max 1400x950)
+            target_width = min(int(screen_width * 0.85), 1400)
+            target_height = min(int(screen_height * 0.85), 950)
+            
+            # Setze Mindestgröße basierend auf Bildschirmgröße
+            # Für sehr kleine Bildschirme reduziere Mindestgröße
+            if screen_width < 1024 or screen_height < 768:
+                min_width = 800
+                min_height = 600
+            else:
+                min_width = 900
+                min_height = 700
+            
+            self.minsize(min_width, min_height)
+            
+            # Zentriere Fenster
+            x = (screen_width - target_width) // 2
+            y = (screen_height - target_height) // 2
+            
+            self.geometry(f"{target_width}x{target_height}+{x}+{y}")
+            
+        except Exception:
+            # Fallback zu Standardwerten
+            self.geometry("1400x950")
+            self.minsize(900, 700)
+
     def _on_map(self, event):
         if self.state() == "normal":
             self.overrideredirect(True)
 
+    # --- Compatibility Helpers for Advanced Indicators ---
+    @property
+    def logger(self):
+        """Helper to satisfy AdvancedIndicators/MarketAnalyzer."""
+        import logging
+        return logging.getLogger("FinGPT-GUI")
+
+    def log(self, level, message, category="GUI"):
+        """Logging helper."""
+        timestamp = datetime.now().strftime('%H:%M:%S')
+        print(f"[{timestamp}] [{level}] [{category}] {message}")
+
+    def get_mt5_live_data(self, symbol):
+        """Returns a string summary of live data for a symbol."""
+        try:
+            tick = mt5.symbol_info_tick(symbol)
+            if tick is None:
+                return f"Keine Ticks für {symbol} empfangen."
+            
+            # Basis-Info
+            bid = tick.bid
+            ask = tick.ask
+            spread = (ask - bid)
+            
+            # Hole letzte Kerze für Änderung
+            rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_D1, 0, 1)
+            change_pct = 0.0
+            if rates is not None and len(rates) > 0:
+                open_price = rates[0]['open']
+                change_pct = ((bid - open_price) / open_price) * 100
+            
+            return (
+                f"AKTUELLER MARKT STATUS ({symbol}):\n"
+                f"- Preis (Bid): {bid:.5f}\n"
+                f"- Preis (Ask): {ask:.5f}\n"
+                f"- Spread: {spread:.5f}\n"
+                f"- Tages-Änderung: {change_pct:+.2f}%\n"
+                f"- Zeit: {datetime.now().strftime('%H:%M:%S')}"
+            )
+        except Exception as e:
+            return f"Fehler beim Abrufen der Live-Daten für {symbol}: {e}"
+
+    # --- Indicator Integration Helpers ---
+    @property
+    def mt5_connected(self):
+        """Helper for MarketAnalyzer check."""
+        return mt5.initialize()
+
+    def calculate_rsi(self, symbol, timeframe=mt5.TIMEFRAME_H1):
+        if self.market_analyzer:
+            return self.market_analyzer.calculate_rsi(symbol, timeframe)
+        return None
+
+    def calculate_macd(self, symbol, timeframe=mt5.TIMEFRAME_H1):
+        if self.market_analyzer:
+            return self.market_analyzer.calculate_macd(symbol, timeframe)
+        return None
+
+    def calculate_support_resistance(self, symbol, timeframe=mt5.TIMEFRAME_H1):
+        if self.market_analyzer:
+            return self.market_analyzer.calculate_support_resistance(symbol, timeframe)
+        return None
+
+    def get_rsi_signal(self, rsi_value):
+        if self.market_analyzer:
+            return self.market_analyzer.get_rsi_signal(rsi_value)
+        return "NEUTRAL", "No Analyzer"
+
+    def get_macd_signal(self, macd_data):
+        if self.market_analyzer:
+            return self.market_analyzer.get_macd_signal(macd_data)
+        return "NEUTRAL", "No Analyzer"
+
+    def get_sr_signal(self, sr_data, current_price):
+        if self.market_analyzer:
+            return self.market_analyzer.get_sr_signal(sr_data, current_price)
+        return "NEUTRAL", "No Analyzer"
+
     def setup_layout(self):
         """Haupt-Grid System der UI"""
-        self.content_frame.grid_rowconfigure(1, weight=1)
+        # row 0 = header, row 1 = nav bar, row 2 = tabview (weight=1), row 3 = status bar
+        self.content_frame.grid_rowconfigure(2, weight=1)
         self.content_frame.grid_columnconfigure(0, weight=1)
         
         # 1. Header Frame
         self.header_frame = ctk.CTkFrame(self.content_frame, fg_color="transparent")
-        self.header_frame.grid(row=0, column=0, sticky="ew", padx=20, pady=(5, 10))
+        self.header_frame.grid(row=0, column=0, sticky="ew", padx=30, pady=(15, 15))
         
-        title_label = ctk.CTkLabel(self.header_frame, text="FinGPT Professional", font=ctk.CTkFont(family="Segoe UI", size=24, weight="bold"))
-        title_label.pack(side="left")
+        # Add Logo
+        try:
+            logo_path = r"C:\Users\edgar\Desktop\FinGPT Webseite\Bilder logo.png"
+            if os.path.exists(logo_path):
+                pil_img = Image.open(logo_path)
+                # Maintain aspect ratio, set height to 32px
+                w, h = pil_img.size
+                aspect = w / h
+                ctk_logo = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(int(32 * aspect), 32))
+                
+                self.logo_label = ctk.CTkLabel(self.header_frame, image=ctk_logo, text="")
+                self.logo_label.pack(side="left", padx=(0, 15))
+        except Exception as e:
+            print(f"Fehler beim Laden des Logos: {e}")
+
+        title_label = ctk.CTkLabel(self.header_frame, text="FinGPT Professional", font=ctk.CTkFont(family="Inter", size=24, weight="bold"), text_color="#FFFFFF")
+        title_label.place(relx=0.45, rely=0.5, anchor="center")
+        
+        version_label = ctk.CTkLabel(self.header_frame, text="v0.7.5 Alpha", font=ctk.CTkFont(family="Inter", size=12), text_color="#8B949E")
+        version_label.pack(side="left", padx=(10, 0), pady=(8, 0))
         
         # Header Controls
         self.live_btn = ctk.CTkButton(self.header_frame, text="▶ Live Starten", command=self.toggle_live_data, 
-                                      fg_color="#5EBA7D", hover_color="#4CAF50", corner_radius=20, font=ctk.CTkFont(weight="bold"))
+                                      fg_color="#00FF66", hover_color="#00C853", text_color="#0B0E14", corner_radius=20, font=ctk.CTkFont(family="Inter", weight="bold"))
         self.live_btn.pack(side="right", padx=(10, 0))
         
-        self.status_dot = ctk.CTkLabel(self.header_frame, text="●", text_color="#E74C3C", font=ctk.CTkFont(size=20))
+        self.status_dot = ctk.CTkLabel(self.header_frame, text="●", text_color="#FF1744", font=ctk.CTkFont(family="Inter", size=20))
         self.status_dot.pack(side="right")
         
-        # 2. Main Tabview (ersetzt ttk.Notebook)
+        # ── Tab names ──────────────────────────────────────────────
+        _TAB_NAMES = [
+            "📊 Dashboard", "📈 Charts", "🎭 Debate",
+            "📉 Backtest", "🔥 Heatmap",
+            "📝 Journal", "📰 News",
+            "🤖 RL Studio", "💻 Terminal", "⚙️ Konfiguration",
+            "❓ FAQ",
+        ]
+
+        # 2a. Modern CTk Tab Bar (row=1)
+        self.nav_bar = _ModernTabBar(
+            self.content_frame,
+            tabs=_TAB_NAMES,
+            on_select=self._navbar_on_select,
+        )
+        # padding pushes it cleanly slightly down
+        self.nav_bar.grid(row=1, column=0, sticky="ew", padx=30, pady=(0, 10))
+
+        # 2b. Main Tabview – content area only (row=2)
+        self.content_frame.grid_rowconfigure(2, weight=1)
         self.tabview = ctk.CTkTabview(
-            self.content_frame, 
+            self.content_frame,
             corner_radius=15,
-            segmented_button_fg_color=("gray85", "#181818"),
-            segmented_button_selected_color="#2E86AB",
-            segmented_button_selected_hover_color="#21618C",
-            segmented_button_unselected_color=("gray85", "#181818"),
-            segmented_button_unselected_hover_color=("gray75", "#282828"),
-            text_color=("gray10", "#F0F0F0")
+            # Match the content background precisely
+            segmented_button_fg_color=("gray85", "#1A1D24"),
+            segmented_button_selected_color=("gray85", "#1A1D24"),
+            segmented_button_unselected_color=("gray85", "#1A1D24"),
+            segmented_button_selected_hover_color=("gray85", "#1A1D24"),
+            segmented_button_unselected_hover_color=("gray85", "#1A1D24"),
+            text_color=("gray85", "#1A1D24"),      # invisible
+            fg_color="#0B0E14" # Transparent tab backgrounds
         )
-        self.tabview.grid(row=1, column=0, sticky="nsew", padx=20, pady=(0, 10))
+        self.tabview.grid(row=2, column=0, sticky="nsew", padx=30, pady=(0, 20))
         
-        # Increase the size and make the font bolder for the Tab buttons dynamically
-        self.tabview._segmented_button.configure(
-            font=ctk.CTkFont(family="Segoe UI", size=15, weight="bold"),
-            height=36
-        )
-        
-        self.tabview.add("📊 Dashboard")
-        self.tabview.add("📈 Charts")
-        self.tabview.add("🎭 Debate")
-        self.tabview.add("🤖 RL Studio")
-        self.tabview.add("📝 Journal")
-        self.tabview.add("📰 News")
-        self.tabview.add("📉 Backtest")
-        self.tabview.add("💻 Terminal")
-        self.tabview.add("⚙️ Konfiguration")
-        self.tabview.add("❓ FAQ")
-        
-        # Tabs konfigurieren
-        self.dashboard_view = DashboardView(self.tabview.tab("📊 Dashboard"), self)
-        self.charts_view = ChartsView(self.tabview.tab("📈 Charts"), self)
-        self.setup_debate_tab()
-        self.setup_rl_studio_tab()
-        self.setup_journal_tab()
-        self.setup_news_tab()
-        self.setup_backtest_tab()
-        self.setup_terminal_tab()
-        self.setup_config_tab()
-        self.setup_faq_tab()
+        self.tabview.configure(border_width=0)
+
+        for name in _TAB_NAMES:
+            self.tabview.add(name)
+
+        # Hide the built-in segmented button completely after tabs are added
+        self.tabview._segmented_button.grid_remove()
+        self.tabview._segmented_button.configure(height=0)
+
+        # Tabs konfigurieren - Reihenfolge muss mit _TAB_NAMES übereinstimmen
+        self.dashboard_view    = DashboardView(self.tabview.tab("📊 Dashboard"), self)
+        self.charts_view       = ChartsView(self.tabview.tab("📈 Charts"), self)
+        self.debate_view       = DebateView(self.tabview.tab("🎭 Debate"), self)
+        self.backtest_view     = BacktestView(self.tabview.tab("📉 Backtest"), self)
+        self.heatmap_view      = HeatmapView(self.tabview.tab("🔥 Heatmap"), self)
+        self.journal_view      = JournalView(self.tabview.tab("📝 Journal"), self)
+        self.news_view         = NewsView(self.tabview.tab("📰 News"), self)
+        self.rl_settings_view  = RLSettingsView(self.tabview.tab("🤖 RL Studio"), self)
+        self.terminal_view     = TerminalView(self.tabview.tab("💻 Terminal"), self)
+        self.config_view       = ConfigView(self.tabview.tab("⚙️ Konfiguration"), self)
+        self.faq_view          = FAQView(self.tabview.tab("❓ FAQ"), self)
 
         
         # 3. Status Bar
-        self.status_bar = ctk.CTkFrame(self.content_frame, height=30, corner_radius=10)
-        self.status_bar.grid(row=2, column=0, sticky="ew", padx=20, pady=(0, 20))
+        self.status_bar = ctk.CTkFrame(self.content_frame, height=30, corner_radius=15)
+        self.status_bar.grid(row=3, column=0, sticky="ew", padx=30, pady=(0, 30))
         
-        self.status_label = ctk.CTkLabel(self.status_bar, text="Bereit | Letzte Aktualisierung: Nie", font=ctk.CTkFont(size=12))
+        self.status_label = ctk.CTkLabel(self.status_bar, text="Bereit | Letzte Aktualisierung: Nie", font=ctk.CTkFont(family="Inter", size=12))
         self.status_label.pack(side="left", padx=15, pady=5)
         
         # System Indicators
@@ -236,9 +616,9 @@ class ModernFinGPTGUI(ctk.CTk):
         for sys_name in ["Python", "MT5", "Ollama", "RL Engine"]:
             frame = ctk.CTkFrame(self.indicator_frame, fg_color="transparent")
             frame.pack(side="left", padx=10)
-            dot = ctk.CTkLabel(frame, text="●", text_color="gray", font=ctk.CTkFont(size=16))
+            dot = ctk.CTkLabel(frame, text="●", text_color="gray", font=ctk.CTkFont(family="Inter", size=16))
             dot.pack(side="left", padx=(0, 6))
-            lbl = ctk.CTkLabel(frame, text=sys_name, font=ctk.CTkFont(size=13, weight="bold"), text_color="gray70")
+            lbl = ctk.CTkLabel(frame, text=sys_name, font=ctk.CTkFont(family="Inter", size=13, weight="bold"), text_color="gray70")
             lbl.pack(side="left")
             self.indicators[sys_name] = dot
             self.indicator_labels[sys_name] = lbl
@@ -246,1833 +626,50 @@ class ModernFinGPTGUI(ctk.CTk):
         self.update_footer_indicators()
         # Load any previously saved settings from disk
         self.after(300, self.load_settings)
+        # Start the fade-in animation
+        self.after(100, self._fade_in, 0.0)
 
-    def setup_debate_tab(self):
-        """🎭 KI Debate Mode — Bull vs Bear vs Judge."""
-        tab = self.tabview.tab("🎭 Debate")
-        tab.grid_columnconfigure(0, weight=1)
-        tab.grid_rowconfigure(2, weight=1)
+    def _fade_in(self, alpha):
+        """Weiche Fade-In Animation beim Start des Programms"""
+        alpha += 0.08
+        if alpha < 1.0:
+            self.attributes("-alpha", alpha)
+            self.after(25, self._fade_in, alpha)
+        else:
+            self.attributes("-alpha", 1.0)
+            
+    def _navbar_on_select(self, tab_name: str):
+        """Called by the nav bar when user clicks a tab."""
+        self.tabview.set(tab_name)
+        self._on_tab_change()
 
-        # ── Header / Controls ────────────────────────────────
-        ctrl = ctk.CTkFrame(tab, fg_color="transparent")
-        ctrl.grid(row=0, column=0, sticky="ew", padx=12, pady=(12, 4))
-        ctrl.grid_columnconfigure(2, weight=1)
-
-        ctk.CTkLabel(ctrl, text="🎭 KI Debate Mode",
-                     font=ctk.CTkFont(size=18, weight="bold"),
-                     text_color="#A855F7").grid(row=0, column=0, padx=(0, 20), sticky="w")
-
-        ctk.CTkLabel(ctrl, text="Symbol:").grid(row=0, column=1, padx=(0, 6), sticky="w")
-        self._debate_symbol = ctk.CTkEntry(ctrl, width=120, placeholder_text="EURUSD")
-        self._debate_symbol.insert(0, "EURUSD")
-        self._debate_symbol.grid(row=0, column=2, sticky="w", padx=(0, 12))
-
-        self._debate_btn = ctk.CTkButton(
-            ctrl, text="⚔️ Debatte starten",
-            fg_color="#7C3AED", hover_color="#6D28D9", width=170,
-            command=self._start_debate)
-        self._debate_btn.grid(row=0, column=3, padx=(0, 12))
-
-        self._debate_status = ctk.CTkLabel(ctrl, text="Bereit.", text_color="gray60",
-                                           font=ctk.CTkFont(size=12))
-        self._debate_status.grid(row=0, column=4, sticky="w")
-
-        # ── Progress bar ─────────────────────────────────────
-        self._debate_progress = ctk.CTkProgressBar(tab, mode="indeterminate",
-                                                    progress_color="#7C3AED")
-        self._debate_progress.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 6))
-        self._debate_progress.set(0)
-
-        # ── Main debate area: Bull | Bear ─────────────────────
-        panels = ctk.CTkFrame(tab, fg_color="transparent")
-        panels.grid(row=2, column=0, sticky="nsew", padx=12, pady=(0, 6))
-        panels.grid_columnconfigure((0, 1), weight=1)
-        panels.grid_rowconfigure(1, weight=1)
-
-        # Bull panel
-        bull_hdr = ctk.CTkFrame(panels, fg_color=("#DCFCE7", "#14532D"), corner_radius=10)
-        bull_hdr.grid(row=0, column=0, sticky="ew", padx=(0, 6), pady=(0, 4))
-        ctk.CTkLabel(bull_hdr, text="🟢 BULL Analyst",
-                     font=ctk.CTkFont(size=14, weight="bold"),
-                     text_color="#4ADE80").pack(anchor="w", padx=12, pady=8)
-
-        self._bull_box = ctk.CTkTextbox(panels, corner_radius=10,
-                                         fg_color=("gray92", "gray12"),
-                                         font=ctk.CTkFont(family="Segoe UI", size=12),
-                                         text_color="#4ADE80", wrap="word",
-                                         state="disabled")
-        self._bull_box.grid(row=1, column=0, sticky="nsew", padx=(0, 6))
-
-        # Bear panel
-        bear_hdr = ctk.CTkFrame(panels, fg_color=("#FEE2E2", "#7F1D1D"), corner_radius=10)
-        bear_hdr.grid(row=0, column=1, sticky="ew", padx=(6, 0), pady=(0, 4))
-        ctk.CTkLabel(bear_hdr, text="🔴 BEAR Analyst",
-                     font=ctk.CTkFont(size=14, weight="bold"),
-                     text_color="#F87171").pack(anchor="w", padx=12, pady=8)
-
-        self._bear_box = ctk.CTkTextbox(panels, corner_radius=10,
-                                         fg_color=("gray92", "gray12"),
-                                         font=ctk.CTkFont(family="Segoe UI", size=12),
-                                         text_color="#F87171", wrap="word",
-                                         state="disabled")
-        self._bear_box.grid(row=1, column=1, sticky="nsew", padx=(6, 0))
-
-        # ── Verdict panel ─────────────────────────────────────
-        verdict_frame = ctk.CTkFrame(tab, corner_radius=12,
-                                      fg_color=("gray88", "gray16"))
-        verdict_frame.grid(row=3, column=0, sticky="ew", padx=12, pady=(0, 10))
-        verdict_frame.grid_columnconfigure(1, weight=1)
-        tab.grid_rowconfigure(3, weight=0)
-
-        ctk.CTkLabel(verdict_frame, text="⚖️",
-                     font=ctk.CTkFont(size=26)).grid(row=0, column=0, padx=(14, 8), pady=10)
-        self._verdict_lbl = ctk.CTkLabel(verdict_frame,
-                                          text="Richter-Urteil erscheint hier nach der Debatte…",
-                                          font=ctk.CTkFont(size=13, weight="bold"),
-                                          text_color="gray50", wraplength=700, justify="left")
-        self._verdict_lbl.grid(row=0, column=1, sticky="w", padx=(0, 14), pady=10)
-
-    # ── Debate helpers ─────────────────────────────────────────────────────
-    def _start_debate(self):
-        symbol = self._debate_symbol.get().strip().upper() or "EURUSD"
-        self._debate_btn.configure(state="disabled", text="⏳ Läuft…")
-        self._debate_status.configure(text="Starte Debatte…", text_color="#A855F7")
-        self._debate_progress.start()
-        self._write_debate_box(self._bull_box, "🟢 Warte auf Bull Analyst…\n", "#4ADE80")
-        self._write_debate_box(self._bear_box, "🔴 Warte auf Bear Analyst…\n", "#F87171")
-        self._verdict_lbl.configure(text="⚖️ Richter analysiert noch…", text_color="gray50")
-        threading.Thread(target=self._run_debate_bg, args=(symbol,), daemon=True).start()
-
-    def _write_debate_box(self, box: ctk.CTkTextbox, text: str, color: str = "#D4D4D4"):
-        box.configure(state="normal")
-        box.delete("0.0", "end")
-        box.insert("end", text)
-        box.configure(state="disabled", text_color=color)
-
-    def _call_llm_api(self, system_prompt: str, user_prompt: str, max_tokens: int = 1024, stream: bool = False) -> str:
-        """Unified LLM API call supporting Ollama, OpenAI, Anthropic, and DeepSeek."""
+    def _on_tab_change(self):
+        """Micro-Interaction: Kurzes dynamisches Flackern / Fade beim Tab-Wechsel."""
+        # Keep the nav bar in sync if tab was changed programmatically
         try:
-            import requests, json
-            provider = self.ki_provider_var.get()
-            url_base = self.url_entry.get().strip()
-            api_key = self.api_key_entry.get().strip()
-            model = self.model_combo.get().strip()
-            temp = float(self.ai_temp_slider.get())
+            current = self.tabview.get()
+            if hasattr(self, 'nav_bar'):
+                self.nav_bar.select(current)
+        except Exception:
+            pass
+        self.attributes("-alpha", 0.85)
+        self.after(10, self._fade_in, 0.85)
 
-            if "Ollama" in provider:
-                url_base = url_base.rstrip('/')
-                payload = {
-                    "model": model or "llama3",
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user",   "content": user_prompt},
-                    ],
-                    "stream": stream,
-                    "options": {"temperature": temp, "num_predict": max_tokens},
-                }
-                resp = requests.post(f"{url_base}/api/chat", json=payload, timeout=120)
-                if resp.status_code == 200:
-                    return resp.json().get("message", {}).get("content", "").strip()
-                return f"[Fehler: HTTP {resp.status_code}]"
 
-            elif "OpenAI" in provider:
-                headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-                api_url = url_base if url_base else "https://api.openai.com/v1/chat/completions"
-                payload = {
-                    "model": model or "gpt-4o",
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    "temperature": temp,
-                    "max_tokens": max_tokens,
-                }
-                resp = requests.post(api_url, headers=headers, json=payload, timeout=60)
-                if resp.status_code == 200:
-                    return resp.json()["choices"][0]["message"]["content"].strip()
-                return f"[Fehler: OpenAI HTTP {resp.status_code} - {resp.text}]"
-
-            elif "Anthropic" in provider:
-                headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"}
-                api_url = url_base if url_base else "https://api.anthropic.com/v1/messages"
-                payload = {
-                    "model": model or "claude-3-5-sonnet-20241022",
-                    "system": system_prompt,
-                    "messages": [{"role": "user", "content": user_prompt}],
-                    "temperature": temp,
-                    "max_tokens": max_tokens,
-                }
-                resp = requests.post(api_url, headers=headers, json=payload, timeout=60)
-                if resp.status_code == 200:
-                    return resp.json()["content"][0]["text"].strip()
-                return f"[Fehler: Anthropic HTTP {resp.status_code} - {resp.text}]"
-
-            elif "DeepSeek" in provider:
-                headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-                api_url = url_base if url_base else "https://api.deepseek.com/chat/completions"
-                payload = {
-                    "model": model or "deepseek-chat",
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    "temperature": temp,
-                    "max_tokens": max_tokens,
-                }
-                resp = requests.post(api_url, headers=headers, json=payload, timeout=60)
-                if resp.status_code == 200:
-                    return resp.json()["choices"][0]["message"]["content"].strip()
-                return f"[Fehler: DeepSeek HTTP {resp.status_code} - {resp.text}]"
-
-            return "[Provider nicht implementiert]"
-        except Exception as e:
-            return f"[API Fehler: {e}]"
-
-    def _run_debate_bg(self, symbol: str):
-        """Background thread: fetch market data → 3 Ollama calls → update UI."""
-        try:
-            # ── Step 0: Gather basic market data from MT5 ──────────────
-            market_ctx = f"Symbol: {symbol}\n"
-            try:
-                tick = mt5.symbol_info_tick(symbol)
-                if tick:
-                    market_ctx += f"Bid: {tick.bid:.5f} | Ask: {tick.ask:.5f}\n"
-                rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_H1, 0, 20)
-                if rates is not None and len(rates) > 1:
-                    closes = [r['close'] for r in rates]
-                    gain = closes[-1] - closes[0]
-                    market_ctx += f"H1 letzte 20 Kerzen: Eröffnung {closes[0]:.5f} → Jetzt {closes[-1]:.5f} | Diff: {gain:+.5f}\n"
-            except Exception:
-                market_ctx += "(MT5 nicht verfügbar – nur KI-Analyse)\n"
-
-            user_msg = (
-                f"Analysiere {symbol} für einen möglichen Trade.\n"
-                f"Marktdaten:\n{market_ctx}\n"
-                "Antworte auf Deutsch. Maximal 200 Wörter."
-            )
-
-            # ── Step 1: BULL ─────────────────────────────────────────
-            self.after(0, lambda: self._debate_status.configure(
-                text="🟢 Bull Analyst denkt…", text_color="#4ADE80"))
-            bull_sys = (
-                "Du bist ein sehr optimistischer Forex-Analyst. "
-                "Deine Aufgabe ist es, ausschließlich BUY/Long-Argumente für das Symbol zu finden. "
-                "Nenne konkrete technische und fundamentale Gründe, warum jetzt ein KAUF sinnvoll ist. "
-                "Sei überzeugend und zeige mögliche Gewinnziele."
-            )
-            bull_text = self._call_llm_api(system_prompt=bull_sys, user_prompt=user_msg, max_tokens=1024)
-            self.after(0, lambda t=bull_text: self._write_debate_box(self._bull_box, t, "#4ADE80"))
-
-            # ── Step 2: BEAR ─────────────────────────────────────────
-            self.after(0, lambda: self._debate_status.configure(
-                text="🔴 Bear Analyst denkt…", text_color="#F87171"))
-            bear_sys = (
-                "Du bist ein sehr pessimistischer Forex-Analyst. "
-                "Deine Aufgabe ist es, ausschließlich SELL/Short-Argumente für das Symbol zu finden. "
-                "Nenne konkrete technische und fundamentale Gründe, warum jetzt ein VERKAUF sinnvoll ist. "
-                "Sei überzeugend und zeige mögliche Verlustrisiken beim Kauf."
-            )
-            bear_text = self._call_llm_api(system_prompt=bear_sys, user_prompt=user_msg, max_tokens=1024)
-            self.after(0, lambda t=bear_text: self._write_debate_box(self._bear_box, t, "#F87171"))
-
-            # ── Step 3: JUDGE ────────────────────────────────────────
-            self.after(0, lambda: self._debate_status.configure(
-                text="⚖️ Richter urteilt…", text_color="#FBBF24"))
-            judge_sys = (
-                "Du bist ein unparteiischer Senior-Analyst. Du hast gerade zwei Analysten gehört: "
-                "einen sehr bullischen und einen sehr bärischen. "
-                "Deine Aufgabe: Bewerte beide Argumente fair, entscheide wer recht hat, "
-                "und gib eine klare Empfehlung: BUY, SELL oder HOLD. "
-                "Format deiner Antwort: Kurze Zusammenfassung beider Seiten (2 Sätze), "
-                "dann: URTEIL: [BUY/SELL/HOLD] — Konfidenz: [0-100%] — Grund: [1 Satz]"
-            )
-            judge_msg = (
-                f"Symbol: {symbol}\n\n"
-                f"BULL-Argumente:\n{bull_text}\n\n"
-                f"BEAR-Argumente:\n{bear_text}\n\n"
-                "Was ist dein Urteil?"
-            )
-            verdict = self._call_llm_api(system_prompt=judge_sys, user_prompt=judge_msg, max_tokens=1024)
-
-            # Parse verdict colour
-            v_upper = verdict.upper()
-            if "BUY" in v_upper:
-                v_color = "#4ADE80"
-            elif "SELL" in v_upper:
-                v_color = "#F87171"
-            else:
-                v_color = "#FBBF24"
-
-            self.after(0, lambda t=verdict, c=v_color: (
-                self._verdict_lbl.configure(text=t, text_color=c),
-                self._debate_status.configure(text="Debatte abgeschlossen ✅", text_color="gray60"),
-            ))
-
-        except Exception as e:
-            self.after(0, lambda err=e: self._debate_status.configure(
-                text=f"Fehler: {err}", text_color="#F87171"))
-        finally:
-            self.after(0, self._debate_progress.stop)
-            self.after(0, lambda: self._debate_btn.configure(
-                state="normal", text="⚔️ Debatte starten"))
 
     # ══════════════════════════════════════════════════════
     # TRADE JOURNAL TAB
     # ══════════════════════════════════════════════════════
-    def setup_journal_tab(self):
-        tab = self.tabview.tab("📝 Journal")
 
-        # Side-by-side Layout: Calendar Links, Trade List Rechts
-        tab.grid_columnconfigure(0, weight=0)  # Calendar is fixed width
-        tab.grid_columnconfigure(1, weight=1)  # Trade list expands
-        tab.grid_rowconfigure(1, weight=1)     # Expand both vertically
 
-        # ── State ──────────────────────────────────────────
-        self._journal_year  = datetime.now().year
-        self._journal_month = datetime.now().month
-        self._journal_entries   = {}  # date_str -> list of trade dicts
-        self._selected_journal_day = None
-        self._selected_trade  = None
-
-        # Seed demo data on very first run so calendar isn't empty
-        self._seed_demo_trades()
-
-        # ── Top bar: calendar controls + stats ─────────────
-        top = ctk.CTkFrame(tab, fg_color="transparent")
-        top.grid(row=0, column=0, columnspan=2, sticky="ew", padx=10, pady=(10, 0))
-        top.grid_columnconfigure(2, weight=1)
-
-        ctk.CTkButton(top, text="◀", width=36, command=self._journal_prev_month).grid(row=0, column=0, padx=(0, 4))
-        self._cal_title_lbl = ctk.CTkLabel(top, text="", font=ctk.CTkFont(size=15, weight="bold"))
-        self._cal_title_lbl.grid(row=0, column=1, padx=8)
-        ctk.CTkButton(top, text="▶", width=36, command=self._journal_next_month).grid(row=0, column=2, sticky="w", padx=(4, 0))
-
-        # Stats summary labels
-        stats_frame = ctk.CTkFrame(top, fg_color="transparent")
-        stats_frame.grid(row=0, column=3, sticky="e", padx=(20, 0))
-        self._j_stat_trades = ctk.CTkLabel(stats_frame, text="Trades: --", font=ctk.CTkFont(size=12), text_color="gray70")
-        self._j_stat_trades.pack(side="left", padx=8)
-        self._j_stat_winrate = ctk.CTkLabel(stats_frame, text="Win Rate: --%", font=ctk.CTkFont(size=12), text_color="gray70")
-        self._j_stat_winrate.pack(side="left", padx=8)
-        self._j_stat_pnl = ctk.CTkLabel(stats_frame, text="Gesamt P&L: --", font=ctk.CTkFont(size=13, weight="bold"), text_color="gray70")
-        self._j_stat_pnl.pack(side="left", padx=8)
-        ctk.CTkButton(stats_frame, text="📥 CSV Export", width=110, command=self._export_journal_csv,
-                      fg_color="transparent", border_width=1).pack(side="left", padx=(16, 0))
-
-        # ── Left: Calendar grid ──────────────────────────────────
-        self._cal_frame = ctk.CTkFrame(tab, fg_color=("gray90", "gray13"), corner_radius=12)
-        self._cal_frame.grid(row=1, column=0, sticky="n", padx=10, pady=8)
-
-        # ── Right: Trade list and AI reasoning ────────────────────
-        right_panel = ctk.CTkFrame(tab, fg_color="transparent")
-        right_panel.grid(row=1, column=1, sticky="nsew", padx=(0, 10), pady=8)
-        right_panel.grid_columnconfigure(0, weight=1)
-        right_panel.grid_rowconfigure(0, weight=1)
-
-        # Trade list (scrollable)
-        list_container = ctk.CTkFrame(right_panel, corner_radius=12, fg_color=("gray90", "gray13"))
-        list_container.grid(row=0, column=0, sticky="nsew", pady=(0, 8))
-        list_container.grid_columnconfigure(0, weight=1)
-        list_container.grid_rowconfigure(2, weight=1)
-
-        self._j_list_title = ctk.CTkLabel(list_container, text="← Klicke einen Tag im Kalender, um Trades zu sehen",
-                                           font=ctk.CTkFont(size=13, weight="bold"), text_color="gray60")
-        self._j_list_title.grid(row=0, column=0, sticky="w", padx=15, pady=8)
-
-        # Header row
-        hdr = ctk.CTkFrame(list_container, fg_color=("gray80", "gray20"), corner_radius=0)
-        hdr.grid(row=1, column=0, sticky="ew", padx=0)
-        for col, (txt, w) in enumerate([("Ticket", 80), ("Symbol", 80), ("Richtung", 80),
-                                         ("Eröffnung", 90), ("Schlusskurs", 90),
-                                         ("Lots", 55), ("Profit", 80), ("KI", 40)]):
-            ctk.CTkLabel(hdr, text=txt, font=ctk.CTkFont(size=11, weight="bold"),
-                         text_color="gray60", width=w).grid(row=0, column=col, padx=6, pady=4, sticky="w")
-
-        self._j_scroll = ctk.CTkScrollableFrame(list_container, fg_color="transparent", corner_radius=0)
-        self._j_scroll.grid(row=2, column=0, sticky="nsew", padx=0, pady=0)
-
-        # AI Reasoning Panel (collapsible)
-        self._ai_panel = ctk.CTkFrame(right_panel, corner_radius=12, fg_color=("gray85", "gray15"))
-        self._ai_panel.grid(row=1, column=0, sticky="ew", pady=(0, 0))
-        self._ai_panel.grid_columnconfigure(1, weight=1)
-
-        ctk.CTkLabel(self._ai_panel, text="🤖", font=ctk.CTkFont(size=20)).grid(row=0, column=0, padx=(15, 8), pady=10)
-        self._ai_panel_header = ctk.CTkLabel(self._ai_panel,
-                                              text="KI Begründung — klicke 🤖 in einer Trade-Zeile",
-                                              font=ctk.CTkFont(size=13, weight="bold"), text_color="gray60")
-        self._ai_panel_header.grid(row=0, column=1, sticky="w")
-        
-        self._ai_reflection_btn = ctk.CTkButton(self._ai_panel, text="🧠 System-Analyse anfordern",
-                                          font=ctk.CTkFont(size=12, weight="bold"),
-                                          fg_color="#A23B72", hover_color="#8c3363",
-                                          width=180, height=28, command=self._analyze_past_trade_async)
-        # We grid it conditionally in _show_ai_reasoning
-
-        self._ai_reasoning_box = ctk.CTkTextbox(self._ai_panel, height=100, fg_color="transparent",
-                                                  font=ctk.CTkFont(family="Segoe UI", size=12),
-                                                  text_color="#D4D4D4", wrap="word", state="disabled")
-        self._ai_reasoning_box.grid(row=1, column=0, columnspan=3, sticky="ew", padx=15, pady=(0, 10))
-
-        self._ai_indicators_lbl = ctk.CTkLabel(self._ai_panel, text="", font=ctk.CTkFont(size=11),
-                                                text_color="#569CD6")
-        self._ai_indicators_lbl.grid(row=2, column=0, columnspan=3, sticky="w", padx=15, pady=(0, 8))
-
-        # Initial render
-        self._render_journal_calendar()
-
-    # ── Calendar helpers ────────────────────────────────────────────────────
-    def _journal_prev_month(self):
-        if self._journal_month == 1:
-            self._journal_month = 12; self._journal_year -= 1
-        else:
-            self._journal_month -= 1
-        self._render_journal_calendar()
-
-    def _journal_next_month(self):
-        if self._journal_month == 12:
-            self._journal_month = 1; self._journal_year += 1
-        else:
-            self._journal_month += 1
-        self._render_journal_calendar()
-
-    def _load_journal_entries(self, year, month):
-        """Load trade history: primary source = MT5 history_deals_get(),
-        secondary = JSON files in storage/trade_journal/ (add AI reasoning).
-        Falls back to JSON-only if MT5 is not available."""
-        import json, os, glob
-        from datetime import datetime, timezone
-
-        entries = {}  # date_str -> [trade_dict, ...]
-
-        # ── 1. Try pulling real MT5 history ──────────────────────────────
-        try:
-            import MetaTrader5 as _mt5
-            if not _mt5.initialize():
-                raise RuntimeError("MT5 not initialized")
-
-            # Month range (UTC timestamps)
-            from_dt = datetime(year, month, 1, tzinfo=timezone.utc)
-            # Last day of month
-            import calendar as _cal
-            last_day = _cal.monthrange(year, month)[1]
-            to_dt   = datetime(year, month, last_day, 23, 59, 59, tzinfo=timezone.utc)
-
-            deals = _mt5.history_deals_get(from_dt, to_dt)
-
-            if deals:
-                # deal entry types: 0=in (open), 1=out (close), 2=in/out
-                DEAL_TYPE_BUY  = 0
-                DEAL_TYPE_SELL = 1
-                DEAL_ENTRY_IN  = 0
-                DEAL_ENTRY_OUT = 1
-
-                for deal in deals:
-                    # Skip balance/credit/commission lines (symbol is empty or type > 1)
-                    if not deal.symbol:
-                        continue
-
-                    otype = deal.type          # 0=BUY, 1=SELL
-                    action = "BUY" if otype == DEAL_TYPE_BUY else "SELL"
-
-                    deal_dt = datetime.fromtimestamp(deal.time)
-                    date_str = deal_dt.strftime("%Y-%m-%d")
-                    profit   = round(deal.profit + deal.commission + deal.swap, 2)
-
-                    trade = {
-                        "ticket":      deal.ticket,
-                        "order":       deal.order,
-                        "symbol":      deal.symbol,
-                        "action":      action,
-                        "entry":       "OPEN" if deal.entry == DEAL_ENTRY_IN else "CLOSE",
-                        "open_time":   deal_dt.isoformat(),
-                        "close_time":  None,
-                        "open_price":  deal.price,
-                        "close_price": deal.price,
-                        "lot_size":    deal.volume,
-                        "profit":      profit,
-                        "commission":  round(deal.commission, 2),
-                        "swap":        round(deal.swap, 2),
-                        "comment":     deal.comment,
-                        "magic":       deal.magic,
-                        "result":      "WIN" if profit > 0 else ("LOSS" if profit < 0 else "BE"),
-                        # AI fields — filled in from JSON overlay below
-                        "ai_reasoning":   "",
-                        "ai_confidence":  "",
-                        "indicators_used": [],
-                        "tags":           [],
-                    }
-                    entries.setdefault(date_str, []).append(trade)
-
-            mt5_loaded = True
-        except Exception as mt5_err:
-            mt5_loaded = False
-            self.after(0, lambda e=str(mt5_err): self.write_terminal(
-                f">> [JOURNAL] MT5 nicht verfügbar, lade JSON-Daten. ({e})\n", "WARNING"))
-
-        # ── 2. Load JSON files (AI reasoning overlay / fallback) ──────────
-        journal_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                   "storage", "trade_journal")
-        prefix = f"{year}{month:02d}"
-
-        # Build lookup: ticket -> json_trade  (for overlay)
-        json_by_ticket = {}
-        for fpath in glob.glob(os.path.join(journal_dir, f"*_{prefix}*.json")):
-            try:
-                with open(fpath, 'r', encoding='utf-8') as f:
-                    jt = json.load(f)
-                jt["_filepath"] = fpath
-                json_by_ticket[jt.get("ticket", 0)] = jt
-                # If MT5 failed, use JSON as primary source
-                if not mt5_loaded:
-                    date_str = jt.get("open_time", "")[:10]
-                    if date_str:
-                        entries.setdefault(date_str, []).append(jt)
-            except Exception:
-                pass
-
-        # ── 3. Overlay AI reasoning onto MT5 deals ────────────────────────
-        if mt5_loaded:
-            for day_trades in entries.values():
-                for trade in day_trades:
-                    jt = json_by_ticket.get(trade["ticket"]) or \
-                         json_by_ticket.get(trade.get("order", -1))
-                    if jt:
-                        trade["ai_reasoning"]    = jt.get("ai_reasoning", "")
-                        trade["ai_confidence"]   = jt.get("ai_confidence", "")
-                        trade["indicators_used"] = jt.get("indicators_used", [])
-                        trade["tags"]            = jt.get("tags", [])
-                        trade["reflection_analysis"] = jt.get("reflection_analysis", "")
-                        trade["_filepath"]       = jt.get("_filepath", "")
-
-        self._journal_entries = entries
-        return entries
-
-    def _render_journal_calendar(self):
-        """Render the calendar grid for the current month."""
-        import calendar
-        year, month = self._journal_year, self._journal_month
-        entries = self._load_journal_entries(year, month)
-
-        # Update title
-        month_names = ["Januar","Februar","März","April","Mai","Juni",
-                        "Juli","August","September","Oktober","November","Dezember"]
-        self._cal_title_lbl.configure(text=f"{month_names[month-1]} {year}")
-
-        # Compute monthly stats
-        all_trades = [t for day_trades in entries.values() for t in day_trades]
-        total_pnl = sum(t.get("profit", 0) for t in all_trades)
-        wins = sum(1 for t in all_trades if t.get("profit", 0) > 0)
-        win_rate = (wins / len(all_trades) * 100) if all_trades else 0
-        pnl_color = "#5EBA7D" if total_pnl >= 0 else "#E74C3C"
-        self._j_stat_trades.configure(text=f"Trades: {len(all_trades)}")
-        self._j_stat_winrate.configure(text=f"Win Rate: {win_rate:.0f}%")
-        self._j_stat_pnl.configure(text=f"Gesamt P&L: {'+' if total_pnl >= 0 else ''}{total_pnl:.2f}€",
-                                    text_color=pnl_color)
-
-        # Clear old calendar widgets
-        for w in self._cal_frame.winfo_children():
-            w.destroy()
-
-        # Day headers
-        for col, day_name in enumerate(["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]):
-            ctk.CTkLabel(self._cal_frame, text=day_name,
-                         font=ctk.CTkFont(size=11, weight="bold"),
-                         text_color="gray50", width=52).grid(row=0, column=col, padx=2, pady=(6, 2))
-
-        # Calendar days
-        cal = calendar.monthcalendar(year, month)
-        today = datetime.now().date()
-
-        for row_idx, week in enumerate(cal):
-            for col_idx, day in enumerate(week):
-                if day == 0:
-                    ctk.CTkFrame(self._cal_frame, width=52, height=52, fg_color="transparent").grid(
-                        row=row_idx + 1, column=col_idx, padx=2, pady=2)
-                    continue
-
-                date_str = f"{year}-{month:02d}-{day:02d}"
-                day_trades = entries.get(date_str, [])
-                day_pnl = sum(t.get("profit", 0) for t in day_trades)
-                n_trades = len(day_trades)
-
-                # Color coding
-                is_today = (datetime(year, month, day).date() == today)
-                if n_trades == 0:
-                    bg = ("#D5D5D5", "#2A2A2A") if not is_today else "#2E86AB"
-                    fg = "gray50"
-                elif day_pnl > 0:
-                    bg = ("#C8F7C5", "#1A4A30")
-                    fg = "#5EBA7D"
-                else:
-                    bg = ("#FAD4D4", "#4A1A1A")
-                    fg = "#E74C3C"
-
-                # Build the day cell frame (acts as a button)
-                cell = ctk.CTkFrame(self._cal_frame, width=58, height=58, corner_radius=8,
-                                    fg_color=bg, cursor="hand2")
-                cell.grid(row=row_idx + 1, column=col_idx, padx=2, pady=2)
-                cell.grid_propagate(False)
-
-                num_lbl = ctk.CTkLabel(cell, text=str(day),
-                                       font=ctk.CTkFont(size=16, weight="bold"),
-                                       text_color=("gray20", "white") if n_trades == 0 else fg)
-                num_lbl.place(relx=0.5, rely=0.35, anchor="center")
-
-                if n_trades > 0:
-                    sub_lbl = ctk.CTkLabel(cell, text=f"{n_trades}T  {'+' if day_pnl>=0 else ''}{day_pnl:.0f}€",
-                                           font=ctk.CTkFont(size=8), text_color=fg)
-                    sub_lbl.place(relx=0.5, rely=0.75, anchor="center")
-
-                # Click binding
-                for widget in [cell, num_lbl]:
-                    widget.bind("<Button-1>", lambda e, ds=date_str: self._show_day_trades(ds))
-                if n_trades > 0:
-                    sub_lbl.bind("<Button-1>", lambda e, ds=date_str: self._show_day_trades(ds))
-
-    def _show_day_trades(self, date_str):
-        """Populate the trade list for a clicked day."""
-        self._selected_journal_day = date_str
-        day_trades = self._journal_entries.get(date_str, [])
-
-        # Update title
-        day_pnl = sum(t.get("profit", 0) for t in day_trades)
-        pnl_color = "#5EBA7D" if day_pnl >= 0 else "#E74C3C"
-        self._j_list_title.configure(
-            text=f"📅 {date_str}  —  {len(day_trades)} Trade(s)  |  P&L: {'+' if day_pnl>=0 else ''}{day_pnl:.2f}€",
-            text_color=pnl_color if day_trades else "gray60")
-
-        # Clear old rows
-        for w in self._j_scroll.winfo_children():
-            w.destroy()
-
-        if not day_trades:
-            ctk.CTkLabel(self._j_scroll, text="Keine Trades an diesem Tag.",
-                         text_color="gray50").pack(pady=20)
-            return
-
-        for i, trade in enumerate(day_trades):
-            profit = trade.get("profit", 0)
-            profit_color = "#5EBA7D" if profit >= 0 else "#E74C3C"
-            row_bg = ("gray85", "gray18") if i % 2 == 0 else ("gray80", "gray15")
-
-            row = ctk.CTkFrame(self._j_scroll, fg_color=row_bg, corner_radius=6)
-            row.pack(fill="x", padx=4, pady=2)
-
-            def fmt_price(p):
-                if isinstance(p, (float, int)):
-                    return f"{p:.5f}".rstrip('0').rstrip('.')
-                return str(p)
-
-            data = [
-                (str(trade.get("ticket", "-")), 80, "gray60"),
-                (trade.get("symbol", "-"), 80, "white"),
-                (trade.get("action", "-"), 80, "#5EBA7D" if trade.get("action") == "BUY" else "#E74C3C"),
-                (fmt_price(trade.get("open_price", "-")), 90, "gray80"),
-                (fmt_price(trade.get("close_price", trade.get("open_price", "-"))), 90, "gray80"),
-                (str(trade.get("lot_size", "-")), 55, "gray70"),
-                (f"{'+' if profit>=0 else ''}{profit:.2f}€", 80, profit_color),
-            ]
-            for col_idx, (text, width, color) in enumerate(data):
-                ctk.CTkLabel(row, text=text, width=width, text_color=color,
-                             font=ctk.CTkFont(size=11)).grid(row=0, column=col_idx, padx=6, pady=6, sticky="w")
-
-            # AI reasoning button
-            ai_btn = ctk.CTkButton(row, text="🤖", width=36, height=28,
-                                    fg_color="#1A1A4A" if trade.get("ai_reasoning") else "transparent",
-                                    hover_color="#2E86AB",
-                                    command=lambda t=trade: self._show_ai_reasoning(t))
-            ai_btn.grid(row=0, column=len(data), padx=6, pady=6)
-
-    def _show_ai_reasoning(self, trade):
-        """Show the AI reasoning panel for a selected trade."""
-        self._selected_trade = trade
-        symbol = trade.get("symbol", "?")
-        action = trade.get("action", "?")
-        reasoning = trade.get("ai_reasoning") or "Keine KI-Begründung für diesen Trade gespeichert."
-        confidence = trade.get("ai_confidence", "")
-        indicators = trade.get("indicators_used", [])
-        reflection = trade.get("reflection_analysis")
-        profit = trade.get("profit", 0)
-
-        self._ai_panel_header.configure(
-            text=f"🤖 KI Begründung  —  {symbol} {action}  "
-                 f"{'| Konfidenz: ' + confidence if confidence else ''}",
-            text_color="#C586C0")
-
-        self._ai_reasoning_box.configure(state="normal")
-        self._ai_reasoning_box.delete("1.0", "end")
-        
-        box_content = reasoning
-        if reflection:
-            box_content += "\n\n💡 KI Selbst-Reflexion (Fehleranalyse):\n" + reflection
-            
-        self._ai_reasoning_box.insert("end", box_content)
-        self._ai_reasoning_box.configure(state="disabled")
-
-        ind_text = ""
-        if indicators:
-            ind_text = "Verwendete Indikatoren: " + "  •  ".join(indicators)
-        tags = trade.get("tags", [])
-        if tags:
-            ind_text += ("  |  Tags: " if ind_text else "Tags: ") + ", ".join(tags)
-        self._ai_indicators_lbl.configure(text=ind_text)
-        
-        # Show Reflection button only for losing trades that haven't been analyzed yet
-        if profit < 0 and not reflection and trade.get("_filepath"):
-            self._ai_reflection_btn.grid(row=0, column=2, padx=(0, 15))
-            self._ai_reflection_btn.configure(state="normal", text="🧠 System-Analyse anfordern")
-        else:
-            self._ai_reflection_btn.grid_forget()
-
-    def _analyze_past_trade_async(self):
-        trade = self._selected_trade
-        if not trade or not trade.get("_filepath"):
-            return
-            
-        self._ai_reflection_btn.configure(state="disabled", text="Analysiere...")
-        
-        def run_analysis():
-            import requests, json
-            
-            prompt = (
-                f"Du bist ein professioneller Trading-Coach. Du analysierst einen vergangenen Trade deines eigenen Systems, der im Stop-Loss endete.\n\n"
-                f"Trade-Daten:\n"
-                f"- Symbol: {trade.get('symbol')}\n"
-                f"- Richtung: {trade.get('action')}\n"
-                f"- Einstiegspreis: {trade.get('open_price')}\n"
-                f"- Ausstiegspreis: {trade.get('close_price')}\n"
-                f"- Verwendete Indikatoren: {', '.join(trade.get('indicators_used', []))}\n"
-                f"- Ursprüngliche System-Begründung: {trade.get('ai_reasoning')}\n\n"
-                f"Bitte schreibe in 2-3 klaren und sachlichen Sätzen auf Deutsch, was der Fehler gewesen sein könnte "
-                f"(z.B. Fakeout, gegen den übergeordneten Trend gehandelt, wichtige News ignoriert, Fehlinterpretation) "
-                f"und was das System beim nächsten Mal besser machen sollte."
-            )
-            
-            try:
-                sys_prompt = "Du bist ein professioneller Trading-Coach."
-                result = self._call_llm_api(system_prompt=sys_prompt, user_prompt=prompt, max_tokens=300)
-                if result and not result.startswith("[Fehler") and not result.startswith("[API Fehler"):
-                    result_text = result
-                else:
-                    result_text = result if result else "Keine vernünftige Antwort erhalten."
-            except Exception as e:
-                result_text = f"KI Fehler: {str(e)}"
-                
-            def on_done():
-                trade["reflection_analysis"] = result_text.strip()
-                # Update JSON file permanently
-                filepath = trade.get("_filepath")
-                try:
-                    with open(filepath, 'r', encoding='utf-8') as f:
-                        file_data = json.load(f)
-                    file_data["reflection_analysis"] = trade["reflection_analysis"]
-                    with open(filepath, 'w', encoding='utf-8') as f:
-                        json.dump(file_data, f, indent=4, ensure_ascii=False)
-                    self.write_terminal(f">> [JOURNAL] KI-Reflexion für Ticket {trade.get('ticket')} dauerhaft gespeichert.\n", "SUCCESS")
-                except Exception as e:
-                    self.write_terminal(f">> [JOURNAL] Fehler beim Speichern der Reflexion: {e}\n", "ERROR")
-                
-                # Update UI
-                self._show_ai_reasoning(trade)
-                
-            self.after(0, on_done)
-            
-        import threading
-        threading.Thread(target=run_analysis, daemon=True).start()
-
-    def _export_journal_csv(self):
-        """Export currently visible month's trades to CSV."""
-        import csv, os
-        from tkinter import filedialog
-        all_trades = [t for trades in self._journal_entries.values() for t in trades]
-        if not all_trades:
-            from tkinter import messagebox
-            messagebox.showinfo("CSV Export", "Keine Trades zum Exportieren gefunden.")
-            return
-
-        default_name = f"journal_{self._journal_year}_{self._journal_month:02d}.csv"
-        filepath = filedialog.asksaveasfilename(defaultextension=".csv",
-                                                initialfile=default_name,
-                                                filetypes=[("CSV", "*.csv")])
-        if not filepath:
-            return
-
-        fields = ["ticket","symbol","action","result","open_time","close_time",
-                  "lot_size","profit","ai_confidence","indicators_used","ai_reasoning"]
-        with open(filepath, 'w', newline='', encoding='utf-8-sig') as f:
-            writer = csv.DictWriter(f, fieldnames=fields, extrasaction='ignore')
-            writer.writeheader()
-            for t in all_trades:
-                row = dict(t)
-                row["indicators_used"] = "; ".join(t.get("indicators_used", []))
-                writer.writerow(row)
-        self.write_terminal(f">> [JOURNAL] CSV exportiert: {filepath}\n", "SYSTEM")
-
-    def _seed_demo_trades(self):
-        """Create demo journal entries if trade_journal folder is empty."""
-        import json, os, glob
-        journal_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                   "storage", "trade_journal")
-        os.makedirs(journal_dir, exist_ok=True)
-        if glob.glob(os.path.join(journal_dir, "*.json")):
-            return  # already has data
-
-        today = datetime.now()
-        demo_trades = [
-            {"ticket": 100001, "symbol": "EURUSD", "action": "BUY", "result": "WIN",
-             "open_time": (today.replace(day=max(1,today.day-5), hour=9, minute=15)).isoformat(),
-             "close_time": (today.replace(day=max(1,today.day-5), hour=11, minute=45)).isoformat(),
-             "open_price": 1.08421, "close_price": 1.08580, "lot_size": 0.1, "profit": 15.90,
-             "ai_reasoning": "EURUSD zeigt bullische Divergenz auf dem RSI H1-Chart. Die 200er EMA wirkt als dynamischer Support. Das Preisniveau 1.0840 ist ein starker historischer Support. London Session ist in vollem Gange mit erhöhtem Volumen. BBands sind eng — Breakout erwartet. Fundamental spricht ein schwächerer USD durch gestrige Fed-Kommentare für Long.",
-             "ai_confidence": "84%", "indicators_used": ["RSI H1", "EMA 200", "Bollinger Bands", "Volume"], "tags": ["trend_follow", "london_session"]},
-            {"ticket": 100002, "symbol": "GBPUSD", "action": "SELL", "result": "WIN",
-             "open_time": (today.replace(day=max(1,today.day-5), hour=14, minute=0)).isoformat(),
-             "close_time": (today.replace(day=max(1,today.day-5), hour=16, minute=30)).isoformat(),
-             "open_price": 1.26800, "close_price": 1.26510, "lot_size": 0.1, "profit": 29.00,
-             "ai_reasoning": "GBPUSD hat ein Double-Top auf H4 gebildet. RSI zeigt Überkauft bei 72. Die NY-Session eröffnet bearish. MACD Crossover nach unten bestätigt den Short-Signal. Target ist der nächste Support bei 1.2640.",
-             "ai_confidence": "79%", "indicators_used": ["MACD", "RSI H4", "Candlestick Pattern"], "tags": ["reversal", "ny_session"]},
-            {"ticket": 100003, "symbol": "USDJPY", "action": "BUY", "result": "LOSS",
-             "open_time": (today.replace(day=max(1,today.day-3), hour=10, minute=0)).isoformat(),
-             "close_time": (today.replace(day=max(1,today.day-3), hour=13, minute=15)).isoformat(),
-             "open_price": 151.200, "close_price": 150.900, "lot_size": 0.1, "profit": -30.00,
-             "ai_reasoning": "USDJPY hat einen bullischen Breakout aus einer Konsolidierungszone versucht. Der Yen schwächte sich intraday ab. Allerdings war der Widerstand bei 151.50 stärker als erwartet. Stop wurde bei 150.90 getroffen nach unerwarteter BOJ-Intervention.",
-             "ai_confidence": "61%", "indicators_used": ["Support/Resistance", "EMA 50", "ATR"], "tags": ["breakout", "asian_carryover"]},
-            {"ticket": 100004, "symbol": "AUDUSD", "action": "SELL", "result": "WIN",
-             "open_time": (today.replace(day=max(1,today.day-1), hour=8, minute=30)).isoformat(),
-             "close_time": (today.replace(day=max(1,today.day-1), hour=12, minute=0)).isoformat(),
-             "open_price": 0.65800, "close_price": 0.65600, "lot_size": 0.1, "profit": 20.00,
-             "ai_reasoning": "AUDUSD befindet sich in einem klaren Abwärtstrend auf dem Daily Chart. Der heutige Bounce zur EMA 20 bietet eine ideale Short-Einstiegsgelegenheit mit gutem R:R von 1:3. China PMI-Daten waren schlechter als erwartet — negativ für AUD.",
-             "ai_confidence": "88%", "indicators_used": ["EMA 20", "Trend Structure", "Fundamentals"], "tags": ["trend_continuation", "london_open"]},
-        ]
-
-        for trade in demo_trades:
-            dt_str = trade["open_time"][:8].replace("-", "")
-            fname = f"{trade['ticket']}_{trade['symbol']}_{dt_str}.json"
-            with open(os.path.join(journal_dir, fname), 'w', encoding='utf-8') as f:
-                json.dump(trade, f, indent=2, ensure_ascii=False)
-
-    # ══════════════════════════════════════════════════════
-    # NEWS & SENTIMENT FEED TAB
-    # ══════════════════════════════════════════════════════
-    def setup_news_tab(self):
-        tab = self.tabview.tab("📰 News")
-        tab.grid_columnconfigure(0, weight=1)
-        tab.grid_rowconfigure(0, weight=1)
-
-        # State
-        self._news_items        = []   # list of dicts
-        self._news_analyzing    = False
-        self._news_filter_pair  = "Alle"
-        self._cal_items         = []   # economic calendar events
-
-        # ── Sub-Tabview ──────────────────────────────────────
-        news_sub = ctk.CTkTabview(tab, corner_radius=12)
-        news_sub.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
-        news_sub.add("📡 News Feed")
-        news_sub.add("📅 Wirtschaftskalender")
-
-        # ═══════════════════ NEWS FEED SUB-TAB ═══════════════════
-        nf_tab = news_sub.tab("📡 News Feed")
-        nf_tab.grid_columnconfigure(0, weight=1)
-        nf_tab.grid_rowconfigure(1, weight=1)
-
-        ctrl = ctk.CTkFrame(nf_tab, fg_color="transparent")
-        ctrl.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 0))
-
-        self._news_refresh_btn = ctk.CTkButton(
-            ctrl, text="🔄 News Laden", width=130,
-            fg_color="#2E86AB", hover_color="#21618C",
-            command=self._fetch_news_threaded)
-        self._news_refresh_btn.pack(side="left", padx=(0, 8))
-
-        self._news_analyze_btn = ctk.CTkButton(
-            ctrl, text="🤖 Alle Analysieren", width=150,
-            fg_color="#8E44AD", hover_color="#6C3483",
-            command=self._analyze_all_news_threaded)
-        self._news_analyze_btn.pack(side="left", padx=(0, 14))
-
-        ctk.CTkLabel(ctrl, text="Filter:", text_color="gray60").pack(side="left", padx=(0, 4))
-        self._news_filter_btns = {}
-        for pair in ["Alle", "EUR", "GBP", "USD", "JPY", "CHF", "AUD", "CAD", "NZD"]:
-            btn = ctk.CTkButton(ctrl, text=pair, width=52, height=26,
-                                fg_color="#2E86AB" if pair == "Alle" else ("gray75", "gray25"),
-                                hover_color="#21618C",
-                                command=lambda p=pair: self._news_filter(p))
-            btn.pack(side="left", padx=2)
-            self._news_filter_btns[pair] = btn
-
-        self._news_status_lbl = ctk.CTkLabel(ctrl, text="● Bereit", text_color="gray50",
-                                              font=ctk.CTkFont(size=11))
-        self._news_status_lbl.pack(side="right", padx=15)
-
-        self._news_scroll = ctk.CTkScrollableFrame(nf_tab, fg_color=("gray88", "gray12"), corner_radius=12)
-        self._news_scroll.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
-        self._news_scroll.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(self._news_scroll,
-                     text="🔄  Klicke 'News Laden' um aktuelle Forex-Nachrichten zu laden.",
-                     font=ctk.CTkFont(size=13), text_color="gray50").pack(pady=40)
-
-        # ═══════════════ WIRTSCHAFTSKALENDER SUB-TAB ═════════════
-        cal_tab = news_sub.tab("📅 Wirtschaftskalender")
-        cal_tab.grid_columnconfigure(0, weight=1)
-        cal_tab.grid_rowconfigure(1, weight=1)
-
-        cal_ctrl = ctk.CTkFrame(cal_tab, fg_color="transparent")
-        cal_ctrl.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 4))
-
-        ctk.CTkButton(cal_ctrl, text="🔄 Kalender Laden", width=150,
-                      fg_color="#2E86AB", hover_color="#21618C",
-                      command=self._fetch_calendar_threaded).pack(side="left", padx=(0, 8))
-
-        # Impact filter
-        ctk.CTkLabel(cal_ctrl, text="Impact:", text_color="gray60").pack(side="left", padx=(0, 4))
-        self._cal_impact_var = ctk.StringVar(value="Alle")
-        for impact in ["Alle", "Hoch", "Mittel", "Niedrig"]:
-            ctk.CTkButton(cal_ctrl, text=impact, width=60, height=26,
-                          fg_color=("gray75", "gray25"), hover_color="#21618C",
-                          command=lambda iv=impact: self._cal_filter(iv)).pack(side="left", padx=2)
-
-        self._cal_status_lbl = ctk.CTkLabel(cal_ctrl, text="● Bereit", text_color="gray50",
-                                             font=ctk.CTkFont(size=11))
-        self._cal_status_lbl.pack(side="right", padx=15)
-
-        # Table header
-        cal_hdr = ctk.CTkFrame(cal_tab, fg_color=("gray80", "gray18"), corner_radius=8, height=32)
-        cal_hdr.grid(row=0, column=0, sticky="ew", padx=10, pady=(52, 0))
-        cal_hdr.grid_columnconfigure((0,1,2,3,4,5), weight=1, uniform="ch")
-        cal_hdr.grid_propagate(False)
-        for ci, ch in enumerate(["Zeit", "Währung", "Impact", "Event", "Prognose / Vorh.", "KI Analyse"]):
-            ctk.CTkLabel(cal_hdr, text=ch, font=ctk.CTkFont(size=11, weight="bold"),
-                         text_color="gray50").grid(row=0, column=ci, sticky="w", padx=8, pady=6)
-
-        self._cal_scroll = ctk.CTkScrollableFrame(cal_tab, fg_color=("gray88", "gray12"), corner_radius=12)
-        self._cal_scroll.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0,10))
-        self._cal_scroll.grid_columnconfigure((0,1,2,3,4,5), weight=1, uniform="ch")
-        ctk.CTkLabel(self._cal_scroll,
-                     text="📅  Klicke 'Kalender Laden' um die Events dieser Woche zu laden.",
-                     font=ctk.CTkFont(size=13), text_color="gray50").grid(row=0, column=0, columnspan=6, pady=40)
-
-        # Auto-load both
-        self.after(800, self._fetch_news_threaded)
-        self.after(1200, self._fetch_calendar_threaded)
-
-    # ── News fetching ────────────────────────────────────────────────────────
-    def _fetch_news_threaded(self):
-        if self._news_analyzing:
-            return
-        self._news_refresh_btn.configure(state="disabled", text="⏳ Lade...")
-        self._news_status_lbl.configure(text="● Lade Nachrichten...", text_color="#E67E22")
-        threading.Thread(target=self._fetch_news_bg, daemon=True).start()
-
-    def _fetch_news_bg(self):
-        """Fetch news from multiple free public RSS/JSON sources."""
-        import xml.etree.ElementTree as ET
-
-        sources = [
-            # FXStreet RSS
-            ("FXStreet", "https://www.fxstreet.com/rss/news"),
-            # MarketWatch currencies RSS
-            ("MarketWatch", "https://feeds.marketwatch.com/marketwatch/marketpulse/"),
-            # Investopedia Forex
-            ("Investopedia", "https://www.investopedia.com/feedbuilder/feed/getfeed?feedName=rss_forex"),
-            # Forex Live
-            ("ForexLive", "https://www.forexlive.com/feed/news"),
-        ]
-
-        all_items = []
-        for source_name, url in sources:
-            try:
-                resp = requests.get(url, timeout=8,
-                                    headers={"User-Agent": "Mozilla/5.0 FinGPT-NewsReader/1.0"})
-                resp.raise_for_status()
-                root = ET.fromstring(resp.content)
-                ns = ""
-                # Try both RSS 2.0 and Atom
-                items = root.findall(".//item") or root.findall(".//{http://www.w3.org/2005/Atom}entry")
-                for item in items[:10]:   # max 10 per source
-                    def g(tag):
-                        el = item.find(tag)
-                        if el is None:
-                            el = item.find("{http://www.w3.org/2005/Atom}" + tag.lstrip("./"))
-                        return (el.text or "").strip() if el is not None else ""
-                    title   = g("title") or g("summary")
-                    pub_raw = g("pubDate") or g("published") or g("updated")
-                    desc    = g("description") or g("summary") or ""
-                    # Clean HTML from desc
-                    import re
-                    desc = re.sub(r'<[^>]+>', '', desc)[:300]
-                    if not title:
-                        continue
-                    all_items.append({
-                        "source":    source_name,
-                        "title":     title,
-                        "published": pub_raw,
-                        "summary":   desc,
-                        "sentiment": {},    # filled by Ollama later
-                        "pairs":     self._detect_pairs(title + " " + desc),
-                    })
-            except Exception as e:
-                self.after(0, lambda s=source_name, err=str(e):
-                    self.write_terminal(f">> [NEWS] {s} Fehler: {err[:60]}\n", "WARNING"))
-
-        # Sort by recency heuristic (just keep insertion order from latest source)
-        self._news_items = all_items
-        self.after(0, self._render_news_feed)
-        self.after(0, lambda: self._news_refresh_btn.configure(state="normal", text="🔄 News Laden"))
-        count = len(all_items)
-        self.after(0, lambda c=count: self._news_status_lbl.configure(
-            text=f"● {c} Artikel geladen", text_color="#5EBA7D"))
-
-    def _detect_pairs(self, text):
-        """Detect currency pairs mentioned in text."""
-        text_up = text.upper()
-        pairs = []
-        currencies = {"EUR": ["EUR","EURO","EUROPEAN","ECB"],
-                      "GBP": ["GBP","POUND","BOE","STERLING","UK","BRITAIN"],
-                      "USD": ["USD","DOLLAR","FED","FEDERAL RESERVE","DXY"],
-                      "JPY": ["JPY","YEN","BOJ","JAPAN"],
-                      "CHF": ["CHF","FRANC","SNB","SWISS"],
-                      "AUD": ["AUD","AUSSIE","RBA","AUSTRALIA"],
-                      "CAD": ["CAD","LOONIE","BOC","CANADA"],
-                      "NZD": ["NZD","KIWI","RBNZ","NEW ZEALAND"]}
-        for cur, keywords in currencies.items():
-            if any(kw in text_up for kw in keywords):
-                pairs.append(cur)
-        return pairs or ["USD"]   # default USD if nothing found
-
-    # ── Ollama Sentiment Analysis ────────────────────────────────────────────
-    def _analyze_all_news_threaded(self):
-        if not self._news_items:
-            self._fetch_news_threaded()
-            return
-        if self._news_analyzing:
-            return
-        self._news_analyzing = True
-        self._news_analyze_btn.configure(state="disabled", text="⏳ Analysiere...")
-        self._news_status_lbl.configure(text="● Ollama analysiert...", text_color="#8E44AD")
-        threading.Thread(target=self._analyze_all_news_bg, daemon=True).start()
-
-    def _analyze_all_news_bg(self):
-        total = len(self._news_items)
-        for i, item in enumerate(self._news_items):
-            if item.get("sentiment"):
-                continue
-            sentiment = self._ollama_analyze_news(item["title"], item["summary"], item["pairs"])
-            item["sentiment"] = sentiment
-            progress = i + 1
-            self.after(0, lambda p=progress, t=total:
-                self._news_status_lbl.configure(text=f"● Analysiere {p}/{t}...",
-                                                text_color="#8E44AD"))
-        self.after(0, self._render_news_feed)
-        self.after(0, lambda: self._news_analyze_btn.configure(state="normal",
-                                                                text="🤖 Alle Analysieren"))
-        self.after(0, lambda: self._news_status_lbl.configure(
-            text="● Analyse abgeschlossen", text_color="#5EBA7D"))
-        self._news_analyzing = False
-
-    def _ollama_analyze_news(self, title, summary, pairs):
-        """Ask AI to rate the news as BULLISH / BEARISH / NEUTRAL per detected currency."""
-        try:
-            model = self.model_combo.get()
-            if "Verbindung" in model or "Lade" in model:
-                return {}
-
-            pairs_str = ", ".join(pairs) if pairs else "EUR, USD"
-            sys_prompt = "Du bist ein erfahrener Forex-Analyst. Antworte AUSSCHLIESSLICH im JSON Format ohne Markdown."
-            user_prompt = (
-                f"Bewerte die folgende Finanznachricht kurz für diese Währungen: {pairs_str}.\n\n"
-                f"Überschrift: {title}\n"
-                f"Zusammenfassung: {summary}\n\n"
-                f"Antworte NUR mit einem JSON-Objekt im Format:\n"
-                f'{{"EUR": "BULLISH", "USD": "BEARISH", "GBP": "NEUTRAL"}}\n'
-                f"Verwende ausschließlich: BULLISH, BEARISH oder NEUTRAL. Kein weiterer Text."
-            )
-            raw = self._call_llm_api(system_prompt=sys_prompt, user_prompt=user_prompt, max_tokens=150)
-
-            import json as _json, re as _re
-            match = _re.search(r'\{[^}]+\}', raw)
-            if match:
-                return _json.loads(match.group(0))
-        except Exception:
-            pass
-        return {}
-
-    # ── News Rendering ───────────────────────────────────────────────────────
-    def _news_filter(self, pair):
-        self._news_filter_pair = pair
-        # Update button highlights
-        for p, btn in self._news_filter_btns.items():
-            btn.configure(fg_color="#2E86AB" if p == pair else ("gray75", "gray25"))
-        self._render_news_feed()
-
-    def _render_news_feed(self):
-        """Render news cards into the scrollable frame."""
-        for w in self._news_scroll.winfo_children():
-            w.destroy()
-
-        items = self._news_items
-        flt   = self._news_filter_pair
-        if flt != "Alle":
-            items = [it for it in items if flt in it.get("pairs", [])]
-
-        if not items:
-            ctk.CTkLabel(self._news_scroll,
-                         text="Keine Nachrichten gefunden. Klicke 🔄 News Laden.",
-                         text_color="gray50").pack(pady=40)
-            return
-
-        # Remove old placeholder
-        SENT_COLOR = {"BULLISH": "#5EBA7D", "BEARISH": "#E74C3C", "NEUTRAL": "#E67E22"}
-        SENT_ICON  = {"BULLISH": "🟢", "BEARISH": "🔴", "NEUTRAL": "🟡"}
-
-        for idx, item in enumerate(items):
-            card_bg = ("gray85", "gray16") if idx % 2 == 0 else ("gray82", "gray14")
-            card = ctk.CTkFrame(self._news_scroll, fg_color=card_bg, corner_radius=10)
-            card.pack(fill="x", padx=6, pady=4)
-            card.grid_columnconfigure(0, weight=1)
-
-            # Row 1: Source + Time + Pairs badges
-            top_row = ctk.CTkFrame(card, fg_color="transparent")
-            top_row.grid(row=0, column=0, sticky="ew", padx=12, pady=(8, 0))
-
-            src_lbl = ctk.CTkLabel(top_row, text=f"📡 {item['source']}",
-                                   font=ctk.CTkFont(size=10, weight="bold"),
-                                   text_color="#569CD6")
-            src_lbl.pack(side="left")
-
-            time_txt = item.get("published", "")[:22]
-            ctk.CTkLabel(top_row, text=f"  {time_txt}", text_color="gray50",
-                         font=ctk.CTkFont(size=10)).pack(side="left", padx=8)
-
-            # Pair badges
-            for pair in item.get("pairs", []):
-                sentiment = item.get("sentiment", {}).get(pair, "")
-                badge_color = SENT_COLOR.get(sentiment, "gray40")
-                badge_text  = f"{SENT_ICON.get(sentiment, '⚪')} {pair}"
-                ctk.CTkLabel(top_row, text=badge_text, fg_color=badge_color,
-                             corner_radius=6, font=ctk.CTkFont(size=10, weight="bold"),
-                             text_color="white").pack(side="right", padx=3)
-
-            # Row 2: Headline
-            ctk.CTkLabel(card, text=item["title"],
-                         font=ctk.CTkFont(size=12, weight="bold"),
-                         text_color="white", wraplength=800, justify="left",
-                         anchor="w").grid(row=1, column=0, sticky="ew", padx=12, pady=(4, 2))
-
-            # Row 3: Summary (if any)
-            if item.get("summary"):
-                ctk.CTkLabel(card, text=item["summary"][:180] + ("…" if len(item["summary"]) > 180 else ""),
-                             font=ctk.CTkFont(size=11), text_color="gray65",
-                             wraplength=800, justify="left",
-                             anchor="w").grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 4))
-
-            # Analyze button (single item) if no sentiment yet
-            if not item.get("sentiment"):
-                def _analyze_one(it=item):
-                    threading.Thread(target=lambda: (
-                        it.__setitem__("sentiment",
-                                       self._ollama_analyze_news(it["title"], it["summary"], it["pairs"])),
-                        self.after(0, self._render_news_feed)
-                    ), daemon=True).start()
-                ctk.CTkButton(card, text="🤖", width=32, height=22,
-                              fg_color="transparent", hover_color="#8E44AD",
-                              command=_analyze_one).grid(row=0, column=1, padx=8, pady=4)
-
-            # Bottom separator
-            ctk.CTkFrame(card, height=1, fg_color="gray30").grid(
-                row=3, column=0, columnspan=2, sticky="ew", padx=12, pady=(4, 0))
-
-    # ══════════════════════════════════════════════════════
-    # WIRTSCHAFTSKALENDER LOGIK
-    # ══════════════════════════════════════════════════════
-    def _fetch_calendar_threaded(self):
-        self._cal_status_lbl.configure(text="● Lade Kalender...", text_color="#E67E22")
-        threading.Thread(target=self._fetch_calendar_bg, daemon=True).start()
-
-    def _fetch_calendar_bg(self):
-        """Fetch this week's economic events – retries on 429, uses local cache as fallback."""
-        import xml.etree.ElementTree as ET
-        import json as _json
-
-        url        = "https://nfs.faireconomy.media/ff_calendar_thisweek.xml"
-        cache_path = os.path.join(os.path.dirname(__file__), "..", "storage", "calendar_cache.json")
-        IMPACT_MAP = {"High": "Hoch", "Medium": "Mittel", "Low": "Niedrig"}
-
-        # ── try live feed with up to 3 retries ─────────────────────────────
-        raw_xml = None
-        for attempt in range(3):
-            try:
-                resp = requests.get(url, timeout=14,
-                                    headers={"User-Agent": "Mozilla/5.0 FinGPT-Calendar/1.0"})
-                if resp.status_code == 429:
-                    wait = 5 * (attempt + 1)   # 5s, 10s, 15s
-                    self.after(0, lambda w=wait: self._cal_status_lbl.configure(
-                        text=f"● Rate-Limit – warte {w}s…", text_color="#E67E22"))
-                    time.sleep(wait)
-                    continue
-                resp.raise_for_status()
-                raw_xml = resp.content
-                # Save to cache on success
-                try:
-                    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
-                    with open(cache_path, "wb") as f:
-                        f.write(raw_xml)
-                except Exception:
-                    pass
-                break
-            except Exception as e:
-                if attempt == 2:
-                    raw_xml = None   # fall through to cache/demo
-
-        # ── try local cache if live failed ─────────────────────────────────
-        if raw_xml is None:
-            try:
-                with open(cache_path, "rb") as f:
-                    raw_xml = f.read()
-                self.after(0, lambda: self._cal_status_lbl.configure(
-                    text="● Live-Feed gesperrt — zeige Cache", text_color="#E67E22"))
-            except Exception:
-                pass
-
-        # ── parse XML ──────────────────────────────────────────────────────
-        events = []
-        if raw_xml:
-            try:
-                root = ET.fromstring(raw_xml)
-                for ev in root.findall("event"):
-                    def gt(tag, _ev=ev):
-                        el = _ev.find(tag)
-                        return (el.text or "").strip() if el is not None else ""
-                    title = gt("title")
-                    if not title:
-                        continue
-                    events.append({
-                        "title":    title,
-                        "currency": gt("country"),
-                        "date":     gt("date"),
-                        "time":     gt("time"),
-                        "impact":   IMPACT_MAP.get(gt("impact"), gt("impact")),
-                        "forecast": gt("forecast"),
-                        "previous": gt("previous"),
-                        "actual":   gt("actual"),
-                        "ai":       None,
-                    })
-            except Exception:
-                events = []
-
-        # ── fallback demo events if still empty ────────────────────────────
-        if not events:
-            today = datetime.now().strftime("%m-%d-%Y")
-            events = [
-                {"title": "Non-Farm Payrolls",         "currency": "USD", "date": today, "time": "1:30pm", "impact": "Hoch",    "forecast": "200K", "previous": "185K", "actual": "", "ai": None},
-                {"title": "ECB Interest Rate Decision", "currency": "EUR", "date": today, "time": "12:15pm","impact": "Hoch",    "forecast": "4.50%","previous": "4.50%","actual": "", "ai": None},
-                {"title": "CPI m/m",                   "currency": "GBP", "date": today, "time": "7:00am", "impact": "Hoch",    "forecast": "0.3%", "previous": "0.2%", "actual": "", "ai": None},
-                {"title": "Retail Sales m/m",           "currency": "USD", "date": today, "time": "1:30pm", "impact": "Mittel",  "forecast": "0.4%", "previous": "0.6%", "actual": "", "ai": None},
-                {"title": "German ifo Business Climate","currency": "EUR", "date": today, "time": "9:00am", "impact": "Mittel",  "forecast": "88.5", "previous": "87.6", "actual": "", "ai": None},
-                {"title": "BOJ Rate Statement",         "currency": "JPY", "date": today, "time": "3:00am", "impact": "Hoch",    "forecast": "0.1%", "previous": "0.1%", "actual": "", "ai": None},
-                {"title": "Trade Balance",              "currency": "AUD", "date": today, "time": "1:30am", "impact": "Niedrig", "forecast": "5.8B", "previous": "5.5B", "actual": "", "ai": None},
-            ]
-            self.after(0, lambda: self._cal_status_lbl.configure(
-                text="● Demo-Daten (Live-Feed nicht erreichbar)", text_color="#E67E22"))
-
-        self._cal_items = events
-        self.after(0, lambda: self._render_calendar_rows(events))
-        if events and "Demo" not in self._cal_status_lbl.cget("text"):
-            count = len(events)
-            self.after(0, lambda c=count: self._cal_status_lbl.configure(
-                text=f"● {c} Events geladen", text_color="#5EBA7D"))
-
-    def _cal_filter(self, impact_filter: str):
-        """Re-render calendar filtered by impact level."""
-        self._cal_impact_var.set(impact_filter)
-        if impact_filter == "Alle":
-            self._render_calendar_rows(self._cal_items)
-        else:
-            filtered = [e for e in self._cal_items if e["impact"] == impact_filter]
-            self._render_calendar_rows(filtered)
-
-    def _render_calendar_rows(self, events):
-        """Render event rows into the scrollable calendar frame."""
-        for w in self._cal_scroll.winfo_children():
-            w.destroy()
-
-        if not events:
-            ctk.CTkLabel(self._cal_scroll,
-                         text="Keine Events gefunden.",
-                         text_color="gray50").grid(row=0, column=0, columnspan=6, pady=30)
-            return
-
-        IMPACT_COLOR = {"Hoch": "#E74C3C", "Mittel": "#E67E22", "Niedrig": "#5EBA7D", "Holiday": "#7F8C8D"}
-
-        for row_idx, ev in enumerate(events):
-            bg = ("gray85", "gray16") if row_idx % 2 == 0 else ("gray82", "gray13")
-            imp_color = IMPACT_COLOR.get(ev["impact"], "gray50")
-
-            # Time + Date
-            time_display = ev.get("time") or "Ganztags"
-            date_display = ev.get("date", "")[:10]
-            ctk.CTkLabel(self._cal_scroll, text=f"{date_display}\n{time_display}",
-                         font=ctk.CTkFont(size=10), text_color="gray60",
-                         fg_color=bg, corner_radius=0, anchor="w"
-                         ).grid(row=row_idx, column=0, sticky="ew", padx=6, pady=2)
-
-            # Currency
-            ctk.CTkLabel(self._cal_scroll, text=ev["currency"],
-                         font=ctk.CTkFont(size=12, weight="bold"),
-                         fg_color=bg, corner_radius=0
-                         ).grid(row=row_idx, column=1, sticky="ew", padx=6, pady=2)
-
-            # Impact badge
-            ctk.CTkLabel(self._cal_scroll, text=ev["impact"],
-                         font=ctk.CTkFont(size=10, weight="bold"),
-                         text_color=imp_color,
-                         fg_color=bg, corner_radius=0
-                         ).grid(row=row_idx, column=2, sticky="ew", padx=6, pady=2)
-
-            # Event title
-            ctk.CTkLabel(self._cal_scroll, text=ev["title"],
-                         font=ctk.CTkFont(size=11), anchor="w",
-                         fg_color=bg, corner_radius=0
-                         ).grid(row=row_idx, column=3, sticky="ew", padx=6, pady=2)
-
-            # Forecast / Previous
-            fp_text = ""
-            if ev["actual"]:
-                fp_text = f"Ist: {ev['actual']}  Prog: {ev['forecast']}"
-            elif ev["forecast"]:
-                fp_text = f"Prog: {ev['forecast']}  Vorh: {ev['previous']}"
-            ctk.CTkLabel(self._cal_scroll, text=fp_text or "–",
-                         font=ctk.CTkFont(size=10), text_color="gray60",
-                         fg_color=bg, corner_radius=0
-                         ).grid(row=row_idx, column=4, sticky="ew", padx=6, pady=2)
-
-            # AI Analyse — compact badge + hover tooltip
-            ai_result = ev.get("ai")
-            if ai_result:
-                ai_color = "#5EBA7D" if "BULLISH" in ai_result.upper() else \
-                           "#E74C3C" if "BEARISH" in ai_result.upper() else "#E67E22"
-
-                # Short truncated label shown in the cell
-                short_text = ai_result[:28] + "…" if len(ai_result) > 28 else ai_result
-                ai_lbl = ctk.CTkLabel(
-                    self._cal_scroll, text=short_text,
-                    text_color=ai_color,
-                    font=ctk.CTkFont(size=10, weight="bold"),
-                    fg_color=bg, corner_radius=4, anchor="w"
-                )
-                ai_lbl.grid(row=row_idx, column=5, sticky="ew", padx=6, pady=2)
-
-                # ── Tooltip Popup auf Hover ──────────────────────
-                _tip = [None]  # holds the Toplevel reference
-
-                def _show_tip(event, full=ai_result, color=ai_color):
-                    if _tip[0] is not None:
-                        return
-                    tip = tk.Toplevel()
-                    tip.overrideredirect(True)     # no title bar
-                    tip.attributes("-topmost", True)
-                    tip.configure(bg="#1e1e1e")
-                    # border frame
-                    border = tk.Frame(tip, bg=color, padx=1, pady=1)
-                    border.pack(fill="both", expand=True)
-                    inner = tk.Frame(border, bg="#252525")
-                    inner.pack(fill="both", expand=True)
-                    tk.Label(
-                        inner, text=full,
-                        fg=color, bg="#252525",
-                        font=("Segoe UI", 10),
-                        wraplength=380,
-                        justify="left",
-                        padx=10, pady=8
-                    ).pack()
-                    # Position near the mouse cursor
-                    x = event.x_root + 12
-                    y = event.y_root + 4
-                    tip.geometry(f"+{x}+{y}")
-                    _tip[0] = tip
-
-                def _hide_tip(event):
-                    if _tip[0] is not None:
-                        try:
-                            _tip[0].destroy()
-                        except Exception:
-                            pass
-                        _tip[0] = None
-
-                ai_lbl.bind("<Enter>", _show_tip)
-                ai_lbl.bind("<Leave>", _hide_tip)
-            else:
-                ctk.CTkButton(self._cal_scroll, text="🤖 KI", width=54, height=22,
-                              fg_color="#8E44AD", hover_color="#6C3483",
-                              command=lambda e=ev, r=row_idx: self._analyze_cal_event(e, r)
-                              ).grid(row=row_idx, column=5, padx=6, pady=2)
-
-    def _analyze_cal_event(self, event: dict, row_idx: int):
-        """Ask Ollama for a hawkish/dovish/neutral verdict on a single calendar event."""
-        def run():
-            try:
-                model = self.model_combo.get()
-                if "Verbindung" in model or "Lade" in model:
-                    event["ai"] = "KI offline"
-                    self.after(0, lambda: self._render_calendar_rows(self._cal_items))
-                    return
-
-                sys_prompt = "Du bist ein erfahrener Forex-Makroanalyst."
-                user_prompt = (
-                    f"Event: {event['title']} ({event['currency']})\n"
-                    f"Impact: {event['impact']}\n"
-                    f"Prognose: {event['forecast']}  Vorherig: {event['previous']}  Aktuell: {event['actual']}\n\n"
-                    f"Bewerte dieses Event in 1 Satz als BULLISH, BEARISH oder NEUTRAL für {event['currency']} "
-                    f"und erkläre kurz warum. Beginne mit dem Wort BULLISH, BEARISH oder NEUTRAL."
-                )
-                raw = self._call_llm_api(system_prompt=sys_prompt, user_prompt=user_prompt, max_tokens=100)
-                event["ai"] = raw[:120] + ("…" if len(raw) > 120 else "")
-            except Exception as e:
-                event["ai"] = f"Fehler: {str(e)[:50]}"
-            self.after(0, lambda: self._render_calendar_rows(
-                self._cal_items if self._cal_impact_var.get() == "Alle"
-                else [e for e in self._cal_items if e["impact"] == self._cal_impact_var.get()]))
-
-        threading.Thread(target=run, daemon=True).start()
 
     # ══════════════════════════════════════════════════════════════
-    # BACKTESTING TAB
+    # BACKTESTING TAB (now in gui/views/backtest_tab.py)
     # ══════════════════════════════════════════════════════════════
-    def setup_backtest_tab(self):
-        tab = self.tabview.tab("📉 Backtest")
-        tab.grid_columnconfigure(0, weight=1)
-        tab.grid_rowconfigure(2, weight=1)
-
-        # ── Control Bar ───────────────────────────────────────────
-        ctrl = ctk.CTkFrame(tab, fg_color="transparent")
-        ctrl.grid(row=0, column=0, sticky="ew", padx=12, pady=(12, 4))
-
-        ctk.CTkLabel(ctrl, text="Symbol:").pack(side="left", padx=(0, 4))
-        self._bt_symbol = ctk.CTkComboBox(ctrl, values=["EURUSD","GBPUSD","USDJPY","USDCHF","AUDUSD","USDCAD"], width=110)
-        self._bt_symbol.set("EURUSD")
-        self._bt_symbol.pack(side="left", padx=(0, 10))
-
-        ctk.CTkLabel(ctrl, text="Timeframe:").pack(side="left", padx=(0, 4))
-        self._bt_tf = ctk.CTkComboBox(ctrl, values=["M15 (15 Min)","M30 (30 Min)","H1 (1 Std)","H4 (4 Std)","D1 (Täglich)"], width=130)
-        self._bt_tf.set("H1 (1 Std)")
-        self._bt_tf.pack(side="left", padx=(0, 10))
-
-        ctk.CTkLabel(ctrl, text="Bars:").pack(side="left", padx=(0, 4))
-        self._bt_bars = ctk.CTkComboBox(ctrl, values=["200","500","1000","2000","5000"], width=80)
-        self._bt_bars.set("500")
-        self._bt_bars.pack(side="left", padx=(0, 10))
-
-        ctk.CTkLabel(ctrl, text="Strategie:").pack(side="left", padx=(0, 4))
-        self._bt_strategy = ctk.CTkComboBox(ctrl, values=[
-            "SMC Fair Value Gap", "SMC Order Block",
-            "Bullish Engulfing", "EMA 20/50 Crossover"], width=180)
-        self._bt_strategy.set("SMC Fair Value Gap")
-        self._bt_strategy.pack(side="left", padx=(0, 10))
-
-        self._bt_run_btn = ctk.CTkButton(ctrl, text="▶ Backtest Starten",
-                                          fg_color="#5EBA7D", hover_color="#4CAF50", width=160,
-                                          command=self._run_backtest_threaded)
-        self._bt_run_btn.pack(side="left", padx=(6, 0))
-
-        self._bt_status = ctk.CTkLabel(ctrl, text="Bereit.", text_color="gray50",
-                                        font=ctk.CTkFont(size=12))
-        self._bt_status.pack(side="right", padx=10)
-
-        # ── Progress bar ──────────────────────────────────────────
-        self._bt_progress = ctk.CTkProgressBar(tab, mode="indeterminate", progress_color="#5EBA7D")
-        self._bt_progress.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 4))
-        self._bt_progress.set(0)
-
-        # ── Main Area: Stats + Chart + Trade List ─────────────────
-        main = ctk.CTkFrame(tab, fg_color="transparent")
-        main.grid(row=2, column=0, sticky="nsew", padx=12, pady=(0, 12))
-        main.grid_columnconfigure(0, weight=2)  # chart
-        main.grid_columnconfigure(1, weight=1)  # stats + trades
-        main.grid_rowconfigure(0, weight=1)
-
-        # Left: Equity Curve canvas
-        chart_frame = ctk.CTkFrame(main, corner_radius=12, fg_color=("gray90","gray13"))
-        chart_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
-        chart_frame.grid_rowconfigure(1, weight=1)
-        chart_frame.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(chart_frame, text="📈 Equity-Kurve",
-                     font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=0, sticky="w", padx=14, pady=10)
-        self._bt_eq_canvas_frame = ctk.CTkFrame(chart_frame, fg_color="transparent")
-        self._bt_eq_canvas_frame.grid(row=1, column=0, sticky="nsew", padx=8, pady=(0,8))
-        self._bt_eq_canvas_frame.grid_columnconfigure(0, weight=1)
-        self._bt_eq_canvas_frame.grid_rowconfigure(0, weight=1)
-        ctk.CTkLabel(self._bt_eq_canvas_frame,
-                     text="Starte einen Backtest um die Equity-Kurve zu sehen.",
-                     text_color="gray50", font=ctk.CTkFont(size=13)).grid(row=0, column=0)
-
-        # Right panel: stats + trade list
-        right = ctk.CTkFrame(main, fg_color="transparent")
-        right.grid(row=0, column=1, sticky="nsew")
-        right.grid_columnconfigure(0, weight=1)
-        right.grid_rowconfigure(1, weight=1)
-
-        # Stats cards (2x3 grid)
-        stats_frame = ctk.CTkFrame(right, corner_radius=12, fg_color=("gray90","gray13"))
-        stats_frame.grid(row=0, column=0, sticky="ew", pady=(0, 6))
-        stats_frame.grid_columnconfigure((0,1), weight=1)
-
-        self._bt_stats = {}
-        for i, (lbl, key) in enumerate([
-            ("Trades Gesamt", "total"), ("Winrate", "winrate"),
-            ("Profit Factor", "pf"),    ("Max Drawdown", "maxdd"),
-            ("Netto P&L (Pips)", "pnl"),("Sharpe Ratio", "sharpe")
-        ]):
-            r, c = divmod(i, 2)
-            card = ctk.CTkFrame(stats_frame, fg_color=("gray82","gray17"), corner_radius=10)
-            card.grid(row=r, column=c, padx=6, pady=6, sticky="ew")
-            ctk.CTkLabel(card, text=lbl, font=ctk.CTkFont(size=10), text_color="gray50").pack(anchor="w", padx=8, pady=(6,0))
-            val_lbl = ctk.CTkLabel(card, text="–", font=ctk.CTkFont(size=18, weight="bold"), text_color="#2E86AB")
-            val_lbl.pack(anchor="w", padx=8, pady=(0,6))
-            self._bt_stats[key] = val_lbl
-
-        # Trade list
-        trades_frame = ctk.CTkFrame(right, corner_radius=12, fg_color=("gray90","gray13"))
-        trades_frame.grid(row=1, column=0, sticky="nsew")
-        trades_frame.grid_rowconfigure(1, weight=1)
-        trades_frame.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(trades_frame, text="📋 Trade-Liste",
-                     font=ctk.CTkFont(size=13, weight="bold")).grid(row=0, column=0, sticky="w", padx=14, pady=8)
-        self._bt_trade_scroll = ctk.CTkScrollableFrame(trades_frame, fg_color="transparent")
-        self._bt_trade_scroll.grid(row=1, column=0, sticky="nsew", padx=6, pady=(0,6))
-        self._bt_trade_scroll.grid_columnconfigure((0,1,2,3), weight=1, uniform="tc")
-
-    def _run_backtest_threaded(self):
-        self._bt_run_btn.configure(state="disabled", text="⏳ Läuft…")
-        self._bt_status.configure(text="Lade Daten…", text_color="#E67E22")
-        self._bt_progress.start()
-        threading.Thread(target=self._run_backtest_bg, daemon=True).start()
-
-    def _run_backtest_bg(self):
-        """Core backtesting engine – runs in a background thread."""
-        import math
-
-        symbol   = self._bt_symbol.get()
-        tf_str   = self._bt_tf.get()
-        bars     = int(self._bt_bars.get())
-        strategy = self._bt_strategy.get()
-
-        # Map timeframe string → MT5 constant
-        if "M15" in tf_str:   tf = mt5.TIMEFRAME_M15
-        elif "M30" in tf_str: tf = mt5.TIMEFRAME_M30
-        elif "H4"  in tf_str: tf = mt5.TIMEFRAME_H4
-        elif "D1"  in tf_str: tf = mt5.TIMEFRAME_D1
-        else:                 tf = mt5.TIMEFRAME_H1
-
-        try:
-            if not mt5.initialize():
-                raise RuntimeError("MT5 nicht verbunden")
-
-            rates = mt5.copy_rates_from_pos(symbol, tf, 0, bars)
-            if rates is None or len(rates) < 50:
-                raise RuntimeError(f"Zu wenig Daten für {symbol}")
-
-            df = pd.DataFrame(rates)
-
-            # ── Signal Generation ──────────────────────────────────
-            signals = []   # list of (index, direction) where direction = 1 (buy) / -1 (sell)
-
-            if strategy == "SMC Fair Value Gap":
-                for i in range(2, len(df) - 1):
-                    c0, c1, c2 = df.iloc[i-2], df.iloc[i-1], df.iloc[i]
-                    if c0['high'] < c2['low'] and c1['close'] > c1['open']:
-                        gap = c2['low'] - c0['high']
-                        if gap > (c1['high'] - c1['low']) * 0.1:
-                            signals.append((i, 1))
-                    if c0['low'] > c2['high'] and c1['close'] < c1['open']:
-                        gap = c0['low'] - c2['high']
-                        if gap > (c1['high'] - c1['low']) * 0.1:
-                            signals.append((i, -1))
-
-            elif strategy == "SMC Order Block":
-                for i in range(2, len(df) - 1):
-                    c0, c1, c2 = df.iloc[i-2], df.iloc[i-1], df.iloc[i]
-                    if c0['close'] < c0['open'] and c1['close'] > c1['open'] and c2['close'] > c2['open']:
-                        if (c1['close']-c1['open']) > (c0['open']-c0['close']) * 1.5:
-                            signals.append((i, 1))
-                    if c0['close'] > c0['open'] and c1['close'] < c1['open'] and c2['close'] < c2['open']:
-                        if (c1['open']-c1['close']) > (c0['close']-c0['open']) * 1.5:
-                            signals.append((i, -1))
-
-            elif strategy == "Bullish Engulfing":
-                for i in range(1, len(df) - 1):
-                    prev, curr = df.iloc[i-1], df.iloc[i]
-                    if prev['close'] < prev['open'] and curr['close'] > curr['open']:
-                        if curr['close'] >= prev['open'] and curr['open'] <= prev['close']:
-                            signals.append((i, 1))
-                    if prev['close'] > prev['open'] and curr['close'] < curr['open']:
-                        if curr['close'] <= prev['open'] and curr['open'] >= prev['close']:
-                            signals.append((i, -1))
-
-            elif strategy == "EMA 20/50 Crossover":
-                df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
-                df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
-                for i in range(51, len(df) - 1):
-                    prev_cross = df['ema20'].iloc[i-1] - df['ema50'].iloc[i-1]
-                    curr_cross = df['ema20'].iloc[i]   - df['ema50'].iloc[i]
-                    if prev_cross <= 0 < curr_cross:
-                        signals.append((i, 1))
-                    elif prev_cross >= 0 > curr_cross:
-                        signals.append((i, -1))
-
-            # ── Trade Simulation (ATR-based SL / 1.5R TP) ──────────
-            ATR_PERIOD = 14
-            df['atr'] = (df['high'] - df['low']).rolling(ATR_PERIOD).mean()
-
-            trades   = []
-            equity   = [0.0]
-            last_exit = -1
-
-            for sig_idx, direction in signals:
-                if sig_idx <= last_exit:
-                    continue   # skip overlapping trades
-                if sig_idx + 1 >= len(df):
-                    continue
-
-                entry_bar = df.iloc[sig_idx + 1]
-                entry     = entry_bar['open']
-                atr       = df['atr'].iloc[sig_idx]
-                if atr == 0 or math.isnan(atr):
-                    continue
-
-                sl_dist = atr * 1.0
-                tp_dist = atr * 1.5
-                sl = entry - direction * sl_dist
-                tp = entry + direction * tp_dist
-
-                # Scan forward for TP/SL hit
-                result_pips = None
-                for j in range(sig_idx + 2, min(sig_idx + 50, len(df))):
-                    bar = df.iloc[j]
-                    if direction == 1:
-                        if bar['low']  <= sl:
-                            result_pips = -sl_dist / 0.0001
-                            last_exit   = j
-                            break
-                        if bar['high'] >= tp:
-                            result_pips = tp_dist / 0.0001
-                            last_exit   = j
-                            break
-                    else:
-                        if bar['high'] >= sl:
-                            result_pips = -sl_dist / 0.0001
-                            last_exit   = j
-                            break
-                        if bar['low']  <= tp:
-                            result_pips = tp_dist / 0.0001
-                            last_exit   = j
-                            break
-
-                if result_pips is None:
-                    continue   # trade still open at end of data
-
-                trades.append({
-                    "entry_time": str(pd.to_datetime(entry_bar['time'], unit='s'))[:16],
-                    "dir":   "BUY" if direction == 1 else "SELL",
-                    "entry": round(entry, 5),
-                    "result": round(result_pips, 1),
-                    "win":   result_pips > 0,
-                })
-                equity.append(equity[-1] + result_pips)
-
-            # ── Calculate Stats ────────────────────────────────────
-            if not trades:
-                self.after(0, lambda: (
-                    self._bt_status.configure(text="Keine Trades gefunden.", text_color="#E67E22"),
-                    self._bt_progress.stop(),
-                    self._bt_run_btn.configure(state="normal", text="▶ Backtest Starten")
-                ))
-                return
-
-            total   = len(trades)
-            wins    = sum(1 for t in trades if t['win'])
-            winrate = wins / total * 100
-            gross_p = sum(t['result'] for t in trades if t['result'] > 0)
-            gross_l = abs(sum(t['result'] for t in trades if t['result'] < 0))
-            pf      = gross_p / gross_l if gross_l > 0 else float('inf')
-            pnl     = sum(t['result'] for t in trades)
-
-            # Max drawdown
-            peak, maxdd = 0.0, 0.0
-            for e in equity:
-                if e > peak: peak = e
-                dd = peak - e
-                if dd > maxdd: maxdd = dd
-
-            # Sharpe (simplified)
-            if len(equity) > 2:
-                rets  = [equity[i] - equity[i-1] for i in range(1, len(equity))]
-                mean_r = sum(rets) / len(rets)
-                std_r  = (sum((r - mean_r)**2 for r in rets) / len(rets)) ** 0.5
-                sharpe = (mean_r / std_r * (252 ** 0.5)) if std_r > 0 else 0.0
-            else:
-                sharpe = 0.0
-
-            self.after(0, lambda: self._bt_show_results(trades, equity, total, winrate, pf, maxdd, pnl, sharpe))
-
-        except Exception as e:
-            err = str(e)
-            self.after(0, lambda msg=err: (
-                self._bt_status.configure(text=f"Fehler: {msg[:70]}", text_color="#E74C3C"),
-                self._bt_progress.stop(),
-                self._bt_run_btn.configure(state="normal", text="▶ Backtest Starten")
-            ))
-
-    def _bt_show_results(self, trades, equity, total, winrate, pf, maxdd, pnl, sharpe):
-        """Render results on the main thread."""
-        self._bt_progress.stop()
-        self._bt_run_btn.configure(state="normal", text="▶ Backtest Starten")
-        self._bt_status.configure(text=f"✅ Fertig – {total} Trades simuliert", text_color="#5EBA7D")
-
-        # Update stat cards
-        wr_color = "#5EBA7D" if winrate >= 50 else "#E74C3C"
-        pnl_color = "#5EBA7D" if pnl >= 0 else "#E74C3C"
-        self._bt_stats["total"].configure(text=str(total))
-        self._bt_stats["winrate"].configure(text=f"{winrate:.1f}%", text_color=wr_color)
-        self._bt_stats["pf"].configure(text=f"{min(pf,99):.2f}")
-        self._bt_stats["maxdd"].configure(text=f"{maxdd:.0f} pips", text_color="#E74C3C")
-        self._bt_stats["pnl"].configure(text=f"{pnl:+.0f}", text_color=pnl_color)
-        self._bt_stats["sharpe"].configure(text=f"{sharpe:.2f}")
-
-        # ── Equity Curve ────────────────────────────────────────
-        for w in self._bt_eq_canvas_frame.winfo_children():
-            w.destroy()
-
-        fig = Figure(figsize=(6, 3), facecolor="#1a1a1a")
-        ax  = fig.add_subplot(111)
-        ax.set_facecolor("#1a1a1a")
-        ax.tick_params(colors="gray")
-        for spine in ax.spines.values():
-            spine.set_edgecolor("#333")
-
-        color = "#5EBA7D" if equity[-1] >= 0 else "#E74C3C"
-        ax.plot(equity, color=color, linewidth=1.5)
-        ax.fill_between(range(len(equity)), equity, alpha=0.15, color=color)
-        ax.axhline(0, color="gray", linewidth=0.5, linestyle="--")
-        ax.set_xlabel("Trades", color="gray", fontsize=9)
-        ax.set_ylabel("Pips", color="gray", fontsize=9)
-        ax.set_title(f"{self._bt_symbol.get()} – {self._bt_strategy.get()}", color="white", fontsize=10)
-        fig.tight_layout(pad=1.0)
-
-        canvas = FigureCanvasTkAgg(fig, master=self._bt_eq_canvas_frame)
-        canvas.draw()
-        canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
-
-        # ── Trade List ───────────────────────────────────────────
-        for w in self._bt_trade_scroll.winfo_children():
-            w.destroy()
-
-        # Header
-        hdr = ctk.CTkFrame(self._bt_trade_scroll, fg_color=("gray80","gray20"), corner_radius=6)
-        hdr.pack(fill="x", pady=(0, 4))
-        hdr.grid_columnconfigure((0,1,2,3), weight=1, uniform="tc")
-        for ci, h in enumerate(["Zeit", "Dir", "Entry", "Ergebnis"]):
-            ctk.CTkLabel(hdr, text=h, font=ctk.CTkFont(size=10, weight="bold"),
-                         text_color="gray50").grid(row=0, column=ci, padx=6, pady=4, sticky="w")
-
-        for t in trades[-50:]:  # show last 50
-            row_bg = ("gray85","gray17") if t['win'] else ("gray82","gray15")
-            rc = ctk.CTkFrame(self._bt_trade_scroll, fg_color=row_bg, corner_radius=6)
-            rc.pack(fill="x", pady=2)
-            rc.grid_columnconfigure((0,1,2,3), weight=1, uniform="tc")
-            pip_color = "#5EBA7D" if t['win'] else "#E74C3C"
-            dir_color = "#2E86AB" if t['dir'] == "BUY" else "#A23B72"
-            ctk.CTkLabel(rc, text=t['entry_time'], font=ctk.CTkFont(size=9), text_color="gray60").grid(row=0, column=0, padx=6, pady=3, sticky="w")
-            ctk.CTkLabel(rc, text=t['dir'],  font=ctk.CTkFont(size=10, weight="bold"), text_color=dir_color).grid(row=0, column=1, padx=6, sticky="w")
-            ctk.CTkLabel(rc, text=str(t['entry']), font=ctk.CTkFont(size=9), text_color="gray70").grid(row=0, column=2, padx=6, sticky="w")
-            ctk.CTkLabel(rc, text=f"{t['result']:+.1f}p", font=ctk.CTkFont(size=10, weight="bold"), text_color=pip_color).grid(row=0, column=3, padx=6, sticky="w")
 
     def setup_terminal_tab(self):
-
-
-
-        tab = self.tabview.tab("💻 Terminal")
-        tab.grid_columnconfigure(0, weight=1)
-        tab.grid_rowconfigure(1, weight=1)
-
-        # ── Control bar ──────────────────────────────────────────────
-        controls = ctk.CTkFrame(tab, fg_color="transparent")
-        controls.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 0))
-
-        ctk.CTkButton(controls, text="🧹 Leeren", command=self.clear_terminal,
-                      fg_color="#E74C3C", hover_color="#C0392B", width=90).pack(side="left", padx=(0, 6))
-
-        self._log_paused = False
-        self._pause_btn = ctk.CTkButton(controls, text="⏸ Pause", command=self._toggle_log_pause,
-                                        fg_color="#E67E22", hover_color="#D35400", width=90)
-        self._pause_btn.pack(side="left", padx=(0, 6))
-
-        ctk.CTkButton(controls, text="📂 Log-Ordner", command=self._open_log_folder,
-                      fg_color="transparent", border_width=1, width=110).pack(side="left", padx=(0, 14))
-
-        # Filter buttons
-        ctk.CTkLabel(controls, text="Filter:", text_color="gray60").pack(side="left", padx=(0, 5))
-        self._log_filter = ctk.StringVar(value="ALL")
-        for label, val, color in [("Alle", "ALL", "#2E86AB"), ("TRADE 💰", "TRADE", "#5EBA7D"),
-                                   ("ERROR ❌", "ERROR", "#E74C3C"), ("WARN ⚠️", "WARNING", "#F1C40F"),
-                                   ("AI 🤖", "AI", "#8E44AD")]:
-            ctk.CTkButton(controls, text=label, width=80,
-                          command=lambda v=val: self._set_log_filter(v),
-                          fg_color=color, hover_color="gray30",
-                          border_width=1).pack(side="left", padx=2)
-
-        # Right side: live log status indicator
-        self._log_status_lbl = ctk.CTkLabel(controls, text="● Log: warte...", text_color="gray50",
-                                             font=ctk.CTkFont(size=11))
-        self._log_status_lbl.pack(side="right", padx=15)
-
-        # ── Terminal text box ─────────────────────────────────────────
-        # We use the underlying Tk Text widget directly for full tag/color support
-        import tkinter as tk
-        self._term_frame = ctk.CTkFrame(tab, corner_radius=15, fg_color="#101010")
-        self._term_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
-        self._term_frame.grid_rowconfigure(0, weight=1)
-        self._term_frame.grid_columnconfigure(0, weight=1)
-
-        self.terminal_box = tk.Text(self._term_frame,
-                                    bg="#101010", fg="#D4D4D4",
-                                    font=("Consolas", 12),
-                                    insertbackground="#D4D4D4",
-                                    selectbackground="#264F78",
-                                    relief="flat", borderwidth=0,
-                                    wrap="word", state="disabled")
-        self.terminal_box.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
-
-        # Scrollbar
-        sb = tk.Scrollbar(self._term_frame, command=self.terminal_box.yview,
-                          bg="#1E1E1E", troughcolor="#1E1E1E", highlightthickness=0)
-        sb.grid(row=0, column=1, sticky="ns")
-        self.terminal_box.configure(yscrollcommand=sb.set)
-
-        # Color tags
-        self.terminal_box.tag_configure("ts",      foreground="#569CD6")   # timestamp (blue)
-        self.terminal_box.tag_configure("INFO",    foreground="#D4D4D4")   # white
-        self.terminal_box.tag_configure("SYSTEM",  foreground="#9CDCFE")   # light blue
-        self.terminal_box.tag_configure("MT5",     foreground="#4EC9B0")   # teal
-        self.terminal_box.tag_configure("AI",      foreground="#C586C0")   # purple
-        self.terminal_box.tag_configure("TRADE",   foreground="#5EBA7D")   # green  ★ important
-        self.terminal_box.tag_configure("WARNING", foreground="#F1C40F")   # yellow
-        self.terminal_box.tag_configure("ERROR",   foreground="#F44747", font=("Consolas", 12, "bold"))
-        self.terminal_box.tag_configure("DEBUG",   foreground="#666666")   # gray
-        self.terminal_box.tag_configure("INDICATORS", foreground="#CE9178")# orange
-        self.terminal_box.tag_configure("RISK",    foreground="#E74C3C")   # red-ish
-        self.terminal_box.tag_configure("PROMPT",  foreground="#DCDCAA")   # yellow-ish
-        self.terminal_box.tag_configure("CATEGORY",foreground="#608B4E")   # bracket green
-        self.terminal_box.tag_configure("separator",foreground="#333333")
-
-        # Boot messages
-        self.write_terminal("FinGPT Professional", "SYSTEM")
-        self.write_terminal("  ─────────────────────────────────────────────\n", "separator")
-        self.write_terminal("  System initialisiert. Log-Stream startet...\n\n", "SYSTEM")
-
-        # Start live log tail
-        self._log_filter_value = "ALL"
-        self._log_tail_running = False
-        self._start_log_tail()
+        # Ausgelagert in TerminalView (gui/views/terminal_tab.py)
+        pass
 
     def _trigger_autosave(self, *args):
         """Debounced auto-save. Waits 1 second after the last change to save."""
@@ -2084,7 +681,7 @@ class ModernFinGPTGUI(ctk.CTk):
         """Silently saves config and updates dependent UI (like symbol rows)."""
         self.save_settings(silent=True)
         # Pairs — delegate to shared helper so dashboard updates instantly
-        raw_pairs = self.pairs_entry.get().strip()
+        raw_pairs = self.config_view.pairs_entry.get().strip()
         if raw_pairs:
             self.dashboard_view._rebuild_symbol_rows(raw_pairs)
 
@@ -2097,523 +694,163 @@ class ModernFinGPTGUI(ctk.CTk):
         self.config_sub_tabs = ctk.CTkTabview(tab, corner_radius=10)
         self.config_sub_tabs.grid(row=0, column=0, sticky="nsew", padx=10, pady=(10, 0))
         self.config_sub_tabs.add("🤖 KI & Ollama")
+        self.config_sub_tabs.add("🎨 Appearance")
         self.config_sub_tabs.add("📊 Trading Style")
         self.config_sub_tabs.add("🧠 Reinforcement Learning")
         self.config_sub_tabs.add("⚙️ MT5 & System")
+        self.config_sub_tabs.add("🔕 Benachrichtigungen")
 
         # Now actually populate them
         self._populate_config_tabs(tab)
 
     def _on_provider_change(self, choice=None):
         if choice is None:
-            choice = self.ki_provider_var.get()
+            choice = self.config_view.ki_provider_var.get()
             
         if "Ollama" in choice:
-            self.url_lbl.configure(text="Ollama URL:")
-            self.api_key_entry.configure(state="normal") # Enable to allow clearing or just let it be
-            self.api_key_entry.configure(fg_color=("gray85", "gray25"))
+            self.config_view.url_lbl.configure(text="Ollama URL:")
+            self.config_view.api_key_entry.configure(state="normal") # Enable to allow clearing or just let it be
+            self.config_view.api_key_entry.configure(fg_color=("gray85", "gray25"))
             # Optionally disable entirely but grey out is nice
-            threading.Thread(target=self.fetch_ollama_models_silently, daemon=True).start()
+            threading.Thread(target=self.config_view.fetch_ollama_models_silently, daemon=True).start()
         elif "OpenAI" in choice:
-            self.url_lbl.configure(text="Base URL (opt):")
-            self.api_key_entry.configure(state="normal", fg_color=("white", "gray15"))
-            self.model_combo.configure(values=["gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"])
-            if self.model_combo.get() not in ["gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"]:
-                self.model_combo.set("gpt-4o")
+            self.config_view.url_lbl.configure(text="Base URL (opt):")
+            self.config_view.api_key_entry.configure(state="normal", fg_color=("white", "gray15"))
+            self.config_view.model_combo.configure(values=["gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"])
+            if self.config_view.model_combo.get() not in ["gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"]:
+                self.config_view.model_combo.set("gpt-4o")
         elif "Anthropic" in choice:
-            self.url_lbl.configure(text="Base URL (opt):")
-            self.api_key_entry.configure(state="normal", fg_color=("white", "gray15"))
-            self.model_combo.configure(values=["claude-3-5-sonnet-20241022", "claude-3-opus-20240229", "claude-3-haiku-20240307"])
-            if self.model_combo.get() not in ["claude-3-5-sonnet-20241022", "claude-3-opus-20240229", "claude-3-haiku-20240307"]:
-                self.model_combo.set("claude-3-5-sonnet-20241022")
+            self.config_view.url_lbl.configure(text="Base URL (opt):")
+            self.config_view.api_key_entry.configure(state="normal", fg_color=("white", "gray15"))
+            self.config_view.model_combo.configure(values=["claude-3-5-sonnet-20241022", "claude-3-opus-20240229", "claude-3-haiku-20240307"])
+            if self.config_view.model_combo.get() not in ["claude-3-5-sonnet-20241022", "claude-3-opus-20240229", "claude-3-haiku-20240307"]:
+                self.config_view.model_combo.set("claude-3-5-sonnet-20241022")
         elif "DeepSeek" in choice:
-            self.url_lbl.configure(text="Base URL (opt):")
-            self.api_key_entry.configure(state="normal", fg_color=("white", "gray15"))
-            self.model_combo.configure(values=["deepseek-chat", "deepseek-coder"])
-            if self.model_combo.get() not in ["deepseek-chat", "deepseek-coder"]:
-                self.model_combo.set("deepseek-chat")
+            self.config_view.url_lbl.configure(text="Base URL (opt):")
+            self.config_view.api_key_entry.configure(state="normal", fg_color=("white", "gray15"))
+            self.config_view.model_combo.configure(values=["deepseek-chat", "deepseek-coder"])
+            if self.config_view.model_combo.get() not in ["deepseek-chat", "deepseek-coder"]:
+                self.config_view.model_combo.set("deepseek-chat")
             
         self._trigger_autosave()
 
-    # ── TAB 1: KI & Ollama ───────────────────────
-    def _populate_config_tabs(self, tab):
-        ki_tab = self.config_sub_tabs.tab("🤖 KI & Ollama")
-        ki_tab.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(ki_tab, text="🤖 KI & API Einstellungen", font=ctk.CTkFont(size=16, weight="bold"), text_color="#2E86AB").grid(row=0, column=0, columnspan=3, sticky="w", padx=20, pady=(15, 10))
-
-        ctk.CTkLabel(ki_tab, text="KI Provider:").grid(row=1, column=0, sticky="w", padx=20, pady=10)
-        self.ki_provider_var = ctk.StringVar(value="Ollama (Lokal)")
-        self.ki_provider_combo = ctk.CTkComboBox(ki_tab, values=["Ollama (Lokal)", "OpenAI (ChatGPT)", "Anthropic (Claude)", "DeepSeek"], variable=self.ki_provider_var, width=300, command=self._on_provider_change)
-        self.ki_provider_combo.grid(row=1, column=1, sticky="w", padx=20, pady=10)
-
-        self.url_lbl = ctk.CTkLabel(ki_tab, text="Ollama URL:")
-        self.url_lbl.grid(row=2, column=0, sticky="w", padx=20, pady=10)
-        self.url_entry = ctk.CTkEntry(ki_tab, placeholder_text="http://localhost:11434", width=300)
-        self.url_entry.insert(0, "http://localhost:11434")
-        self.url_entry.grid(row=2, column=1, sticky="w", padx=20, pady=10)
-
-        self.api_key_lbl = ctk.CTkLabel(ki_tab, text="API Key:")
-        self.api_key_lbl.grid(row=3, column=0, sticky="w", padx=20, pady=10)
-        self.api_key_entry = ctk.CTkEntry(ki_tab, placeholder_text="sk-...", width=300, show="*")
-        self.api_key_entry.grid(row=3, column=1, sticky="w", padx=20, pady=10)
-
-        ctk.CTkLabel(ki_tab, text="LLM Modell:").grid(row=4, column=0, sticky="w", padx=20, pady=10)
-        self.model_combo = ctk.CTkComboBox(ki_tab, values=["Lade Modelle..."], width=300)
-        self.model_combo.grid(row=4, column=1, sticky="w", padx=20, pady=10)
-
-        ctk.CTkLabel(ki_tab, text="Auto-Trading Intervall (sek):").grid(row=5, column=0, sticky="w", padx=20, pady=10)
-        self.interval_slider = ctk.CTkSlider(ki_tab, from_=1, to=30, number_of_steps=29)
-        self.interval_slider.set(5)
-        self.interval_slider.grid(row=5, column=1, sticky="ew", padx=20, pady=10)
-        self.interval_lbl = ctk.CTkLabel(ki_tab, text="5s")
-        self.interval_lbl.grid(row=5, column=2, padx=(0, 20))
-        self.interval_slider.configure(command=lambda val: self.interval_lbl.configure(text=f"{int(val)}s"))
-
-        ctk.CTkLabel(ki_tab, text="KI Temperatur:").grid(row=6, column=0, sticky="w", padx=20, pady=10)
-        self.ai_temp_slider = ctk.CTkSlider(ki_tab, from_=0.0, to=1.0, number_of_steps=10)
-        self.ai_temp_slider.set(0.3)
-        self.ai_temp_slider.grid(row=6, column=1, sticky="ew", padx=20, pady=10)
-        self.ai_temp_lbl = ctk.CTkLabel(ki_tab, text="0.3")
-        self.ai_temp_lbl.grid(row=6, column=2, padx=(0, 20))
-        self.ai_temp_slider.configure(command=lambda val: self.ai_temp_lbl.configure(text=f"{val:.1f}"))
-
-        ctk.CTkLabel(ki_tab, text="Prompt-Sprache:").grid(row=7, column=0, sticky="w", padx=20, pady=10)
-        self.prompt_lang_var = ctk.StringVar(value="Deutsch")
-        ctk.CTkComboBox(ki_tab, values=["Deutsch", "Englisch", "Gemischt"], variable=self.prompt_lang_var).grid(row=7, column=1, sticky="w", padx=20, pady=10)
-
-        # ── TAB 2: Trading Style ─────────────────
-        style_tab = self.config_sub_tabs.tab("📊 Trading Style")
-        style_tab.grid_columnconfigure(0, weight=1)
-        style_tab.grid_rowconfigure(0, weight=1)
-        style_scroll = ctk.CTkScrollableFrame(style_tab, fg_color="transparent")
-        style_scroll.grid(row=0, column=0, sticky="nsew")
-        style_scroll.grid_columnconfigure(1, weight=1)
-
-        # ── Abschnitt: Strategie ──────────────────────────────────────
-        ctk.CTkLabel(style_scroll, text="📊 Trading Strategie & Stil", font=ctk.CTkFont(size=16, weight="bold"), text_color="#E67E22").grid(row=0, column=0, columnspan=2, sticky="w", padx=20, pady=(15, 5))
-        ctk.CTkFrame(style_scroll, height=1, fg_color="#333").grid(row=1, column=0, columnspan=2, sticky="ew", padx=20, pady=(0, 10))
-
-        ctk.CTkLabel(style_scroll, text="Trading Style:").grid(row=2, column=0, sticky="w", padx=20, pady=8)
-        self.trading_style_var = ctk.StringVar(value="Swing Trading")
-        ctk.CTkComboBox(style_scroll, values=["Scalping", "Day Trading", "Swing Trading", "Position Trading"], variable=self.trading_style_var, width=250, command=self._trigger_autosave).grid(row=2, column=1, sticky="w", padx=20, pady=8)
-
-        ctk.CTkLabel(style_scroll, text="Signal-Strategie:").grid(row=3, column=0, sticky="w", padx=20, pady=8)
-        self.signal_strategy_var = ctk.StringVar(value="KI-gesteuert (Ollama)")
-        ctk.CTkComboBox(style_scroll, values=["KI-gesteuert (Ollama)", "Technische Indikatoren", "Hybrid (KI + Indikatoren)"], variable=self.signal_strategy_var, width=280, command=self._trigger_autosave).grid(row=3, column=1, sticky="w", padx=20, pady=8)
-
-        ctk.CTkLabel(style_scroll, text="Risikoprofil:").grid(row=4, column=0, sticky="w", padx=20, pady=8)
-        self.risk_profile_var = ctk.StringVar(value="Moderat")
-        ctk.CTkComboBox(style_scroll, values=["Konservativ", "Moderat", "Aggressiv"], variable=self.risk_profile_var, width=200, command=self._trigger_autosave).grid(row=4, column=1, sticky="w", padx=20, pady=8)
-
-        ctk.CTkLabel(style_scroll, text="Max Risiko pro Trade (%):").grid(row=5, column=0, sticky="w", padx=20, pady=8)
-        self.risk_trade_entry = ctk.CTkEntry(style_scroll, width=80)
-        self.risk_trade_entry.insert(0, "1.0")
-        self.risk_trade_entry.bind("<KeyRelease>", self._trigger_autosave)
-        self.risk_trade_entry.grid(row=5, column=1, sticky="w", padx=20, pady=8)
-
-        ctk.CTkLabel(style_scroll, text="Max Daily Loss (%):").grid(row=6, column=0, sticky="w", padx=20, pady=8)
-        self.risk_daily_entry = ctk.CTkEntry(style_scroll, width=80)
-        self.risk_daily_entry.insert(0, "3.0")
-        self.risk_daily_entry.bind("<KeyRelease>", self._trigger_autosave)
-        self.risk_daily_entry.grid(row=6, column=1, sticky="w", padx=20, pady=8)
-
-        ctk.CTkLabel(style_scroll, text="Max Offene Positionen:").grid(row=7, column=0, sticky="w", padx=20, pady=8)
-        self.max_pos_entry = ctk.CTkEntry(style_scroll, width=80)
-        self.max_pos_entry.insert(0, "3")
-        self.max_pos_entry.bind("<KeyRelease>", self._trigger_autosave)
-        self.max_pos_entry.grid(row=7, column=1, sticky="w", padx=20, pady=8)
-
-        self.trading_active_switch = ctk.CTkSwitch(style_scroll, text="Auto-Trading Global Erlauben", progress_color="#5EBA7D", command=self._trigger_autosave)
-        self.trading_active_switch.select()
-        self.trading_active_switch.grid(row=8, column=0, columnspan=2, sticky="w", padx=20, pady=(10, 5))
-
-        # ── Abschnitt: Trading Zeiten ─────────────────────────────────
-        ctk.CTkLabel(style_scroll, text="⏰ Trading Zeiten", font=ctk.CTkFont(size=16, weight="bold"), text_color="#2E86AB").grid(row=9, column=0, columnspan=2, sticky="w", padx=20, pady=(20, 5))
-        ctk.CTkFrame(style_scroll, height=1, fg_color="#333").grid(row=10, column=0, columnspan=2, sticky="ew", padx=20, pady=(0, 10))
-
-        ctk.CTkLabel(style_scroll, text="Favorisierte Sitzungen:").grid(row=11, column=0, sticky="w", padx=20, pady=8)
-        sessions_frame = ctk.CTkFrame(style_scroll, fg_color="transparent")
-        sessions_frame.grid(row=11, column=1, sticky="w", padx=20, pady=8)
-        self.session_london = ctk.CTkCheckBox(sessions_frame, text="London", command=self._trigger_autosave)
-        self.session_london.select()
-        self.session_london.pack(side="left", padx=5)
-        self.session_ny = ctk.CTkCheckBox(sessions_frame, text="New York", command=self._trigger_autosave)
-        self.session_ny.select()
-        self.session_ny.pack(side="left", padx=5)
-        self.session_asia = ctk.CTkCheckBox(sessions_frame, text="Asian", command=self._trigger_autosave)
-        self.session_asia.pack(side="left", padx=5)
-
-        ctk.CTkLabel(style_scroll, text="Aktive Handelstage:").grid(row=12, column=0, sticky="w", padx=20, pady=8)
-        days_frame = ctk.CTkFrame(style_scroll, fg_color="transparent")
-        days_frame.grid(row=12, column=1, sticky="w", padx=20, pady=8)
-        self.day_mon = ctk.CTkCheckBox(days_frame, text="Mo", width=55, command=self._trigger_autosave); self.day_mon.select(); self.day_mon.pack(side="left", padx=3)
-        self.day_tue = ctk.CTkCheckBox(days_frame, text="Di", width=55, command=self._trigger_autosave); self.day_tue.select(); self.day_tue.pack(side="left", padx=3)
-        self.day_wed = ctk.CTkCheckBox(days_frame, text="Mi", width=55, command=self._trigger_autosave); self.day_wed.select(); self.day_wed.pack(side="left", padx=3)
-        self.day_thu = ctk.CTkCheckBox(days_frame, text="Do", width=55, command=self._trigger_autosave); self.day_thu.select(); self.day_thu.pack(side="left", padx=3)
-        self.day_fri = ctk.CTkCheckBox(days_frame, text="Fr", width=55, command=self._trigger_autosave); self.day_fri.select(); self.day_fri.pack(side="left", padx=3)
-
-        ctk.CTkLabel(style_scroll, text="Trading-Fenster (UTC):").grid(row=13, column=0, sticky="w", padx=20, pady=8)
-        time_frame = ctk.CTkFrame(style_scroll, fg_color="transparent")
-        time_frame.grid(row=13, column=1, sticky="w", padx=20, pady=8)
-        ctk.CTkLabel(time_frame, text="Von:", text_color="gray60").pack(side="left")
-        self.trade_time_from = ctk.CTkEntry(time_frame, width=65, placeholder_text="07:00")
-        self.trade_time_from.insert(0, "07:00")
-        self.trade_time_from.bind("<KeyRelease>", self._trigger_autosave)
-        self.trade_time_from.pack(side="left", padx=(5, 15))
-        ctk.CTkLabel(time_frame, text="Bis:", text_color="gray60").pack(side="left")
-        self.trade_time_to = ctk.CTkEntry(time_frame, width=65, placeholder_text="22:00")
-        self.trade_time_to.insert(0, "22:00")
-        self.trade_time_to.bind("<KeyRelease>", self._trigger_autosave)
-        self.trade_time_to.pack(side="left", padx=(5, 0))
-        ctk.CTkLabel(time_frame, text="  (HH:MM Format)", text_color="gray50", font=ctk.CTkFont(size=11)).pack(side="left", padx=5)
-
-        self.time_filter_switch = ctk.CTkSwitch(style_scroll, text="Trading-Fenster aktiv (außerhalb keine neuen Trades)", progress_color="#2E86AB", command=self._trigger_autosave)
-        self.time_filter_switch.select()
-        self.time_filter_switch.grid(row=14, column=0, columnspan=2, sticky="w", padx=20, pady=(5, 5))
-
-        # ── Abschnitt: Nachrichten-Filter ─────────────────────────────
-        ctk.CTkLabel(style_scroll, text="📰 Nachrichten & Events", font=ctk.CTkFont(size=16, weight="bold"), text_color="#8E44AD").grid(row=15, column=0, columnspan=2, sticky="w", padx=20, pady=(20, 5))
-        ctk.CTkFrame(style_scroll, height=1, fg_color="#333").grid(row=16, column=0, columnspan=2, sticky="ew", padx=20, pady=(0, 10))
-
-        self.news_filter_switch = ctk.CTkSwitch(style_scroll, text="Kein Trading bei Hochrisiko-Nachrichten (NFP, CPI, FOMC...)", progress_color="#8E44AD", command=self._trigger_autosave)
-        self.news_filter_switch.select()
-        self.news_filter_switch.grid(row=17, column=0, columnspan=2, sticky="w", padx=20, pady=5)
-
-        ctk.CTkLabel(style_scroll, text="Vorab-Sperrzeit (Min):").grid(row=18, column=0, sticky="w", padx=20, pady=8)
-        news_before_frame = ctk.CTkFrame(style_scroll, fg_color="transparent")
-        news_before_frame.grid(row=18, column=1, sticky="w", padx=20, pady=8)
-        self.news_before_slider = ctk.CTkSlider(news_before_frame, from_=5, to=60, number_of_steps=11, width=180, command=lambda v: (self.news_before_lbl.configure(text=f"{int(v)} Min"), self._trigger_autosave()))
-        self.news_before_slider.set(30)
-        self.news_before_slider.pack(side="left")
-        self.news_before_lbl = ctk.CTkLabel(news_before_frame, text="30 Min", width=55)
-        self.news_before_lbl.pack(side="left", padx=8)
-
-        ctk.CTkLabel(style_scroll, text="Nachher-Sperrzeit (Min):").grid(row=19, column=0, sticky="w", padx=20, pady=8)
-        news_after_frame = ctk.CTkFrame(style_scroll, fg_color="transparent")
-        news_after_frame.grid(row=19, column=1, sticky="w", padx=20, pady=8)
-        self.news_after_slider = ctk.CTkSlider(news_after_frame, from_=5, to=60, number_of_steps=11, width=180, command=lambda v: (self.news_after_lbl.configure(text=f"{int(v)} Min"), self._trigger_autosave()))
-        self.news_after_slider.set(15)
-        self.news_after_slider.pack(side="left")
-        self.news_after_lbl = ctk.CTkLabel(news_after_frame, text="15 Min", width=55)
-        self.news_after_lbl.pack(side="left", padx=8)
-
-        ctk.CTkLabel(style_scroll, text="Nachrichten-Stärke filtern:").grid(row=20, column=0, sticky="w", padx=20, pady=8)
-        news_impact_frame = ctk.CTkFrame(style_scroll, fg_color="transparent")
-        news_impact_frame.grid(row=20, column=1, sticky="w", padx=20, pady=8)
-        self.news_high = ctk.CTkCheckBox(news_impact_frame, text="🔴 Hoch", command=self._trigger_autosave); self.news_high.select(); self.news_high.pack(side="left", padx=5)
-        self.news_medium = ctk.CTkCheckBox(news_impact_frame, text="🟡 Mittel", command=self._trigger_autosave); self.news_medium.pack(side="left", padx=5)
-        self.news_low = ctk.CTkCheckBox(news_impact_frame, text="⚪ Niedrig", command=self._trigger_autosave); self.news_low.pack(side="left", padx=5)
-
-        # ── Abschnitt: Ausführungsqualität ─────────────────────────────
-        ctk.CTkLabel(style_scroll, text="⚡ Ausführungsqualität", font=ctk.CTkFont(size=16, weight="bold"), text_color="#5EBA7D").grid(row=21, column=0, columnspan=2, sticky="w", padx=20, pady=(20, 5))
-        ctk.CTkFrame(style_scroll, height=1, fg_color="#333").grid(row=22, column=0, columnspan=2, sticky="ew", padx=20, pady=(0, 10))
-
-        ctk.CTkLabel(style_scroll, text="Max. Spread (Pips):").grid(row=23, column=0, sticky="w", padx=20, pady=8)
-        spread_frame = ctk.CTkFrame(style_scroll, fg_color="transparent")
-        spread_frame.grid(row=23, column=1, sticky="w", padx=20, pady=8)
-        self.max_spread_slider = ctk.CTkSlider(spread_frame, from_=1, to=20, number_of_steps=19, width=180, command=lambda v: (self.max_spread_lbl.configure(text=f"{int(v)} pips"), self._trigger_autosave()))
-        self.max_spread_slider.set(3)
-        self.max_spread_slider.pack(side="left")
-        self.max_spread_lbl = ctk.CTkLabel(spread_frame, text="3 pips", width=60)
-        self.max_spread_lbl.pack(side="left", padx=8)
-
-        ctk.CTkLabel(style_scroll, text="Max. Slippage (Pips):").grid(row=24, column=0, sticky="w", padx=20, pady=8)
-        slip_frame = ctk.CTkFrame(style_scroll, fg_color="transparent")
-        slip_frame.grid(row=24, column=1, sticky="w", padx=20, pady=8)
-        self.max_slippage_slider = ctk.CTkSlider(slip_frame, from_=1, to=10, number_of_steps=9, width=180, command=lambda v: (self.max_slippage_lbl.configure(text=f"{int(v)} pips"), self._trigger_autosave()))
-        self.max_slippage_slider.set(2)
-        self.max_slippage_slider.pack(side="left")
-        self.max_slippage_lbl = ctk.CTkLabel(slip_frame, text="2 pips", width=60)
-        self.max_slippage_lbl.pack(side="left", padx=8)
-
-        self.spread_check_switch = ctk.CTkSwitch(style_scroll, text="Trade ablehnen wenn Spread zu hoch", progress_color="#5EBA7D", command=self._trigger_autosave)
-        self.spread_check_switch.select()
-        self.spread_check_switch.grid(row=25, column=0, columnspan=2, sticky="w", padx=20, pady=(5, 20))
-
-        # ── TAB 3: Reinforcement Learning ──────────
-        rl_tab = self.config_sub_tabs.tab("🧠 Reinforcement Learning")
-        rl_tab.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(rl_tab, text="🧠 Reinforcement Learning Einstellungen", font=ctk.CTkFont(size=16, weight="bold"), text_color="#8E44AD").grid(row=0, column=0, columnspan=3, sticky="w", padx=20, pady=(15, 10))
-        ctk.CTkLabel(rl_tab, text="RL Algorithmus:").grid(row=1, column=0, sticky="w", padx=20, pady=10)
-        self.rl_algo_var = ctk.StringVar(value="PPO")
-        ctk.CTkComboBox(rl_tab, values=["PPO", "DQN", "A2C", "SAC"], variable=self.rl_algo_var, width=180, command=self._trigger_autosave).grid(row=1, column=1, sticky="w", padx=20, pady=10)
-        ctk.CTkLabel(rl_tab, text="Lernrate:").grid(row=2, column=0, sticky="w", padx=20, pady=10)
-        self.rl_lr_slider = ctk.CTkSlider(rl_tab, from_=0.0001, to=0.01, number_of_steps=99)
-        self.rl_lr_slider.set(0.0003)
-        self.rl_lr_slider.grid(row=2, column=1, sticky="ew", padx=20, pady=10)
-        self.rl_lr_lbl = ctk.CTkLabel(rl_tab, text="0.0003")
-        self.rl_lr_lbl.grid(row=2, column=2, padx=(0, 20))
-        def _on_lr_change(val):
-            self.rl_lr_lbl.configure(text=f"{val:.4f}")
-            self._trigger_autosave()
-        self.rl_lr_slider.configure(command=_on_lr_change)
-        ctk.CTkLabel(rl_tab, text="Gamma (Discount):").grid(row=3, column=0, sticky="w", padx=20, pady=10)
-        self.rl_gamma_slider = ctk.CTkSlider(rl_tab, from_=0.8, to=1.0, number_of_steps=20)
-        self.rl_gamma_slider.set(0.99)
-        self.rl_gamma_slider.grid(row=3, column=1, sticky="ew", padx=20, pady=10)
-        self.rl_gamma_lbl = ctk.CTkLabel(rl_tab, text="0.99")
-        self.rl_gamma_lbl.grid(row=3, column=2, padx=(0, 20))
-        def _on_gamma_change(val):
-            self.rl_gamma_lbl.configure(text=f"{val:.2f}")
-            self._trigger_autosave()
-        self.rl_gamma_slider.configure(command=_on_gamma_change)
-        ctk.CTkLabel(rl_tab, text="Training Steps:").grid(row=4, column=0, sticky="w", padx=20, pady=10)
-        self.rl_steps_entry = ctk.CTkEntry(rl_tab, width=120)
-        self.rl_steps_entry.insert(0, "100000")
-        self.rl_steps_entry.bind("<KeyRelease>", self._trigger_autosave)
-        self.rl_steps_entry.grid(row=4, column=1, sticky="w", padx=20, pady=10)
-        ctk.CTkLabel(rl_tab, text="Belohnungsfunktion:").grid(row=5, column=0, sticky="w", padx=20, pady=10)
-        self.rl_reward_var = ctk.StringVar(value="Profit + Sharpe Ratio")
-        ctk.CTkComboBox(rl_tab, values=["Profit + Sharpe Ratio", "Reiner Profit", "Sortino Ratio", "Custom"], variable=self.rl_reward_var, width=250, command=self._trigger_autosave).grid(row=5, column=1, sticky="w", padx=20, pady=10)
-        ctk.CTkLabel(rl_tab, text="Checkpoint Pfad:").grid(row=6, column=0, sticky="w", padx=20, pady=10)
-        self.rl_checkpoint_entry = ctk.CTkEntry(rl_tab, placeholder_text="storage/rl_agents/model.zip", width=300)
-        self.rl_checkpoint_entry.bind("<KeyRelease>", self._trigger_autosave)
-        self.rl_checkpoint_entry.grid(row=6, column=1, sticky="ew", padx=20, pady=10)
-        self.rl_live_switch = ctk.CTkSwitch(rl_tab, text="RL Agent für Live-Trading aktivieren (Experimentell)", progress_color="#8E44AD", command=self._trigger_autosave)
-        self.rl_live_switch.grid(row=7, column=0, columnspan=3, sticky="w", padx=20, pady=15)
-
-        # ── TAB 4: MT5 & System ──────────────
-        mt5_tab = self.config_sub_tabs.tab("⚙️ MT5 & System")
-        mt5_tab.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(mt5_tab, text="⚙️ MetaTrader 5 & System", font=ctk.CTkFont(size=16, weight="bold"), text_color="#E74C3C").grid(row=0, column=0, columnspan=2, sticky="w", padx=20, pady=(15, 10))
-        ctk.CTkButton(mt5_tab, text="MT5 Manuell Neuverbinden", command=self.test_mt5_connection, fg_color="transparent", border_width=1).grid(row=1, column=0, sticky="w", padx=20, pady=10)
-        ctk.CTkLabel(mt5_tab, text="Währungspaare Preset:").grid(row=2, column=0, sticky="w", padx=20, pady=(10, 2))
-
-        # Preset definitions
-        self._pair_presets = {
-            "🏆 Majors (6 Paare)":
-                "EURUSD, GBPUSD, USDJPY, USDCHF, AUDUSD, USDCAD",
-            "🥈 Majors + Minors (14 Paare)":
-                "EURUSD, GBPUSD, USDJPY, USDCHF, AUDUSD, USDCAD, NZDUSD, "
-                "EURGBP, EURJPY, GBPJPY, AUDNZD, CADJPY, AUDCAD, NZDJPY",
-            "🔀 Crosses (EUR/GBP/JPY Cross)":
-                "EURGBP, EURJPY, EURCAD, EURAUD, EURNZD, EURCHF, "
-                "GBPJPY, GBPCAD, GBPAUD, GBPNZD, GBPCHF",
-            "💎 Exotics":
-                "USDTRY, USDZAR, USDMXN, USDHKD, USDSGD, EURTRY, "
-                "GBPTRY, XAUUSD, XAGUSD",
-            "🌐 Alle Paare (Majors + Minors + Crosses)":
-                "EURUSD, GBPUSD, USDJPY, USDCHF, AUDUSD, USDCAD, NZDUSD, "
-                "EURGBP, EURJPY, EURCAD, EURAUD, EURNZD, EURCHF, "
-                "GBPJPY, GBPCAD, GBPAUD, GBPNZD, GBPCHF, "
-                "AUDNZD, AUDCAD, CADJPY, NZDJPY, CHFJPY",
-            "✏️ Custom (Manuell eingeben)": "",
-        }
-
-        self._pairs_preset_var = ctk.StringVar(value="🏆 Majors (6 Paare)")
-        pairs_preset_combo = ctk.CTkComboBox(
-            mt5_tab,
-            values=list(self._pair_presets.keys()),
-            variable=self._pairs_preset_var,
-            width=350,
-            command=self._on_pairs_preset_change,
-        )
-        pairs_preset_combo.grid(row=2, column=1, sticky="w", padx=20, pady=(10, 2))
-
-        ctk.CTkLabel(mt5_tab, text="Aktive Paare (editierbar):").grid(row=3, column=0, sticky="w", padx=20, pady=(2, 10))
-        self.pairs_entry = ctk.CTkEntry(mt5_tab, width=350)
-        self.pairs_entry.insert(0, self._pair_presets["🏆 Majors (6 Paare)"])
-        self.pairs_entry.bind("<KeyRelease>", self._trigger_autosave)
-        self.pairs_entry.grid(row=3, column=1, sticky="ew", padx=20, pady=(2, 10))
-        ctk.CTkLabel(mt5_tab, text="Konto:").grid(row=4, column=0, sticky="w", padx=20, pady=10)
+    def _call_llm_api(self, system_prompt, user_prompt, max_tokens=500):
+        """
+        Zentraler HTTP Wrapper für Ollama, OpenAI, Anthropic, DeepSeek.
+        Nimmt Parameter aus dem GUI state. Blockiert, sollte also aus Threads aufgerufen werden!
+        """
+        import requests
+        provider = self.config_view.ki_provider_var.get()
+        model = self.config_view.model_combo.get()
+        temperature = self.config_view.ai_temp_slider.get()
+        url = self.config_view.url_entry.get().strip()
+        api_key = self.config_view.api_key_entry.get().strip()
         
-        self.account_combo_var = ctk.StringVar(value="🔍 Wird ermittelt...")
-        self.account_combo = ctk.CTkComboBox(
-            mt5_tab,
-            variable=self.account_combo_var,
-            values=["Wird geladen..."],
-            width=350,
-            command=self._on_account_switch
-        )
-        self.account_combo.grid(row=4, column=1, sticky="w", padx=20, pady=10)
-        
-        # Container for extended Broker/Account Info
-        broker_info_frame = ctk.CTkFrame(mt5_tab, fg_color="transparent")
-        broker_info_frame.grid(row=5, column=1, sticky="w", padx=20, pady=(0, 10))
-        
-        self._account_type_lbl = ctk.CTkLabel(broker_info_frame, text="Typ: --", font=ctk.CTkFont(size=12))
-        self._account_type_lbl.pack(side="left", padx=(0, 15))
-        
-        self._broker_name_lbl = ctk.CTkLabel(broker_info_frame, text="Broker: --", font=ctk.CTkFont(size=12))
-        self._broker_name_lbl.pack(side="left", padx=(0, 15))
-        
-        self._prop_firm_lbl = ctk.CTkLabel(broker_info_frame, text="Prop Firm: --", font=ctk.CTkFont(size=12))
-        self._prop_firm_lbl.pack(side="left")
-
-        self.debug_mode_switch = ctk.CTkSwitch(mt5_tab, text="Debug-Modus (mehr Terminal-Output)", progress_color="#E74C3C", command=self._trigger_autosave)
-        self.debug_mode_switch.grid(row=6, column=0, columnspan=2, sticky="w", padx=20, pady=15)
-        # Trigger auto-detection after UI is ready
-        self.after(800, self._detect_account_type)
-
-        # Removed explicit Save Button since auto-save handles it now
-        parent_tab = self.tabview.tab("⚙️ Konfiguration")
-        parent_tab.grid_rowconfigure(1, weight=0)
-        
-        # Auto-saved hint
-        self.autosave_hint = ctk.CTkLabel(parent_tab, text="✅ Alle Änderungen werden automatisch gespeichert.", text_color="gray50", font=ctk.CTkFont(size=11, slant="italic"))
-        self.autosave_hint.grid(row=1, column=0, sticky="e", padx=20, pady=(10, 15))
-
-        self.after(500, self.fetch_ollama_models_silently)
-
-    def _on_pairs_preset_change(self, choice):
-        """Fill the pairs entry when a preset is selected from the dropdown."""
-        pairs = self._pair_presets.get(choice, "")
-        self.pairs_entry.delete(0, "end")
-        if pairs:
-            self.pairs_entry.insert(0, pairs)
-            self._trigger_autosave()
-        # If "Custom" → entry stays empty and user types freely
-
-    def _on_account_switch(self, selected_account_str):
-        self.write_terminal(f">> Wechsel zu Konto: {selected_account_str}...\n")
-        try:
-            # Extract login from string (e.g. "12345678 - FTMO")
-            login = int(selected_account_str.split(" - ")[0].strip())
-            
-            # Use mt5.login to switch
-            if mt5.initialize():
-                # We often need server and password, but passing just login works if 
-                # MT5 remembers the credentials, otherwise it might just open the prompt.
-                result = mt5.login(login)
-                if result:
-                    self.write_terminal(">> ✅ Konto erfolgreich gewechselt.\n")
-                    self._update_broker_labels()
-                    # Trigger a dashboard refresh
-                    self.dashboard_view.update_dashboard_data()
+        # 1. Ollama (Lokal)
+        if "Ollama" in provider:
+            base_url = url if url else "http://localhost:11434"
+            full_prompt = f"System: {system_prompt}\nUser: {user_prompt}"
+            try:
+                resp = requests.post(f"{base_url}/api/generate", json={
+                    "model": model,
+                    "prompt": full_prompt,
+                    "stream": False,
+                    "options": {
+                        "num_predict": max_tokens,
+                        "temperature": temperature
+                    }
+                }, timeout=45)
+                if resp.status_code == 200:
+                    return resp.json().get("response", "")
                 else:
-                    self.write_terminal(f">> ❌ Fehler beim Kontowechsel. MT5 Fehlercode: {mt5.last_error()}\n", "ERROR")
-                    messagebox.showwarning("Login fehlgeschlagen", "MT5 benötigt eventuell Passwort/Server. Bitte einmalig manuell im MT5 Terminal einloggen.")
-        except Exception as e:
-            self.write_terminal(f">> ❌ Fehler beim Parsen des Kontos: {e}\n", "ERROR")
-
-    def fetch_ollama_models_silently(self):
-
-        try:
-            url = self.url_entry.get().strip()
-            response = requests.get(f"{url}/api/tags", timeout=3)
-            if response.status_code == 200:
-                models = [model['name'] for model in response.json().get('models', [])]
-                if models:
-                    self.model_combo.configure(values=models)
-                    self.model_combo.set(models[0])
-                else:
-                    self.model_combo.configure(values=["Keine Modelle gefunden"])
-                    self.model_combo.set("Keine Modelle gefunden")
-            else:
-                self.model_combo.configure(values=["Verbindung fehlgeschlagen"])
-                self.model_combo.set("Verbindung fehlgeschlagen")
-        except Exception:
-            self.model_combo.configure(values=["Verbindung fehlgeschlagen"])
-            self.model_combo.set("Verbindung fehlgeschlagen")
-
-    def test_ollama_connection(self):
-        try:
-            url = self.url_entry.get().strip()
-            response = requests.get(f"{url}/api/tags", timeout=5)
-            if response.status_code == 200:
-                models = [model['name'] for model in response.json().get('models', [])]
-                if models:
-                    self.model_combo.configure(values=models)
-                    self.model_combo.set(models[0])
-                    messagebox.showinfo("Erfolg", f"Ollama verbunden! {len(models)} Modelle gefunden.")
-                    self.write_terminal(f">> Ollama Connection OK. Models: {', '.join(models)}\n")
-                else:
-                    self.model_combo.configure(values=["Keine Modelle gefunden"])
-                    messagebox.showwarning("Warnung", "Ollama ist erreichbar, aber es sind keine Modelle installiert.")
-            else:
-                messagebox.showerror("Fehler", f"Server antwortete mit Status: {response.status_code}")
-        except requests.exceptions.RequestException as e:
-            messagebox.showerror("Verbindungsfehler", f"Ollama Daemon konnte nicht erreicht werden:\n{e}")
-
-    def _update_broker_labels(self):
-        info = mt5.account_info()
-        if info is not None:
-            trade_mode = getattr(info, 'trade_mode', None)
-            type_map = {
-                0: ("🟡 Demo",    "#F1C40F"),
-                2: ("🔴 Live",    "#E74C3C"),
-                1: ("🟠 Contest", "#E67E22"),
+                    return f"[API Fehler Ollama] {resp.status_code}: {resp.text}"
+            except Exception as e:
+                return f"[API Fehler Ollama] {str(e)}"
+                
+        # 2. OpenAI API
+        elif "OpenAI" in provider:
+            base_url = url if url else "https://api.openai.com/v1"
+            headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+            payload = {
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                "max_tokens": max_tokens,
+                "temperature": temperature
             }
-            text, color = type_map.get(trade_mode, (f"Unbekannt ({trade_mode})", "gray60"))
-            
-            currency = getattr(info, 'currency', '')
-            if 'CENT' in currency.upper():
-                text, color = "🪙 Cent", "#8E44AD"
+            try:
+                resp = requests.post(f"{base_url}/chat/completions", headers=headers, json=payload, timeout=45)
+                if resp.status_code == 200:
+                    return resp.json()["choices"][0]["message"]["content"]
+                else:
+                    return f"[API Fehler OpenAI] {resp.status_code}: {resp.text}"
+            except Exception as e:
+                return f"[API Fehler OpenAI] {str(e)}"
                 
-            self._account_type_lbl.configure(text=f"Typ: {text}", text_color=color)
-            
-            # Broker / Server
-            company = getattr(info, 'company', 'Unbekannt')
-            server = getattr(info, 'server', 'Unbekannt')
-            self._broker_name_lbl.configure(text=f"Broker: {company}", text_color="gray80")
-            
-            # Prop Firm Detection (heuristic based on common names)
-            company_upper = company.upper()
-            server_upper = server.upper()
-            prop_keywords = ["FTMO", "FUNDED", "TFF", "EIGHTCAP", "TRUEFOREX", "MYFOREX", "MFF", "ALPHA", "SURGE", "BESPOKE", "FUNDING"]
-            is_prop = any(hint in company_upper or hint in server_upper for hint in prop_keywords)
-            
-            if is_prop:
-                self._prop_firm_lbl.configure(text="Prop Firm: ✅ Ja", text_color="#5EBA7D")
-            else:
-                self._prop_firm_lbl.configure(text="Prop Firm: ❌ Nein", text_color="gray50")
-        else:
-            self._account_type_lbl.configure(text="Typ: ⚠️ Không verbunden", text_color="gray50")
-            self._broker_name_lbl.configure(text="Broker: --", text_color="gray50")
-            self._prop_firm_lbl.configure(text="Prop Firm: --", text_color="gray50")
-
-    def _detect_account_type(self):
-        """Auto-detect MT5 account type, find multiple accounts, and update UI."""
-        try:
-            if mt5.initialize():
-                # Get current active account details
-                self._update_broker_labels()
+        # 3. Anthropic API
+        elif "Anthropic" in provider:
+            headers = {
+                "x-api-key": api_key, 
+                "anthropic-version": "2023-06-01", 
+                "content-type": "application/json"
+            }
+            payload = {
+                "model": model,
+                "system": system_prompt,
+                "messages": [{"role": "user", "content": user_prompt}],
+                "max_tokens": max_tokens,
+                "temperature": temperature
+            }
+            try:
+                resp = requests.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload, timeout=45)
+                if resp.status_code == 200:
+                    return resp.json()["content"][0]["text"]
+                else:
+                    return f"[API Fehler Anthropic] {resp.status_code}: {resp.text}"
+            except Exception as e:
+                return f"[API Fehler Anthropic] {str(e)}"
                 
-                # Unfortunately mt5 python library does *not* offer an API to list all logged in/saved accounts directly.
-                # However, we can display the CURRENT account and offer a refresh mechanism if they switch in MT5.
-                # Let's populate the combo box with the current account for now, and check if we can read accounts from config.
+        # 4. DeepSeek API
+        elif "DeepSeek" in provider:
+            base_url = url if url else "https://api.deepseek.com/v1"
+            headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+            payload = {
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                "max_tokens": max_tokens,
+                "temperature": temperature
+            }
+            try:
+                resp = requests.post(f"{base_url}/chat/completions", headers=headers, json=payload, timeout=45)
+                if resp.status_code == 200:
+                    return resp.json()["choices"][0]["message"]["content"]
+                else:
+                    return f"[API Fehler DeepSeek] {resp.status_code}: {resp.text}"
+            except Exception as e:
+                return f"[API Fehler DeepSeek] {str(e)}"
                 
-                current_info = mt5.account_info()
-                if current_info:
-                    current_str = f"{current_info.login} - {current_info.company}"
-                    self.account_combo.configure(values=[current_str])
-                    self.account_combo_var.set(current_str)
-                    
-                # To actually make multi-account work, we would need the user to have stored credentials or just
-                # show them what's currently active. Since we can't fetch all passwords easily from MT5 via python,
-                # we'll build a basic "Current Active" view, and prompt them that they can swap in MT5 terminal 
-                # and click 'Test Connection' to refresh.
-                
-                return
-        except Exception as e:
-            self.write_terminal(f">> ❌ Fehler beim Lesen der Konten: {e}\n", "ERROR")
-            
-        self.account_combo_var.set("⚠️ Nicht verbunden")
-        self._update_broker_labels()
-
-    def test_mt5_connection(self):
-        if mt5.initialize():
-            messagebox.showinfo("Erfolg", "MetaTrader 5 erfolgreich verbunden!")
-            self.write_terminal(">> MT5 Connection re-initialized successfully.\n")
-            self._detect_account_type()
-        else:
-            messagebox.showerror("Fehler", "MT5 Terminal konnte nicht gefunden oder verbunden werden.")
+        return "[Fehler] Unbekannter KI Provider"
 
     def save_config(self):
         try:
             # Gather Configuration Data
-            ollama_url = self.url_entry.get().strip()
-            llm_model = self.model_combo.get()
-            auto_trade_interval = int(self.interval_slider.get())
+            ollama_url = self.config_view.url_entry.get().strip()
+            llm_model = self.config_view.model_combo.get()
+            auto_trade_interval = int(self.config_view.interval_slider.get())
             
             # Risk Management
-            is_auto_trading = self.trading_active_switch.get() == 1
-            max_risk = float(self.risk_trade_entry.get())
-            max_daily_loss = float(self.risk_daily_entry.get())
-            max_pos = int(self.max_pos_entry.get())
+            is_auto_trading = self.config_view.trading_active_switch.get() == 1
+            max_risk = float(self.config_view.risk_trade_entry.get())
+            max_daily_loss = float(self.config_view.risk_daily_entry.get())
+            max_pos = int(self.config_view.max_pos_entry.get())
             
             # Pairs — delegate to shared helper
-            raw_pairs = self.pairs_entry.get().strip()
+            raw_pairs = self.config_view.pairs_entry.get().strip()
             if raw_pairs:
                 self.dashboard_view._rebuild_symbol_rows(raw_pairs)
 
@@ -2634,489 +871,259 @@ class ModernFinGPTGUI(ctk.CTk):
             messagebox.showerror("Eingabefehler", f"Bitte überprüfen Sie Ihre numerischen Eingaben.\nDetails: {str(e)}")
 
     def _config_path(self):
-        import os
-        config_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "storage", "gui_settings")
-        os.makedirs(config_dir, exist_ok=True)
-        return os.path.join(config_dir, "config.json")
+        return app_config_manager.config_path
+
+    def update_config_from_gui(self):
+        cfg = self.app_config
+        view = self.config_view
+        
+        cfg.ki_provider = view.ki_provider_var.get()
+        cfg.ollama_url = view.url_entry.get().strip()
+        cfg.api_key = view.api_key_entry.get().strip()
+        cfg.llm_model = view.model_combo.get()
+        try: cfg.interval = int(view.interval_slider.get())
+        except: pass
+        try: cfg.ai_temperature = round(view.ai_temp_slider.get(), 1)
+        except: pass
+        cfg.prompt_lang = view.prompt_lang_var.get()
+        cfg.system_prompt = view.system_prompt_text.get("0.0", "end-1c").strip()
+        try: cfg.min_confidence = int(view.confidence_slider.get())
+        except: pass
+        
+        cfg.trading_style = view.trading_style_var.get()
+        cfg.signal_strategy = view.signal_strategy_var.get()
+        cfg.risk_profile = view.risk_profile_var.get()
+        cfg.max_risk = view.risk_trade_entry.get()
+        cfg.max_daily_loss = view.risk_daily_entry.get()
+        cfg.max_positions = view.max_pos_entry.get()
+        cfg.trailing_stop = bool(view.trailing_stop_switch.get())
+        cfg.trailing_dist = view.ts_dist_entry.get()
+        cfg.break_even = bool(view.break_even_switch.get())
+        cfg.break_even_dist = view.be_dist_entry.get()
+        cfg.weekend_exit = bool(view.weekend_exit_switch.get())
+        cfg.auto_trading = bool(view.trading_active_switch.get())
+        cfg.session_london = bool(view.session_london.get())
+        cfg.session_ny = bool(view.session_ny.get())
+        cfg.session_asia = bool(view.session_asia.get())
+        
+        cfg.trade_time_from = view.trade_time_from.get()
+        cfg.trade_time_to = view.trade_time_to.get()
+        cfg.time_filter = bool(view.time_filter_switch.get())
+        cfg.day_mon = bool(view.day_mon.get())
+        cfg.day_tue = bool(view.day_tue.get())
+        cfg.day_wed = bool(view.day_wed.get())
+        cfg.day_thu = bool(view.day_thu.get())
+        cfg.day_fri = bool(view.day_fri.get())
+        
+        cfg.news_filter = bool(view.news_filter_switch.get())
+        try: cfg.news_before_min = int(view.news_before_slider.get())
+        except: pass
+        try: cfg.news_after_min = int(view.news_after_slider.get())
+        except: pass
+        cfg.news_high = bool(view.news_high.get())
+        cfg.news_medium = bool(view.news_medium.get())
+        cfg.news_low = bool(view.news_low.get())
+        
+        try: cfg.max_spread = int(view.max_spread_slider.get())
+        except: pass
+        try: cfg.max_slippage = int(view.max_slippage_slider.get())
+        except: pass
+        cfg.spread_check = bool(view.spread_check_switch.get())
+        
+        cfg.rl_algo = view.rl_algo_var.get()
+        try: cfg.rl_learning_rate = round(view.rl_lr_slider.get(), 4)
+        except: pass
+        try: cfg.rl_gamma = round(view.rl_gamma_slider.get(), 2)
+        except: pass
+        cfg.rl_steps = view.rl_steps_entry.get()
+        cfg.rl_reward = view.rl_reward_var.get()
+        cfg.rl_buffer_size = view.rl_buffer_entry.get()
+        cfg.rl_batch_size = view.rl_batch_entry.get()
+        cfg.rl_epochs = view.rl_epochs_entry.get()
+        cfg.rl_target_update = view.rl_target_update_entry.get()
+        cfg.rl_checkpoint = view.rl_checkpoint_entry.get()
+        cfg.rl_live_enabled = bool(view.rl_live_switch.get())
+        try: cfg.rl_epsilon_start = round(view.rl_eps_start_slider.get(), 2)
+        except: pass
+        try: cfg.rl_epsilon_min = round(view.rl_eps_min_slider.get(), 3)
+        except: pass
+        try: cfg.rl_epsilon_decay = round(view.rl_eps_decay_slider.get(), 4)
+        except: pass
+        cfg.rl_timeframe = view.rl_timeframe_var.get()
+        cfg.rl_bars = view.rl_bars_entry.get()
+        cfg.rl_nn_arch = view.rl_nn_arch_var.get()
+
+        # Risk Manager
+        try: cfg.rm_max_daily_loss_eur = float(view.rm_daily_loss_entry.get())
+        except: pass
+        try: cfg.rm_max_weekly_loss_eur = float(view.rm_weekly_loss_entry.get())
+        except: pass
+        try: cfg.rm_min_time_between_trades = int(view.rm_cooldown_slider.get())
+        except: pass
+        try: cfg.rm_max_trades_per_day = int(view.rm_max_trades_entry.get())
+        except: pass
+
+        # Backtest
+        try: cfg.bt_rr_ratio = round(view.rr_slider.get() if hasattr(view, 'rr_slider') else 1.5, 1)
+        except: pass
+        try: cfg.llm_max_tokens = int(view.max_tokens_slider.get())
+        except: pass
+        cfg.pairs = view.pairs_entry.get()
+        cfg.debug_mode = bool(view.debug_mode_switch.get())
+        
+        cfg.tg_token = view.tg_token_entry.get().strip()
+        cfg.tg_chat_id = view.tg_chat_id_entry.get().strip()
+        cfg.discord_webhook = view.discord_webhook_entry.get().strip()
+        cfg.sound_alerts = bool(view.sound_alerts_switch.get())
 
     def save_settings(self, silent: bool = False):
-        """Save all GUI settings to a JSON file for persistence across restarts."""
-        import json
-        cfg = {
-            # KI & Ollama
-            "ki_provider":      self.ki_provider_var.get(),
-            "ollama_url":       self.url_entry.get().strip(),
-            "api_key":          self.api_key_entry.get().strip(),
-            "llm_model":        self.model_combo.get(),
-            "interval":         int(self.interval_slider.get()),
-            "ai_temperature":   round(self.ai_temp_slider.get(), 1),
-            "prompt_lang":      self.prompt_lang_var.get(),
-            # Trading Style
-            "trading_style":    self.trading_style_var.get(),
-            "signal_strategy":  self.signal_strategy_var.get(),
-            "risk_profile":     self.risk_profile_var.get(),
-            "max_risk":         self.risk_trade_entry.get(),
-            "max_daily_loss":   self.risk_daily_entry.get(),
-            "max_positions":    self.max_pos_entry.get(),
-            "auto_trading":     bool(self.trading_active_switch.get()),
-            "session_london":   bool(self.session_london.get()),
-            "session_ny":       bool(self.session_ny.get()),
-            "session_asia":     bool(self.session_asia.get()),
-            # Trading Zeiten
-            "trade_time_from":  self.trade_time_from.get(),
-            "trade_time_to":    self.trade_time_to.get(),
-            "time_filter":      bool(self.time_filter_switch.get()),
-            "day_mon":          bool(self.day_mon.get()),
-            "day_tue":          bool(self.day_tue.get()),
-            "day_wed":          bool(self.day_wed.get()),
-            "day_thu":          bool(self.day_thu.get()),
-            "day_fri":          bool(self.day_fri.get()),
-            # Nachrichten-Filter
-            "news_filter":      bool(self.news_filter_switch.get()),
-            "news_before_min":  int(self.news_before_slider.get()),
-            "news_after_min":   int(self.news_after_slider.get()),
-            "news_high":        bool(self.news_high.get()),
-            "news_medium":      bool(self.news_medium.get()),
-            "news_low":         bool(self.news_low.get()),
-            # Ausführungsqualität
-            "max_spread":       int(self.max_spread_slider.get()),
-            "max_slippage":     int(self.max_slippage_slider.get()),
-            "spread_check":     bool(self.spread_check_switch.get()),
-            # Reinforcement Learning
-            "rl_algo":          self.rl_algo_var.get(),
-            "rl_learning_rate": round(self.rl_lr_slider.get(), 4),
-            "rl_gamma":         round(self.rl_gamma_slider.get(), 2),
-            "rl_steps":         self.rl_steps_entry.get(),
-            "rl_reward":        self.rl_reward_var.get(),
-            "rl_checkpoint":    self.rl_checkpoint_entry.get(),
-            "rl_live_enabled":  bool(self.rl_live_switch.get()),
-            # MT5 & System
-            "pairs":            self.pairs_entry.get(),
-            "debug_mode":       bool(self.debug_mode_switch.get()),
-        }
         try:
-            with open(self._config_path(), 'w', encoding='utf-8') as f:
-                json.dump(cfg, f, indent=2, ensure_ascii=False)
+            self.update_config_from_gui()
+            app_config_manager.save()
             if not silent:
-                self.write_terminal(f">> [SETTINGS] Gespeichert in: {self._config_path()}\n")
+                self.write_terminal(f">> [SETTINGS] Gespeichert in: {app_config_manager.config_path}\n")
         except Exception as e:
             if not silent:
                 self.write_terminal(f">> [SETTINGS ERROR] Speichern fehlgeschlagen: {e}\n")
 
     def load_settings(self):
-        """Load saved GUI settings from JSON and apply to all widgets."""
-        import json
         try:
-            path = self._config_path()
-            import os
-            if not os.path.exists(path):
-                return  # No saved config yet, keep defaults
-
-            with open(path, 'r', encoding='utf-8') as f:
-                cfg = json.load(f)
-
-            def _set_entry(widget, key):
-                v = cfg.get(key)
+            self.app_config = app_config_manager.load()
+            cfg = self.app_config
+            view = self.config_view
+            
+            def _set_entry(widget, v):
                 if v is not None:
                     widget.delete(0, "end")
                     widget.insert(0, str(v))
 
-            def _set_combo(var_or_combo, key):
-                v = cfg.get(key)
+            def _set_combo(var, v):
                 if v is not None:
-                    if isinstance(var_or_combo, ctk.StringVar):
-                        var_or_combo.set(v)
-                    else:
-                        var_or_combo.set(v)
+                    var.set(v)
 
-            def _set_slider(slider, lbl, key, fmt="{:.0f}"):
-                v = cfg.get(key)
+            def _set_slider(slider, lbl, v, fmt="{:.0f}"):
                 if v is not None:
                     slider.set(float(v))
                     lbl.configure(text=fmt.format(float(v)))
 
-            def _set_switch(switch, key):
-                v = cfg.get(key)
+            def _set_switch(switch, v):
                 if v is not None:
                     switch.select() if v else switch.deselect()
 
-            # KI & Ollama
-            if cfg.get("ki_provider"):
-                self.ki_provider_var.set(cfg["ki_provider"])
-            _set_entry(self.url_entry, "ollama_url")
-            _set_entry(self.api_key_entry, "api_key")
-            if cfg.get("llm_model"):
-                self.model_combo.set(cfg["llm_model"])
-            _set_slider(self.interval_slider, self.interval_lbl, "interval", fmt="{:.0f}s")
-            _set_slider(self.ai_temp_slider, self.ai_temp_lbl, "ai_temperature", fmt="{:.1f}")
-            _set_combo(self.prompt_lang_var, "prompt_lang")
+            _set_combo(view.ki_provider_var, cfg.ki_provider)
+            _set_entry(view.url_entry, cfg.ollama_url)
+            _set_entry(view.api_key_entry, cfg.api_key)
+            _set_combo(view.model_combo, cfg.llm_model)
+            _set_slider(view.interval_slider, view.interval_lbl, cfg.interval, "{:.0f}s")
+            _set_slider(view.ai_temp_slider, view.ai_temp_lbl, cfg.ai_temperature, "{:.1f}")
+            _set_combo(view.prompt_lang_var, cfg.prompt_lang)
+            view.system_prompt_text.delete("0.0", "end")
+            view.system_prompt_text.insert("0.0", str(cfg.system_prompt))
+            _set_slider(view.confidence_slider, view.confidence_lbl, cfg.min_confidence, "{:.0f}%")
             
-            # trigger UI updates based on loaded provider
             self.after(200, lambda: self._on_provider_change())
 
-            # Trading Style
-            _set_combo(self.trading_style_var, "trading_style")
-            _set_combo(self.signal_strategy_var, "signal_strategy")
-            _set_combo(self.risk_profile_var, "risk_profile")
-            _set_entry(self.risk_trade_entry, "max_risk")
-            _set_entry(self.risk_daily_entry, "max_daily_loss")
-            _set_entry(self.max_pos_entry, "max_positions")
-            _set_switch(self.trading_active_switch, "auto_trading")
-            _set_switch(self.session_london, "session_london")
-            _set_switch(self.session_ny, "session_ny")
-            _set_switch(self.session_asia, "session_asia")
-            # Trading Zeiten
-            _set_entry(self.trade_time_from, "trade_time_from")
-            _set_entry(self.trade_time_to, "trade_time_to")
-            _set_switch(self.time_filter_switch, "time_filter")
-            _set_switch(self.day_mon, "day_mon")
-            _set_switch(self.day_tue, "day_tue")
-            _set_switch(self.day_wed, "day_wed")
-            _set_switch(self.day_thu, "day_thu")
-            _set_switch(self.day_fri, "day_fri")
-            # Nachrichten-Filter
-            _set_switch(self.news_filter_switch, "news_filter")
-            _set_slider(self.news_before_slider, self.news_before_lbl, "news_before_min", fmt="{:.0f} Min")
-            _set_slider(self.news_after_slider, self.news_after_lbl, "news_after_min", fmt="{:.0f} Min")
-            _set_switch(self.news_high, "news_high")
-            _set_switch(self.news_medium, "news_medium")
-            _set_switch(self.news_low, "news_low")
-            # Ausführungsqualität
-            _set_slider(self.max_spread_slider, self.max_spread_lbl, "max_spread", fmt="{:.0f} pips")
-            _set_slider(self.max_slippage_slider, self.max_slippage_lbl, "max_slippage", fmt="{:.0f} pips")
-            _set_switch(self.spread_check_switch, "spread_check")
+            _set_combo(view.trading_style_var, cfg.trading_style)
+            _set_combo(view.signal_strategy_var, cfg.signal_strategy)
+            _set_combo(view.risk_profile_var, cfg.risk_profile)
+            _set_entry(view.risk_trade_entry, cfg.max_risk)
+            _set_entry(view.risk_daily_entry, cfg.max_daily_loss)
+            _set_entry(view.max_pos_entry, cfg.max_positions)
+            _set_switch(view.trailing_stop_switch, cfg.trailing_stop)
+            _set_entry(view.ts_dist_entry, cfg.trailing_dist)
+            _set_switch(view.break_even_switch, cfg.break_even)
+            _set_entry(view.be_dist_entry, cfg.break_even_dist)
+            _set_switch(view.weekend_exit_switch, cfg.weekend_exit)
+            _set_switch(view.trading_active_switch, cfg.auto_trading)
+            _set_switch(view.session_london, cfg.session_london)
+            _set_switch(view.session_ny, cfg.session_ny)
+            _set_switch(view.session_asia, cfg.session_asia)
+            
+            _set_entry(view.trade_time_from, cfg.trade_time_from)
+            _set_entry(view.trade_time_to, cfg.trade_time_to)
+            _set_switch(view.time_filter_switch, cfg.time_filter)
+            _set_switch(view.day_mon, cfg.day_mon)
+            _set_switch(view.day_tue, cfg.day_tue)
+            _set_switch(view.day_wed, cfg.day_wed)
+            _set_switch(view.day_thu, cfg.day_thu)
+            _set_switch(view.day_fri, cfg.day_fri)
+            
+            _set_switch(view.news_filter_switch, cfg.news_filter)
+            _set_slider(view.news_before_slider, view.news_before_lbl, cfg.news_before_min, "{:.0f} Min")
+            _set_slider(view.news_after_slider, view.news_after_lbl, cfg.news_after_min, "{:.0f} Min")
+            _set_switch(view.news_high, cfg.news_high)
+            _set_switch(view.news_medium, cfg.news_medium)
+            _set_switch(view.news_low, cfg.news_low)
+            
+            _set_slider(view.max_spread_slider, view.max_spread_lbl, cfg.max_spread, "{:.0f} pips")
+            _set_slider(view.max_slippage_slider, view.max_slippage_lbl, cfg.max_slippage, "{:.0f} pips")
+            _set_switch(view.spread_check_switch, cfg.spread_check)
 
-            # Reinforcement Learning
-            _set_combo(self.rl_algo_var, "rl_algo")
-            _set_slider(self.rl_lr_slider, self.rl_lr_lbl, "rl_learning_rate", fmt="{:.4f}")
-            _set_slider(self.rl_gamma_slider, self.rl_gamma_lbl, "rl_gamma", fmt="{:.2f}")
-            _set_entry(self.rl_steps_entry, "rl_steps")
-            _set_combo(self.rl_reward_var, "rl_reward")
-            _set_entry(self.rl_checkpoint_entry, "rl_checkpoint")
-            _set_switch(self.rl_live_switch, "rl_live_enabled")
+            _set_combo(view.rl_algo_var, cfg.rl_algo)
+            _set_slider(view.rl_lr_slider, view.rl_lr_lbl, cfg.rl_learning_rate, "{:.4f}")
+            _set_slider(view.rl_gamma_slider, view.rl_gamma_lbl, cfg.rl_gamma, "{:.2f}")
+            _set_entry(view.rl_steps_entry, cfg.rl_steps)
+            _set_combo(view.rl_reward_var, cfg.rl_reward)
+            _set_entry(view.rl_buffer_entry, cfg.rl_buffer_size)
+            _set_entry(view.rl_batch_entry, cfg.rl_batch_size)
+            _set_entry(view.rl_epochs_entry, cfg.rl_epochs)
+            _set_entry(view.rl_target_update_entry, cfg.rl_target_update)
+            _set_entry(view.rl_checkpoint_entry, cfg.rl_checkpoint)
+            _set_switch(view.rl_live_switch, cfg.rl_live_enabled)
 
-            # MT5 & System
-            _set_entry(self.pairs_entry, "pairs")
-            _set_switch(self.debug_mode_switch, "debug_mode")
+            _set_entry(view.pairs_entry, cfg.pairs)
+            _set_switch(view.debug_mode_switch, cfg.debug_mode)
+            
+            _set_entry(view.tg_token_entry, cfg.tg_token)
+            _set_entry(view.tg_chat_id_entry, cfg.tg_chat_id)
+            _set_entry(view.discord_webhook_entry, cfg.discord_webhook)
+            _set_switch(view.sound_alerts_switch, cfg.sound_alerts)
+            try:
+                view.notif_sl_hit.select()    if cfg.notif_sl_hit    else view.notif_sl_hit.deselect()
+                view.notif_tp_hit.select()    if cfg.notif_tp_hit    else view.notif_tp_hit.deselect()
+                view.notif_new_trade.select() if cfg.notif_new_trade else view.notif_new_trade.deselect()
+                view.notif_error.select()     if cfg.notif_error     else view.notif_error.deselect()
+            except Exception: pass
 
-            # Auto-apply saved pairs to dashboard immediately
-            loaded_pairs = self.pairs_entry.get().strip()
+            # NEW: RL epsilon, timeframe, bars, nn_arch
+            try: _set_slider(view.rl_eps_start_slider, view.rl_eps_start_lbl, cfg.rl_epsilon_start, "{:.2f}")
+            except: pass
+            try: _set_slider(view.rl_eps_min_slider, view.rl_eps_min_lbl, cfg.rl_epsilon_min, "{:.3f}")
+            except: pass
+            try: _set_slider(view.rl_eps_decay_slider, view.rl_eps_decay_lbl, cfg.rl_epsilon_decay, "{:.4f}")
+            except: pass
+            try: _set_combo(view.rl_timeframe_var, cfg.rl_timeframe)
+            except: pass
+            try: _set_entry(view.rl_bars_entry, cfg.rl_bars)
+            except: pass
+            try: _set_combo(view.rl_nn_arch_var, cfg.rl_nn_arch)
+            except: pass
+
+            # NEW: Max Tokens
+            try: _set_slider(view.max_tokens_slider, view.max_tokens_lbl, cfg.llm_max_tokens, "{:.0f}")
+            except: pass
+
+            # NEW: Risk Manager
+            try: _set_entry(view.rm_daily_loss_entry, cfg.rm_max_daily_loss_eur)
+            except: pass
+            try: _set_entry(view.rm_weekly_loss_entry, cfg.rm_max_weekly_loss_eur)
+            except: pass
+            try:
+                view.rm_cooldown_slider.set(float(cfg.rm_min_time_between_trades))
+                view.rm_cooldown_lbl.configure(text=f"{int(cfg.rm_min_time_between_trades)} sek")
+            except: pass
+            try: _set_entry(view.rm_max_trades_entry, cfg.rm_max_trades_per_day)
+            except: pass
+
+
+            loaded_pairs = view.pairs_entry.get().strip()
             if loaded_pairs:
                 self.after(0, lambda p=loaded_pairs: self.dashboard_view._rebuild_symbol_rows(p))
 
-            self.write_terminal(f">> [SETTINGS] Einstellungen geladen aus: {path}\n")
+            self.write_terminal(f">> [SETTINGS] Einstellungen geladen aus: {app_config_manager.config_path}\n")
 
         except Exception as e:
             self.write_terminal(f">> [SETTINGS ERROR] Laden fehlgeschlagen: {e}\n")
-
-    # ==========================================
-    # 7. FAQ TAB (Hilfe & Dokumentation)
-    # ==========================================
-    def setup_faq_tab(self):
-        tab = self.tabview.tab("❓ FAQ")
-        tab.grid_columnconfigure(0, weight=1)
-        tab.grid_columnconfigure(1, weight=4) # New right column for content
-        tab.grid_rowconfigure(1, weight=1)
-        
-        # Header (spans both columns)
-        header = ctk.CTkFrame(tab, fg_color="transparent")
-        header.grid(row=0, column=0, columnspan=2, sticky="ew", padx=20, pady=(20, 10))
-        
-        ctk.CTkLabel(header, text="Häufig gestellte Fragen (FAQ)", 
-                     font=ctk.CTkFont(size=24, weight="bold")).pack(side="left")
-        ctk.CTkLabel(header, text="Hilfe zur Software & Trading-Plattform", 
-                     font=ctk.CTkFont(size=14), text_color="gray60").pack(side="left", padx=(15, 0), pady=(8, 0))
-
-        # Dataset mapped by category
-        self.faq_dataset = {
-            "🤖 KI & Ollama": [
-                ("Muss Ollama im Hintergrund laufen?", "Ja! FinGPT greift auf ein lokales KI-Modell (z.B. llama3.2) über die Ollama API zu. Ohne gestarteten Ollama-Service (meist http://localhost:11434) funktioniert die KI-Analyse, das Journal-Reasoning und das Setup-Finden nicht."),
-                ("Wie funktioniert der AI Trade Coach (Reflexion) im Journal?", "Wenn ein Trade im Minus geschlossen wird, taucht im '📝 Journal' Tab beim Anklicken des Trades im KI-Panel unten rechts der Button '🧠 System-Analyse anfordern' auf. Darüber schickt FinGPT rückwirkend die Indikatordaten nochmals an Ollama, um aus dem Fehler zu lernen (z.B. Fakeouts, gegen den Trend gehandelt etc.)."),
-                ("Unterstützt FinGPT andere KI-Modelle außer Ollama?", "Ja! Wechsle in den '⚙️ Konfiguration' Tab unter '🤖 KI & Ollama'. Dort kannst du auch OpenAI (ChatGPT), Anthropic (Claude) oder DeepSeek auswählen und deinen API-Key hinterlegen."),
-                ("Wie liest FinGPT die Charts?", "Die Software nutzt die MetaTrader 5 Schnittstelle, um Preisdaten (Open, High, Low, Close) für verschiedene Zeitfenster (z.B. M15, H1, H4) direkt im Hintergrund abzufragen. Die Python-Engine berechnet daraus Indikatoren (RSI, MACD, Bollinger Bänder) und gibt diese textuell an das lokale Ollama-Modell oder die Cloud APIs weiter.")
-            ],
-            "📈 MetaTrader 5": [
-                ("Wie verbinde ich MetaTrader 5?", "Wechsle in den Tab '⚙️ Konfiguration' und überprüfe, ob der MT5-Pfad korrekt ist. Wenn alles stimmt, klicke oben rechts auf '▶ Live Starten'. Achte darauf, dass im MetaTrader 5 oben der Button 'Algo-Trading' aktiviert (grün) ist!"),
-                ("Warum tradet die KI nicht, obwohl Live gestartet ist?", "1. Ist 'Algo-Trading' im MT5 an?\n2. Ist im '⚙️ Konfiguration' Tab -> '⚙️ System' der Schalter 'Trading Erlaubt' aktiv?\n3. Findet die KI gerade überhaupt ein Setup? FinGPT erzwingt keine Trades. Schau im '💻 Terminal' Tab nach Log-Ausgaben oder nutze den '🤖 KI Trade-Berater' in der Live Markt-Übersicht für manuelle Setups.")
-            ],
-            "🧠 RL Engine": [
-                ("Was bedeutet der rote Punkt bei RL Engine unten rechts?", "Die RL (Reinforcement Learning) Engine sucht nach fertig trainierten KI-Agenten im Ordner 'storage/rl_agents'. Der rote Punkt bedeutet, dass das System momentan im Basis-Modus läuft, weil noch keine Modelle trainiert und gespeichert wurden. FinGPT funktioniert auch ohne diese Agenten einwandfrei.")
-            ]
-        }
-
-        # Sidebar for categories
-        sidebar = ctk.CTkFrame(tab, corner_radius=10, fg_color=("gray85", "#181818"))
-        sidebar.grid(row=1, column=0, sticky="nsew", padx=(20, 10), pady=(0, 20))
-        
-        ctk.CTkLabel(sidebar, text="Themen", font=ctk.CTkFont(size=14, weight="bold"), text_color="gray50").pack(anchor="w", padx=15, pady=(15, 10))
-
-        # Content area for questions
-        self.faq_content_area = ctk.CTkScrollableFrame(tab, fg_color="transparent")
-        self.faq_content_area.grid(row=1, column=1, sticky="nsew", padx=(10, 20), pady=(0, 20))
-
-        # Render Category Buttons
-        self.faq_buttons = []
-        for cat in self.faq_dataset.keys():
-            btn = ctk.CTkButton(sidebar, text=cat, fg_color="transparent", text_color="gray70", anchor="w",
-                                hover_color="#2A2A2A", command=lambda c=cat: self._render_faq_category(c))
-            btn.pack(fill="x", padx=10, pady=2)
-            self.faq_buttons.append((cat, btn))
-
-        # Load first category
-        if self.faq_dataset:
-            first_cat = list(self.faq_dataset.keys())[0]
-            self._render_faq_category(first_cat)
-
-    def _render_faq_category(self, category_name):
-        """Updates the FAQ content area with items matching the selected category."""
-        # Update button highlighting
-        for name, btn in self.faq_buttons:
-            if name == category_name:
-                btn.configure(fg_color="#333333", text_color="#5EBA7D", font=ctk.CTkFont(weight="bold"))
-            else:
-                btn.configure(fg_color="transparent", text_color="gray70", font=ctk.CTkFont(weight="normal"))
-
-        # Clear existing cards
-        for widget in self.faq_content_area.winfo_children():
-            widget.destroy()
-
-        # Render new cards
-        faqs = self.faq_dataset.get(category_name, [])
-        for question, answer in faqs:
-            card = ctk.CTkFrame(self.faq_content_area, fg_color=("gray90", "gray13"), corner_radius=12)
-            card.pack(fill="x", padx=5, pady=(0, 15))
-            card.grid_columnconfigure(0, weight=1)
-            
-            q_lbl = ctk.CTkLabel(card, text=f"Q: {question}", font=ctk.CTkFont(size=14, weight="bold"), 
-                                 text_color="#5EBA7D", justify="left", anchor="w", wraplength=650)
-            q_lbl.grid(row=0, column=0, sticky="ew", padx=20, pady=(15, 5))
-            
-            a_lbl = ctk.CTkLabel(card, text=answer, font=ctk.CTkFont(size=13), 
-                                 text_color="gray70", justify="left", anchor="w", wraplength=650)
-            a_lbl.grid(row=1, column=0, sticky="ew", padx=20, pady=(0, 15))
-
-    # ==========================================
-    # 8. RL STUDIO TAB (Agent Training)
-    # ==========================================
-    def setup_rl_studio_tab(self):
-        tab = self.tabview.tab("🤖 RL Studio")
-        tab.grid_columnconfigure(0, weight=1)
-        tab.grid_columnconfigure(1, weight=2)
-        tab.grid_rowconfigure(1, weight=1)
-        
-        # --- TOP HEADER BAR ---
-        header = ctk.CTkFrame(tab, fg_color="transparent")
-        header.grid(row=0, column=0, columnspan=2, sticky="ew", padx=20, pady=(20, 10))
-        
-        ctk.CTkLabel(header, text="Reinforcement Learning Studio", 
-                     font=ctk.CTkFont(size=24, weight="bold"), text_color="#8E44AD").pack(side="left")
-        ctk.CTkLabel(header, text="Trainiere eigene KI-Agenten auf historischen MT5-Daten", 
-                     font=ctk.CTkFont(size=14), text_color="gray60").pack(side="left", padx=(15, 0), pady=(8, 0))
-        
-        # --- LEFT PANEL: Config Overview & Start Button ---
-        left_panel = ctk.CTkFrame(tab, corner_radius=15, fg_color=("gray85", "#181818"))
-        left_panel.grid(row=1, column=0, sticky="nsew", padx=(20, 10), pady=(0, 20))
-        
-        ctk.CTkLabel(left_panel, text="📌 Aktuelle Trainings-Config", font=ctk.CTkFont(weight="bold", size=16)).pack(pady=(20, 10), padx=20, anchor="w")
-        
-        # Info Box reading from settings
-        info_box = ctk.CTkFrame(left_panel, fg_color=("gray90", "gray13"), corner_radius=10)
-        info_box.pack(fill="x", padx=20, pady=10)
-        
-        # Labels that we'll update when switching tabs or clicking refresh
-        self.rl_cfg_algo_lbl = ctk.CTkLabel(info_box, text="Algorithmus: PPO", text_color="#2E86AB")
-        self.rl_cfg_algo_lbl.pack(anchor="w", padx=15, pady=(15, 5))
-        
-        self.rl_cfg_lr_lbl = ctk.CTkLabel(info_box, text="Lernrate: 0.0003", text_color="#5EBA7D")
-        self.rl_cfg_lr_lbl.pack(anchor="w", padx=15, pady=5)
-        
-        self.rl_cfg_steps_lbl = ctk.CTkLabel(info_box, text="Total Steps: 100000", text_color="#E67E22")
-        self.rl_cfg_steps_lbl.pack(anchor="w", padx=15, pady=(5, 15))
-        
-        self._training_active = False
-        
-        # Control Buttons
-        self.btn_start_rl = ctk.CTkButton(left_panel, text="▶ Neues Modell Trainieren", 
-                                          font=ctk.CTkFont(size=15, weight="bold"),
-                                          height=45, fg_color="#5EBA7D", hover_color="#4CAF50",
-                                          command=self._start_rl_training_sim)
-        self.btn_start_rl.pack(fill="x", padx=20, pady=(20, 10))
-        
-        self.btn_stop_rl = ctk.CTkButton(left_panel, text="⏹ Training Abbrechen", 
-                                         font=ctk.CTkFont(size=14),
-                                         height=35, fg_color="#E74C3C", hover_color="#C0392B",
-                                         state="disabled", command=self._stop_rl_training_sim)
-        self.btn_stop_rl.pack(fill="x", padx=20, pady=0)
-        
-        # Refresh config button
-        ctk.CTkButton(left_panel, text="🔄 Config Neu Laden", fg_color="transparent", 
-                      border_width=1, text_color="gray60", command=self._update_rl_studio_config_labels).pack(pady=20)
-                      
-        # --- RIGHT PANEL: Live Progress & Terminal ---
-        right_panel = ctk.CTkFrame(tab, corner_radius=15, fg_color=("gray85", "#181818"))
-        right_panel.grid(row=1, column=1, sticky="nsew", padx=(10, 20), pady=(0, 20))
-        right_panel.grid_rowconfigure(2, weight=1)
-        right_panel.grid_columnconfigure(0, weight=1)
-        
-        # Progress Section
-        prog_header = ctk.CTkFrame(right_panel, fg_color="transparent")
-        prog_header.grid(row=0, column=0, sticky="ew", padx=20, pady=(20, 5))
-        
-        self.rl_status_lbl = ctk.CTkLabel(prog_header, text="Warte auf Start...", font=ctk.CTkFont(weight="bold", size=15), text_color="gray50")
-        self.rl_status_lbl.pack(side="left")
-        
-        self.rl_pct_lbl = ctk.CTkLabel(prog_header, text="0%", font=ctk.CTkFont(weight="bold", size=15), text_color="#5EBA7D")
-        self.rl_pct_lbl.pack(side="right")
-        
-        self.rl_progress = ctk.CTkProgressBar(right_panel, progress_color="#8E44AD", height=12)
-        self.rl_progress.grid(row=1, column=0, sticky="ew", padx=20, pady=(0, 15))
-        self.rl_progress.set(0)
-        
-        # Terminal Box for Training Logs
-        import tkinter as tk
-        term_frame = ctk.CTkFrame(right_panel, corner_radius=8, fg_color="#101010")
-        term_frame.grid(row=2, column=0, sticky="nsew", padx=20, pady=(0, 20))
-        term_frame.grid_rowconfigure(0, weight=1)
-        term_frame.grid_columnconfigure(0, weight=1)
-        
-        self.rl_term_box = tk.Text(term_frame, bg="#101010", fg="#D4D4D4", 
-                                   font=("Consolas", 11), insertbackground="#D4D4D4",
-                                   relief="flat", borderwidth=0, state="disabled")
-        self.rl_term_box.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
-        
-        sb = tk.Scrollbar(term_frame, command=self.rl_term_box.yview, bg="#1E1E1E", troughcolor="#1E1E1E", highlightthickness=0)
-        sb.grid(row=0, column=1, sticky="ns")
-        self.rl_term_box.configure(yscrollcommand=sb.set)
-        
-        self.rl_term_box.tag_configure("tf", foreground="#F1C40F") # Yellow warning/tf labels
-        self.rl_term_box.tag_configure("info", foreground="#9CDCFE") # Blue info
-        self.rl_term_box.tag_configure("success", foreground="#5EBA7D") # Green success
-        
-        self._write_rl_log("[SYSTEM] RL Studio initialisiert. Bereit für Training.", "info")
-
-    def _update_rl_studio_config_labels(self):
-        """Pulls latest configs from the Config tab variables to show in the Studio"""
-        try:
-            algo = self.rl_algo_var.get()
-            lr   = self.rl_lr_slider.get()
-            steps = self.rl_steps_entry.get()
-            
-            self.rl_cfg_algo_lbl.configure(text=f"Algorithmus: {algo}")
-            self.rl_cfg_lr_lbl.configure(text=f"Lernrate: {lr:.5f}")
-            self.rl_cfg_steps_lbl.configure(text=f"Total Steps: {steps}")
-        except Exception:
-            pass
-
-    def _write_rl_log(self, text, tag=None):
-        self.rl_term_box.configure(state="normal")
-        if tag:
-            self.rl_term_box.insert("end", text + "\n", tag)
-        else:
-            self.rl_term_box.insert("end", text + "\n")
-        self.rl_term_box.see("end")
-        self.rl_term_box.configure(state="disabled")
-
-    def _start_rl_training_sim(self):
-        if self._training_active: return
-        self._update_rl_studio_config_labels()
-        
-        algo = self.rl_algo_var.get()
-        steps = 100000
-        try:
-            steps = int(self.rl_steps_entry.get())
-        except:
-            steps = 100000
-            
-        self._training_active = True
-        self.btn_start_rl.configure(state="disabled", fg_color="gray40")
-        self.btn_stop_rl.configure(state="normal")
-        self.rl_status_lbl.configure(text=f"Trainiere {algo} Model...", text_color="#8E44AD")
-        self.rl_progress.set(0)
-        
-        self.rl_term_box.configure(state="normal")
-        self.rl_term_box.delete("1.0", "end")
-        self.rl_term_box.configure(state="disabled")
-        
-        self._write_rl_log(f"[INIT] Starte StableBaselines3 Umgebung...", "info")
-        self._write_rl_log(f"[INFO] Lade historische Ticks von MetaTrader5...", "info")
-        self._write_rl_log(f"WARNING:tensorflow:From C:\\Python314\\lib\\site-packages\\keras... (ignored)", "tf")
-        self._write_rl_log(f"Using CPU device (CUDA not found or disabled for testing)")
-        self._write_rl_log(f"Loading environment `FinGPT-MT5-Env-v0`...")
-        
-        # Threaded simulation block
-        def _train_loop():
-            import time, random, os
-            current_step = 0
-            episodes = 0
-            reward = -50.0 # start bad
-            
-            while self._training_active and current_step < steps:
-                chunk = int(steps / 20) # 20 updates
-                time.sleep(1.5) # simulate hard work
-                
-                if not self._training_active: break
-                
-                current_step += chunk
-                episodes += random.randint(5, 15)
-                reward += random.uniform(2.0, 15.0) # get better over time
-                
-                pct = min(1.0, current_step / steps)
-                
-                # Update UI safely
-                self.after(0, lambda p=pct, s=current_step, e=episodes, r=reward: self._update_rl_ui_sim(p, s, e, r))
-                
-            if self._training_active:
-                # Finished normally
-                self.after(0, self._finish_rl_training_sim)
-                
-        threading.Thread(target=_train_loop, daemon=True).start()
-
-    def _update_rl_ui_sim(self, pct, step, eps, rew):
-        self.rl_progress.set(pct)
-        self.rl_pct_lbl.configure(text=f"{int(pct * 100)}%")
-        log_txt = f"---------------------------------\n" \
-                  f"| rollout/           |          |\n" \
-                  f"|    ep_len_mean     | 104      |\n" \
-                  f"|    ep_rew_mean     | {rew:>8.2f} |\n" \
-                  f"| time/              |          |\n" \
-                  f"|    episodes        | {eps:<8} |\n" \
-                  f"|    total_timesteps | {step:<8} |"
-        self._write_rl_log(log_txt)
-
-    def _finish_rl_training_sim(self):
-        self._training_active = False
-        algo = self.rl_algo_var.get().lower()
-        self._write_rl_log(f"\n[DONE] Training abgeschlossen ({algo}).", "success")
-        self._write_rl_log(f"[SAVE] Speichere Modell in storage/rl_agents/fingpt_{algo}_v1.zip...", "info")
-        
-        # Create dummy file to trigger the green check later
-        agent_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "storage", "rl_agents")
-        os.makedirs(agent_dir, exist_ok=True)
-        dummy_file = os.path.join(agent_dir, f"fingpt_{algo}_v1.zip")
-        try:
-            with open(dummy_file, "w") as f:
-                f.write("DUMMY_AGENT_DATA")
-        except: pass
-        
-        self._write_rl_log(f"Modell erfolgreich gespeichert! Die RL Engine ist nun aktiv.", "success")
-        
-        self.rl_status_lbl.configure(text="Training Abgeschlossen!", text_color="#5EBA7D")
-        self.rl_progress.set(1.0)
-        self.rl_pct_lbl.configure(text="100%")
-        
-        self.btn_start_rl.configure(state="normal", fg_color="#5EBA7D")
-        self.btn_stop_rl.configure(state="disabled")
-
-    def _stop_rl_training_sim(self):
-        if not self._training_active: return
-        self._training_active = False
-        self._write_rl_log(f"\n[ABORT] Benutzer hat das Training vorzeitig abgebrochen.", "tf")
-        
-        self.rl_status_lbl.configure(text="Training Abgebrochen", text_color="#E74C3C")
-        self.btn_start_rl.configure(state="normal", fg_color="#5EBA7D")
-        self.btn_stop_rl.configure(state="disabled")
-
-    # --- Funktionalitäten ---
 
     def toggle_live_data(self):
         if not hasattr(self, 'is_live_running'):
@@ -3126,7 +1133,9 @@ class ModernFinGPTGUI(ctk.CTk):
             self.is_live_running = False
             self.live_btn.configure(text="▶ Live Starten", fg_color="#5EBA7D", hover_color="#4CAF50")
             self.status_dot.configure(text_color="#E74C3C") # Static Red
-            self.write_terminal(">> Live-Stream angehalten.\n")
+            self.write_terminal(">> Live-Stream angehalten.\\n")
+            if hasattr(self, 'trading_controller'):
+                self.trading_controller.stop()
         else:
             if not mt5.initialize():
                 messagebox.showerror("MT5 Fehler", "Konnte MetaTrader 5 nicht für Live-Daten initialisieren.")
@@ -3146,12 +1155,22 @@ class ModernFinGPTGUI(ctk.CTk):
             # Start Background AI Speech Bubble Worker
             threading.Thread(target=self._ai_analysis_worker, daemon=True).start()
             
-            # Start Auto-Trading Engine (if enabled by the user)
-            if hasattr(self, 'trading_active_switch') and self.trading_active_switch.get():
-                self.write_terminal(">> [AUTO] Auto-Trading Engine gestartet.\n")
-                threading.Thread(target=self._auto_trading_loop, daemon=True).start()
+            # Start Experience DB Resolver
+            if EXPERIENCE_DB_AVAILABLE:
+                if not hasattr(self, 'experience_db'):
+                    self.experience_db = ExperienceDB()
+                self.write_terminal(">> [RL] Experience DB aktiv. Lerne aus Trades.\\n")
             
-            self.write_terminal(">> MT5 Live-Stream gestartet. Empfange Ticks...\n")
+            if not hasattr(self, 'trading_controller'):
+                from core.trading_controller import TradingController
+                self.trading_controller = TradingController(self)
+                
+            self.trading_controller.start()
+            
+            if hasattr(self.config_view, 'trading_active_switch') and self.config_view.trading_active_switch.get():
+                self.write_terminal(">> [AUTO] Auto-Trading Engine gestartet.\\n")
+            
+            self.write_terminal(">> MT5 Live-Stream gestartet. Empfange Ticks...\\n")
             self.start_live_stream_thread()
 
     def _play_startup_sweep(self):
@@ -3213,7 +1232,31 @@ class ModernFinGPTGUI(ctk.CTk):
                 
             symbol = random.choice(self.dashboard_symbols)[1]
             sys_prompt = "Du bist ein FinGPT Agent. Antworte in maximal einem Satz und maximal 10 Worten."
-            prompt = f"Schreibe eine extrem kurze und spannende Feststellung zum {symbol} Chart. Zum Beispiel 'RSI stark überverkauft bei {symbol}' oder 'Volatilitäts-Spike bei {symbol} registriert.'. Keine Einleitung."
+            
+            # --- Comprehensive Analysis for AI Bubbles ---
+            if self.indicator_integration:
+                # Use enhanced AI analysis to get a deep insight
+                try:
+                    # Use a standard timeframe for general dashboard bubbles (e.g., M15 or H1)
+                    # We can try to see what the user has currently selected as "Trading Style"
+                    style = getattr(self, 'trading_style_var', None)
+                    style_str = style.get() if style else "Day Trading"
+                    
+                    # Map style to MT5 timeframe constant (re-using the logic from _auto_trading_loop)
+                    tf = mt5.TIMEFRAME_M15
+                    if style_str == "Scalping": tf = mt5.TIMEFRAME_M5
+                    elif style_str == "Swing Trading": tf = mt5.TIMEFRAME_H1
+                    elif style_str == "Position Trading": tf = mt5.TIMEFRAME_H4
+                    elif style_str in ["Price Action", "Mean Reversion"]: tf = mt5.TIMEFRAME_M15
+                    elif style_str == "Breakout-Trading": tf = mt5.TIMEFRAME_H1
+                    
+                    analysis = self.indicator_integration.enhanced_ai_analysis(symbol, timeframe=tf, include_advanced=True)
+                    # We want just a short summary from this long analysis
+                    prompt = f"Hier ist eine technische Analyse für {symbol} ({style_str} Perspektive):\n{analysis}\nFasse das Wichtigste in EXAKT EINEM KURZEN SATZ (max 10 Worte) zusammen. Zum Beispiel 'Starker Kaufimpuls durch Ichimoku bestätigt' oder 'RSI und MACD warnen vor Trendwende'."
+                except Exception:
+                    prompt = f"Schreibe eine extrem kurze und spannende Feststellung zum {symbol} Chart. Zum Beispiel 'RSI stark überverkauft bei {symbol}' oder 'Volatilitäts-Spike bei {symbol} registriert.'. Keine Einleitung."
+            else:
+                prompt = f"Schreibe eine extrem kurze und spannende Feststellung zum {symbol} Chart. Zum Beispiel 'RSI stark überverkauft bei {symbol}' oder 'Volatilitäts-Spike bei {symbol} registriert.'. Keine Einleitung."
             
             try:
                 text_raw = self._call_llm_api(system_prompt=sys_prompt, user_prompt=prompt, max_tokens=30)
@@ -3238,322 +1281,6 @@ class ModernFinGPTGUI(ctk.CTk):
                         })
             except Exception:
                 pass
-
-
-    def _auto_trading_loop(self):
-        """
-        Real auto-trading engine.
-        Runs in a background daemon thread while is_live_running is True.
-        Reads ALL GUI settings and executes trades via MT5/AI accordingly.
-        """
-        import time, re, requests
-        import MetaTrader5 as mt5
-        import numpy as np
-
-        # ── Helpers ────────────────────────────────────────────────
-        def _g(widget, default):
-            """Safely read a GUI widget value."""
-            try:
-                return widget.get()
-            except Exception:
-                return default
-
-        def _to_float(v, default=0.0):
-            try:
-                return float(v)
-            except Exception:
-                return default
-
-        def _rsi(closes, period=14):
-            if len(closes) < period + 1:
-                return None
-            deltas = np.diff(closes)
-            gains  = np.where(deltas > 0, deltas, 0.0)
-            losses = np.where(deltas < 0, -deltas, 0.0)
-            avg_g  = np.mean(gains[-period:])
-            avg_l  = np.mean(losses[-period:])
-            if avg_l == 0:
-                return 100.0
-            return round(100 - 100 / (1 + avg_g / avg_l), 2)
-
-        def _ema(arr, period):
-            alpha = 2 / (period + 1)
-            ema   = arr[0]
-            for v in arr[1:]:
-                ema = alpha * v + (1 - alpha) * ema
-            return ema
-
-        def _macd_signal(closes):
-            if len(closes) < 35:
-                return "NEUTRAL"
-            e12 = _ema(closes, 12)
-            e26 = _ema(closes, 26)
-            diff = e12 - e26
-            return "BUY" if diff > 0 else "SELL"
-
-        # ── Trading Style → Timeframe + SL/TP map ──────────────────
-        STYLE_MAP = {
-            "Scalping":         {"tf": mt5.TIMEFRAME_M5,  "sl": 10, "tp": 15, "pause": 30},
-            "Day Trading":      {"tf": mt5.TIMEFRAME_M15, "sl": 30, "tp": 45, "pause": 120},
-            "Swing Trading":    {"tf": mt5.TIMEFRAME_H1,  "sl": 60, "tp": 90, "pause": 300},
-            "Position Trading": {"tf": mt5.TIMEFRAME_H4,  "sl":100, "tp":150, "pause": 300},
-        }
-
-        # ── Day name map (weekday() index → checkbox attr) ──────────
-        DAY_ATTRS = ["day_mon", "day_tue", "day_wed", "day_thu", "day_fri"]
-
-        self.write_terminal(">> [AUTO] Engine aktiv. Warte auf erste Analyse...\n")
-
-        while self.is_live_running:
-            try:
-                # ── Read GUI settings ────────────────────────────────
-                auto_on     = hasattr(self, 'trading_active_switch') and self.trading_active_switch.get()
-                if not auto_on:
-                    time.sleep(5)
-                    continue
-
-                style       = _g(getattr(self, 'trading_style_var',    None), "Day Trading")
-                strategy    = _g(getattr(self, 'signal_strategy_var',  None), "KI-Entscheidung")
-                max_risk_pct= _to_float(_g(getattr(self, 'risk_trade_entry',  None), "1.0"), 1.0)
-                max_daily   = _to_float(_g(getattr(self, 'risk_daily_entry',  None), "50"), 50.0)
-                max_pos     = int(_to_float(_g(getattr(self, 'max_pos_entry',        None), "3"), 3))
-                max_spread  = int(_to_float(_g(getattr(self, 'max_spread_slider',    None), "3"), 3))
-                max_slip    = int(_to_float(_g(getattr(self, 'max_slippage_slider',  None), "2"), 2))
-                spread_chk  = hasattr(self, 'spread_check_switch')  and self.spread_check_switch.get()
-                time_filt   = hasattr(self, 'time_filter_switch')   and self.time_filter_switch.get()
-                news_filt   = hasattr(self, 'news_filter_switch')   and self.news_filter_switch.get()
-                tf_from     = _g(getattr(self, 'trade_time_from', None), "07:00")
-                tf_to       = _g(getattr(self, 'trade_time_to',   None), "22:00")
-
-                cfg         = STYLE_MAP.get(style, STYLE_MAP["Day Trading"])
-                timeframe   = cfg["tf"]
-                sl_pips     = cfg["sl"]
-                tp_pips     = cfg["tp"]
-                pause_secs  = cfg["pause"]
-
-                # ── 1. Day-of-week filter ─────────────────────────────
-                today_idx   = datetime.now().weekday()  # 0=Mon
-                if today_idx < 5:
-                    day_attr = DAY_ATTRS[today_idx]
-                    day_widget = getattr(self, day_attr, None)
-                    if day_widget is not None and not day_widget.get():
-                        self.write_terminal(f">> [AUTO] Handelstag {['Mo','Di','Mi','Do','Fr'][today_idx]} deaktiviert.\n")
-                        time.sleep(pause_secs)
-                        continue
-                else:
-                    # Weekend – never trade
-                    self.write_terminal(">> [AUTO] Wochenende – kein Trading.\n")
-                    time.sleep(300)
-                    continue
-
-                # ── 2. Time-window filter (UTC) ───────────────────────
-                if time_filt:
-                    now_utc = datetime.utcnow()
-                    now_str = now_utc.strftime("%H:%M")
-                    if not (tf_from <= now_str <= tf_to):
-                        self.write_terminal(f">> [AUTO] Außerhalb Trading-Fenster ({tf_from}–{tf_to} UTC). Jetzt: {now_str}\n")
-                        time.sleep(60)
-                        continue
-
-                # ── 3. Daily-loss check ───────────────────────────────
-                acc = mt5.account_info()
-                if acc is None:
-                    time.sleep(10)
-                    continue
-                today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-                deals_today = mt5.history_deals_get(today_start, datetime.now())
-                daily_pnl   = sum(d.profit for d in deals_today) if deals_today else 0.0
-                daily_pnl  += acc.profit  # add floating
-                if daily_pnl <= -abs(max_daily):
-                    self.write_terminal(f">> [AUTO] Tages-Verlustlimit erreicht ({daily_pnl:.2f}€ / -{max_daily:.2f}€). Pause bis Mitternacht.\n")
-                    time.sleep(3600)
-                    continue
-
-                # ── 4. Max open positions check ───────────────────────
-                open_pos = mt5.positions_total()
-                if open_pos >= max_pos:
-                    self.write_terminal(f">> [AUTO] Max. Positionen ({open_pos}/{max_pos}). Warte...\n")
-                    time.sleep(pause_secs)
-                    continue
-
-                # ── Symbols to analyse ────────────────────────────────
-                symbols = [sym for _, sym in getattr(self, 'dashboard_symbols', [])]
-                if not symbols:
-                    symbols = ["EURUSD"]
-
-                # ── 5. Analyse each symbol ────────────────────────────
-                for symbol in symbols:
-                    if not self.is_live_running:
-                        break
-
-                    tick = mt5.symbol_info_tick(symbol)
-                    if tick is None:
-                        continue
-
-                    info = mt5.symbol_info(symbol)
-                    if info is None:
-                        continue
-
-                    # ── 5a. Spread check ──────────────────────────────
-                    point     = info.point
-                    pip_size  = point * 10 if info.digits in (3, 5) else point
-                    spread_pts = tick.ask - tick.bid
-                    spread_pips = spread_pts / pip_size if pip_size > 0 else 99
-                    if spread_chk and spread_pips > max_spread:
-                        self.write_terminal(
-                            f">> [AUTO] {symbol}: Spread {spread_pips:.1f} Pips > Max {max_spread} Pips. Übersprungen.\n"
-                        )
-                        continue
-
-                    # ── 5b. Indicators ────────────────────────────────
-                    rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, 50)
-                    if rates is None or len(rates) < 20:
-                        continue
-                    closes  = np.array([r['close'] for r in rates], dtype=float)
-                    rsi_val = _rsi(closes)
-                    macd_sig = _macd_signal(closes)
-                    price   = closes[-1]
-
-                    # Higher-timeframe trend (one TF above)
-                    htf_map = {
-                        mt5.TIMEFRAME_M5:  mt5.TIMEFRAME_M15,
-                        mt5.TIMEFRAME_M15: mt5.TIMEFRAME_H1,
-                        mt5.TIMEFRAME_H1:  mt5.TIMEFRAME_H4,
-                        mt5.TIMEFRAME_H4:  mt5.TIMEFRAME_D1,
-                    }
-                    htf_rates = mt5.copy_rates_from_pos(symbol, htf_map.get(timeframe, mt5.TIMEFRAME_H1), 0, 10)
-                    if htf_rates is not None and len(htf_rates) >= 5:
-                        htf_trend = "BULLISH" if htf_rates[-1]['close'] > htf_rates[0]['close'] else "BEARISH"
-                    else:
-                        htf_trend = "NEUTRAL"
-
-                    # ── 5c. AI signal ─────────────────────────────────
-                    ollama_url   = getattr(self, 'url_entry',   None)
-                    model_combo  = getattr(self, 'model_combo', None)
-                    base_url     = (ollama_url.get().strip().rstrip("/") if ollama_url else "http://localhost:11434")
-                    model        = (model_combo.get() if model_combo else "llama3.2")
-
-                    # Adapt prompt by signal strategy
-                    if "RSI" in strategy:
-                        signal_hint = f"RSI={rsi_val}. RSI<30=BUY, RSI>70=SELL."
-                    elif "MACD" in strategy:
-                        signal_hint = f"MACD-Signal={macd_sig}."
-                    else:
-                        signal_hint = (
-                            f"RSI={rsi_val}, MACD={macd_sig}, Übergeordneter Trend={htf_trend}. "
-                            f"Spread={spread_pips:.1f} Pips. Preis={price:.5f}."
-                        )
-
-                    style_instruction = {
-                        "Scalping":         "Kurze schnelle Bewegungen, sehr enge SL/TP.",
-                        "Day Trading":      "Intraday-Bewegung, klare Trendrichtung bevorzugen.",
-                        "Swing Trading":    "Mehrstündige Bewegungen, nur starke Setups.",
-                        "Position Trading": "Strategische Trendfolge, viel Geduld.",
-                    }.get(style, "")
-
-                    sys_prompt = "Du bist FinGPT, ein professioneller Forex Bot."
-                    prompt = (
-                        f"Analysiere: {symbol}. "
-                        f"Stil: {style}. {style_instruction} "
-                        f"Marktdaten: {signal_hint} "
-                        f"Antworte NUR mit: BUY, SELL, oder WARTEN. Keine Erklärung."
-                    )
-
-                    ai_signal = "WARTEN"
-                    try:
-                        raw = self._call_llm_api(system_prompt=sys_prompt, user_prompt=prompt, max_tokens=20).strip().upper()
-                        if re.search(r'\bBUY\b|\bKAUF\b|\bLONG\b', raw):
-                            ai_signal = "BUY"
-                        elif re.search(r'\bSELL\b|\bVERKAUF\b|\bSHORT\b', raw):
-                            ai_signal = "SELL"
-                    except Exception as e:
-                        self.write_terminal(f">> [AUTO] KI API Fehler für {symbol}: {e}\n")
-                        continue
-
-                    self.write_terminal(
-                        f">> [AUTO] {symbol} | RSI:{rsi_val} | MACD:{macd_sig} | Trend:{htf_trend} "
-                        f"| Spread:{spread_pips:.1f}p | Signal: {ai_signal}\n"
-                    )
-
-                    if ai_signal == "WARTEN":
-                        continue
-
-                    # ── 5d. Check existing position on this symbol ────
-                    sym_positions = mt5.positions_get(symbol=symbol)
-                    if sym_positions and len(sym_positions) > 0:
-                        # Already have a position on this symbol – skip
-                        continue
-
-                    # ── 5e. Calculate SL/TP in price ────────────────
-                    pip_dist_sl = sl_pips * pip_size
-                    pip_dist_tp = tp_pips * pip_size
-                    if ai_signal == "BUY":
-                        entry = tick.ask
-                        stop_loss   = round(entry - pip_dist_sl, info.digits)
-                        take_profit = round(entry + pip_dist_tp, info.digits)
-                    else:
-                        entry = tick.bid
-                        stop_loss   = round(entry + pip_dist_sl, info.digits)
-                        take_profit = round(entry - pip_dist_tp, info.digits)
-
-                    # ── 5f. Lot size (risk-based) ─────────────────────
-                    try:
-                        account_balance = acc.balance
-                        risk_amount     = account_balance * (max_risk_pct / 100.0)
-                        tick_value      = info.trade_tick_value or 1.0
-                        pip_val         = (pip_size / info.trade_tick_size) * tick_value if info.trade_tick_size > 0 else 1.0
-                        lot_raw         = risk_amount / (sl_pips * pip_val) if sl_pips > 0 and pip_val > 0 else 0.01
-                        lot_step        = info.volume_step or 0.01
-                        lot_size        = round(round(lot_raw / lot_step) * lot_step, 2)
-                        lot_size        = max(info.volume_min or 0.01, min(lot_size, info.volume_max or 1.0))
-                    except Exception:
-                        lot_size = 0.01
-
-                    # ── 5g. slippage deviation from GUI ───────────────
-                    deviation = max(5, max_slip * 10)  # convert pips to points roughly
-
-                    # ── 5h. Execute trade ─────────────────────────────
-                    order_type = mt5.ORDER_TYPE_BUY if ai_signal == "BUY" else mt5.ORDER_TYPE_SELL
-                    request = {
-                        "action":       mt5.TRADE_ACTION_DEAL,
-                        "symbol":       symbol,
-                        "volume":       float(lot_size),
-                        "type":         order_type,
-                        "price":        entry,
-                        "sl":           stop_loss,
-                        "tp":           take_profit,
-                        "deviation":    deviation,
-                        "magic":        234001,
-                        "comment":      f"FinGPT {style}",
-                        "type_time":    mt5.ORDER_TIME_GTC,
-                        "type_filling": mt5.ORDER_FILLING_IOC,
-                    }
-
-                    check = mt5.order_check(request)
-                    # order_check() retcode=0 means OK (NOT TRADE_RETCODE_DONE which is for order_send)
-                    if check is None or check.retcode != 0:
-                        err = f"{check.comment} (code {check.retcode})" if check else str(mt5.last_error())
-                        self.write_terminal(f">> [AUTO] {symbol} Pre-Check fehlgeschlagen: {err}\n")
-                        continue
-
-                    result = mt5.order_send(request)
-                    if result.retcode == mt5.TRADE_RETCODE_DONE:
-                        self.write_terminal(
-                            f">> [TRADE] ✅ {ai_signal} {lot_size} {symbol} @ {result.price:.5f} "
-                            f"| SL:{stop_loss:.5f} TP:{take_profit:.5f} | Ticket:{result.order}\n"
-                        )
-                    else:
-                        self.write_terminal(
-                            f">> [TRADE] ❌ {symbol} {ai_signal} fehlgeschlagen: {result.comment} ({result.retcode})\n"
-                        )
-
-            except Exception as e:
-                self.write_terminal(f">> [AUTO] Loop-Fehler: {e}\n")
-
-            time.sleep(pause_secs)
-
-        self.write_terminal(">> [AUTO] Auto-Trading Engine gestoppt.\n")
-
 
     def animate_status_dot(self):
         if not self.is_live_running:
@@ -3622,10 +1349,10 @@ class ModernFinGPTGUI(ctk.CTk):
         
         # Orb settings: (radius_base, radius_var, drift_x_amp, drift_x_freq, drift_y_amp, drift_y_freq, color, width)
         orbs = [
-            (25, 8, 30, 0.6, 15, 0.4, "#1ABC9C", 2),
-            (45, 12, 50, 0.3, 20, 0.5, "#117A65", 1.5),
-            (70, 15, 80, 0.2, 30, 0.3, "#0E6251", 1),
-            (15, 4, -40, 0.7, -10, 0.6, "#48C9B0", 1.5) # Fast small satellite
+            (35, 12, 45, 0.6, 25, 0.4, "#1ABC9C", 2),
+            (65, 18, 70, 0.3, 30, 0.5, "#117A65", 1.5),
+            (95, 25, 100, 0.2, 40, 0.3, "#0E6251", 1),
+            (20, 6, -60, 0.7, -20, 0.6, "#48C9B0", 1.5) # Fast small satellite
         ]
         
         for base_r, var_r, dx_amp, dx_f, dy_amp, dy_f, color, w in orbs:
@@ -3659,8 +1386,10 @@ class ModernFinGPTGUI(ctk.CTk):
             if b["age"] >= b["max_age"]:
                 continue
                 
-            # Float up
-            b["y"] -= 0.3
+            # Float up and gently drift side-to-side (Parallax)
+            b["y"] -= 0.4
+            # Add a slight sine-wave drift in x-direction based on age
+            parallax_x = b["x"] + math.sin(b["age"] * 0.05) * 15.0
             
             # Fade out from bright green (#5EBA7D) to background (#2b2b2b)
             life_pct = b["age"] / b["max_age"]
@@ -3670,11 +1399,11 @@ class ModernFinGPTGUI(ctk.CTk):
             color = f"#{r:02x}{g:02x}{bl:02x}"
             
             item = self.sonar_canvas.create_text(
-                b["x"], b["y"],
+                parallax_x, b["y"],
                 text=b["text"],
                 fill=color,
-                font=("Arial", 10, "bold"),
-                width=120,
+                font=("Arial", 11, "bold"),
+                width=240,  # <-- Deutlich breiter, um Abschneiden zu verhindern
                 justify="center"
             )
             self._bubble_canvas_items.append(item)
@@ -3704,7 +1433,7 @@ class ModernFinGPTGUI(ctk.CTk):
         # Ollama check (non-blocking thread to avoid UI freeze)
         def check_ollama():
             try:
-                url = self.url_entry.get().strip()
+                url = self.config_view.url_entry.get().strip()
                 resp = requests.get(f"{url}/api/tags", timeout=2)
                 if resp.status_code == 200:
                     self.after(0, lambda: self.indicators["Ollama"].configure(text_color="#5EBA7D"))
@@ -3807,37 +1536,58 @@ class ModernFinGPTGUI(ctk.CTk):
             self.mvp_trade_lbl.configure(text="Noch keine Gewinne", text_color="gray50")
 
         # Aktualisiere Symbole
+        import time
+        now = time.time()
+        should_update_history = False
+        if not hasattr(self, '_last_dashboard_history_update') or (now - self._last_dashboard_history_update) > 60:
+            self._last_dashboard_history_update = now
+            should_update_history = True
+            
+        if not hasattr(self, '_dashboard_history_cache'):
+            self._dashboard_history_cache = {}
+
         for symbol, row in self.live_data_rows:
             tick = mt5.symbol_info_tick(symbol)
             if tick is not None:
-                # Berechne Änderung (simuliert über Tageskerze oder einfach bid/ask)
-                # Da uns die tägliche Änderung fehlt ohne rates, zeigen wir Bid/Ask Spread oder letzte Bewegungen.
-                # Für ein echtes "% Change" müsste man daily open laden
-                rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_D1, 0, 1)
-                if rates is not None and len(rates) > 0:
-                    open_price = rates[0]['open']
-                    change_pct = ((tick.bid - open_price) / open_price) * 100
-                    sign = "+" if change_pct > 0 else ""
-                    change_str = f"{sign}{change_pct:.2f}%"
-                else:
-                    change_str = "0.00%"
-                    
-                # MTF Trend Logic (M15, H1, H4)
-                trend_colors = []
-                for tf in [mt5.TIMEFRAME_M15, mt5.TIMEFRAME_H1, mt5.TIMEFRAME_H4]:
-                    tf_rates = mt5.copy_rates_from_pos(symbol, tf, 0, 5)
-                    if tf_rates is not None and len(tf_rates) >= 2:
-                        # Simple trend: current close vs oldest available close (up to 4 periods ago)
-                        if tf_rates[-1]['close'] > tf_rates[0]['close']:
-                            trend_colors.append("#5EBA7D") # Green / Bull
-                        elif tf_rates[-1]['close'] < tf_rates[0]['close']:
-                            trend_colors.append("#E74C3C") # Red / Bear
-                        else:
-                            trend_colors.append("gray")    # Neutral
+                if should_update_history or symbol not in self._dashboard_history_cache:
+                    # Berechne Änderung
+                    rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_D1, 0, 1)
+                    if rates is not None and len(rates) > 0:
+                        open_price = rates[0]['open']
+                        change_pct = ((tick.bid - open_price) / open_price) * 100
+                        sign = "+" if change_pct > 0 else ""
+                        change_str = f"{sign}{change_pct:.2f}%"
                     else:
-                        trend_colors.append("gray")
+                        change_str = "0.00%"
                         
-                row.update_data(f"{tick.bid:.5f}", change_str)
+                    # MTF Trend Logic (M15, H1, H4)
+                    trend_colors = []
+                    for tf in [mt5.TIMEFRAME_M15, mt5.TIMEFRAME_H1, mt5.TIMEFRAME_H4]:
+                        tf_rates = mt5.copy_rates_from_pos(symbol, tf, 0, 5)
+                        if tf_rates is not None and len(tf_rates) >= 2:
+                            if tf_rates[-1]['close'] > tf_rates[0]['close']:
+                                trend_colors.append("#5EBA7D") # Green / Bull
+                            elif tf_rates[-1]['close'] < tf_rates[0]['close']:
+                                trend_colors.append("#E74C3C") # Red / Bear
+                            else:
+                                trend_colors.append("gray")    # Neutral
+                        else:
+                            trend_colors.append("gray")
+                            
+                    # --- Fetch Sparkline Data (last 30 minutes M1) ---
+                    history_data = []
+                    try:
+                        m1_rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M1, 0, 30)
+                        if m1_rates is not None and len(m1_rates) > 0:
+                            history_data = [r['close'] for r in m1_rates]
+                    except Exception:
+                        pass
+                        
+                    self._dashboard_history_cache[symbol] = (change_str, trend_colors, history_data)
+                else:
+                    change_str, trend_colors, history_data = self._dashboard_history_cache[symbol]
+                        
+                row.update_data(f"{tick.bid:.5f}", change_str, history=history_data)
                 row.update_trend(*trend_colors)
 
     def _draw_pnl_chart(self):
@@ -3943,171 +1693,47 @@ class ModernFinGPTGUI(ctk.CTk):
         # So bleiben echte Trades und Fehlermeldungen besser sichtbar.
         pass
 
-    def write_terminal(self, text, tag="INFO"):
-        """Write colored text to the terminal. tag must be one of the configured color tags."""
-        try:
-            tb = self.terminal_box
-            tb.configure(state="normal")
+    # ============================================================
+    # MODERNISIERUNG: Event Bus Callback-Handler
+    # ============================================================
+    def _on_data_updated(self, event):
+        """Wird aufgerufen wenn Daten aktualisiert wurden"""
+        if hasattr(event, 'data'):
+            data_type = event.event_type
+            # Hier können wir UI-Updates basierend auf Datenänderungen durchführen
+            # z.B. Metric Cards aktualisieren, Charts neu zeichnen, etc.
+            self.write_terminal(f">> [EVENT] Daten aktualisiert: {data_type}")
+    
+    def _on_trade_executed(self, event):
+        """Wird aufgerufen wenn ein Trade ausgeführt wurde"""
+        if hasattr(event, 'data'):
+            data = event.data
+            symbol = data.get('symbol', 'N/A')
+            action = data.get('action', 'N/A')
+            self.write_terminal(f">> [EVENT] Trade ausgeführt: {action} {symbol}")
             
-            # Füge einen Zeitstempel hinzu, wenn der Text nicht bereits mit [HH:MM:SS] o.ä. beginnt
-            import re
-            if text.strip() and not re.match(r'^\[\d{2}:\d{2}:\d{2}\]', text.strip()):
-                timestamp = datetime.now().strftime('%H:%M:%S')
-                text = f"[{timestamp}] {text}"
-                
-            tb.insert("end", text, tag)
-            tb.configure(state="disabled")
-            if not getattr(self, '_log_paused', False):
-                tb.see("end")
-        except Exception:
-            pass  # terminal may not be ready yet
-    def clear_terminal(self):
-        try:
-            self.terminal_box.configure(state="normal")
-            self.terminal_box.delete("1.0", "end")
-            self.terminal_box.configure(state="disabled")
-            self.write_terminal("> Terminal geleert\n", "SYSTEM")
-        except Exception:
-            pass
-
-    def _toggle_log_pause(self):
-        self._log_paused = not self._log_paused
-        if self._log_paused:
-            self._pause_btn.configure(text="▶ Weiter", fg_color="#5EBA7D", hover_color="#4CAF50")
+            # Aktualisiere Dashboard nach Trade
+            if hasattr(self, 'dashboard_view'):
+                self.dashboard_view.refresh_data()
+    
+    def _on_config_changed(self, event):
+        """Wird aufgerufen wenn sich die Konfiguration geändert hat"""
+        self.write_terminal(">> [EVENT] Konfiguration geändert")
+        # Lade Konfiguration neu
+        self.app_config = app_config_manager.load()
+    
+    def emit_event(self, event_type: str, data: dict = None, source: str = None):
+        """Hilfsmethode um Events zu senden"""
+        if self.event_bus and data:
+            self.event_bus.publish(event_type, data, source)
+    # ============================================================
+    
+    def write_terminal(self, text, tag="INFO"):
+        """Write colored text to the terminal by delegating to TerminalView."""
+        if hasattr(self, 'terminal_view') and self.terminal_view:
+            self.terminal_view.write_terminal(text, tag)
         else:
-            self._pause_btn.configure(text="⏸ Pause", fg_color="#E67E22", hover_color="#D35400")
-            self.terminal_box.see("end")
-
-    def _open_log_folder(self):
-        import subprocess, os
-        log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs")
-        os.makedirs(log_dir, exist_ok=True)
-        subprocess.Popen(f'explorer "{log_dir}"')
-
-    def _set_log_filter(self, value):
-        self._log_filter_value = value
-        self.write_terminal(f"\n── Filter gesetzt: {value} ──\n", "separator")
-
-    def _parse_log_line(self, line):
-        """Parse a FinGPT log line and return (formatted_text, tag).
-        Log format: '2024-01-01 12:34:56,789 | INFO | [CATEGORY] message'
-        or console format: '12:34:56 ℹ️  [SYSTEM] message'
-        """
-        import re
-        line = line.rstrip('\n\r')
-        if not line.strip():
-            return None, None
-
-        # Filter check
-        flt = getattr(self, '_log_filter_value', 'ALL')
-
-        # Determine color tag by scanning for known keywords
-        tag = "INFO"
-        if "ERROR" in line or "❌" in line:
-            tag = "ERROR"
-        elif "WARNING" in line or "WARN" in line or "⚠️" in line:
-            tag = "WARNING"
-        elif "TRADE" in line or "💰" in line or "BUY" in line or "SELL" in line or "ORDER" in line:
-            tag = "TRADE"
-        elif "AI" in line or "🤖" in line or "LLM" in line or "Ollama" in line or "model" in line.lower():
-            tag = "AI"
-        elif "MT5" in line or "📊" in line or "MetaTrader" in line:
-            tag = "MT5"
-        elif "RISK" in line or "risk" in line.lower():
-            tag = "RISK"
-        elif "INDICATOR" in line or "indicator" in line.lower():
-            tag = "INDICATORS"
-        elif "DEBUG" in line or "🔍" in line:
-            tag = "DEBUG"
-        elif "SYSTEM" in line or "FinGPT" in line:
-            tag = "SYSTEM"
-
-        # Apply filter
-        if flt != "ALL" and tag != flt:
-            return None, None
-
-        # Format: prepend a clean timestamp if not already at start
-        ts_match = re.match(r'(\d{2}:\d{2}:\d{2})', line)
-        full_ts_match = re.match(r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})', line)
-
-        if full_ts_match:
-            # Standard logging format: strip date, keep time
-            ts = full_ts_match.group(1).split(' ')[1]
-            body = line[len(full_ts_match.group(1)):].lstrip(' |,0123456789')
-            return f"  {ts}  {body}\n", tag
-        elif ts_match:
-            # Already has HH:MM:SS prefix
-            return f"  {line}\n", tag
-        else:
-            return f"  {line}\n", tag
-
-    def _start_log_tail(self):
-        """Start background thread that tails the live FinGPT log file."""
-        import os, time
-        self._log_tail_running = True
-
-        def tail_loop():
-            log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs")
-            last_inode = None
-            last_pos = 0
-
-            while self._log_tail_running:
-                try:
-                    log_file = os.path.join(log_dir, f"fingpt_{datetime.now().strftime('%Y%m%d')}.log")
-                    if not os.path.exists(log_file):
-                        self.after(0, lambda: self._log_status_lbl.configure(
-                            text="● Log: keine Datei", text_color="gray50"))
-                        time.sleep(3)
-                        continue
-
-                    stat = os.stat(log_file)
-                    inode = stat.st_ino
-
-                    if inode != last_inode:
-                        # File rotated or first open
-                        last_inode = inode
-                        last_pos = 0
-
-                    with open(log_file, 'r', encoding='utf-8', errors='replace') as f:
-                        f.seek(last_pos)
-                        lines = f.readlines()
-                        last_pos = f.tell()
-
-                    if lines:
-                        for line in lines:
-                            text, tag = self._parse_log_line(line)
-                            if text:
-                                self.after(0, lambda t=text, tg=tag: self.write_terminal(t, tg))
-
-                        count = stat.st_size
-                        self.after(0, lambda c=count: self._log_status_lbl.configure(
-                            text=f"● Log aktiv  ({c//1024}KB)", text_color="#5EBA7D"))
-                    else:
-                        self.after(0, lambda: self._log_status_lbl.configure(
-                            text="● Log: verbunden", text_color="#5EBA7D"))
-
-                except Exception as ex:
-                    self.after(0, lambda e=str(ex): self._log_status_lbl.configure(
-                        text=f"● Log Fehler: {e[:30]}", text_color="#E74C3C"))
-
-                time.sleep(1)  # poll every 1 second
-
-        threading.Thread(target=tail_loop, daemon=True).start()
-
-    def simulate_terminal_output(self):
-        """Kept for backwards compatibility - now injects a realistic log line."""
-        msgs = [
-            ("12:34:56 ℹ️  [SYSTEM] Analysiere EURUSD Marktstruktur...", "SYSTEM"),
-            ("12:34:57 💰 [TRADE] BUY Signal erkannt | GBPUSD | Konfidenz: 87.4%", "TRADE"),
-            ("12:34:58 🤖 [AI] Ollama Inference abgeschlossen | 412ms | model: llama3", "AI"),
-            ("12:34:59 ⚠️  [WARNING] Margin Level unter 200% - Vorsicht!", "WARNING"),
-            ("12:35:00 📊 [MT5] Tick empfangen: EURUSD Bid=1.08421 Ask=1.08435", "MT5"),
-            ("12:35:01 ❌ [ERROR] Slippage zu hoch auf USDJPY - Trade abgebrochen", "ERROR"),
-            ("12:35:02 ℹ️  [RISK] Max Daily Loss Grenze: 3.0% | Aktuell: 0.8%", "RISK"),
-        ]
-        import random
-        txt, tag = random.choice(msgs)
-        self.write_terminal(f"  {txt}\n", tag)
+            print(f"[{tag}] {text.strip()}")
 
     def load_forex_charts(self):
         self.write_terminal(">> Lade echte Forex-Candlesticks (Major Pairs) via MetaTrader 5...\n")
@@ -4116,7 +1742,7 @@ class ModernFinGPTGUI(ctk.CTk):
         for widget in self.charts_container.winfo_children():
             widget.destroy()
             
-        self.charts_loading_lbl = ctk.CTkLabel(self.charts_container, text="Lade Livedaten für Major Pairs... (MT5)", font=ctk.CTkFont(size=14))
+        self.charts_loading_lbl = ctk.CTkLabel(self.charts_container, text="Lade Livedaten für Major Pairs... (MT5)", font=ctk.CTkFont(family="Inter", size=14))
         self.charts_loading_lbl.grid(row=0, column=0, columnspan=2, pady=50)
 
         pairs = [
@@ -4133,14 +1759,16 @@ class ModernFinGPTGUI(ctk.CTk):
         s = mpf.make_mpf_style(marketcolors=mc, facecolor='#1E1E1E', edgecolor='gray', 
                                figcolor='#1E1E1E', gridcolor='#333333', gridstyle=':')
 
-        def fetch_and_plot():
+        # Get timeframe safely on the main thread
+        current_tf_str = self.chart_timeframe_var.get()
+
+        def fetch_and_plot(tf_str):
             try:
                 # MT5 initialisieren, falls nicht schon aktiv
                 if not mt5.initialize():
                     raise Exception("MetaTrader 5 konnte nicht initialisiert werden.")
                 
                 # Bestimme Timeframe
-                tf_str = self.chart_timeframe_var.get()
                 if "M1 " in tf_str: tf = mt5.TIMEFRAME_M1
                 elif "M5" in tf_str: tf = mt5.TIMEFRAME_M5
                 elif "M15" in tf_str: tf = mt5.TIMEFRAME_M15
@@ -4149,12 +1777,12 @@ class ModernFinGPTGUI(ctk.CTk):
                 elif "H4" in tf_str: tf = mt5.TIMEFRAME_H4
                 else: tf = mt5.TIMEFRAME_D1
                 
-                figures = []
+                chart_data = []
                 for title, symbol in pairs:
                     # Lade 60 Kerzen für besseren Chart-Überblick
                     rates = mt5.copy_rates_from_pos(symbol, tf, 0, 60)
                     if rates is None or len(rates) == 0:
-                        self.write_terminal(f">> WARNUNG: Keine Daten von MT5 für {symbol} empfangen.\n")
+                        self.after(0, lambda sym=symbol: self.write_terminal(f">> WARNUNG: Keine Daten von MT5 für {sym} empfangen.\n"))
                         continue
                         
                     df = pd.DataFrame(rates)
@@ -4163,27 +1791,37 @@ class ModernFinGPTGUI(ctk.CTk):
                     
                     if df.empty:
                         continue
-                    
-                    fig = Figure(figsize=(5, 3.5), facecolor='#1E1E1E')
-                    ax = fig.add_subplot(111)
-                    ax.set_title(title + f" ({tf_str.split(' ')[0]})", color='white')
-                    ax.tick_params(colors='white')
-                    
-                    # Plotly ist hübsch, aber mplfinance im Plot-Modus ist nativ einbettbar
-                    mpf.plot(df, type='candle', ax=ax, style=s, show_nontrading=False, warn_too_much_data=1000)
-                    
-                    # Layout anpassen
-                    fig.tight_layout()
-                    figures.append((title, fig))
+                        
+                    chart_data.append((title, df, tf_str))
                 
-                # Update GUI
-                self.after(0, lambda: self._render_charts(figures))
+                # Update GUI im Main-Thread (inklusive Figure-Erstellung)
+                self.after(0, lambda: self._render_charts_from_data(chart_data, s))
             except Exception as e:
-                self.after(0, lambda: self.write_terminal(f">> Fehler beim Chart-Download: {str(e)}\n"))
-                self.after(0, lambda: messagebox.showerror("API Fehler", f"Fehler beim Abrufen der Marktdaten:\n{e}"))
+                err_msg = str(e)
+                self.after(0, lambda err=err_msg: self.write_terminal(f">> Fehler beim Chart-Download: {err}\n"))
+                self.after(0, lambda err=err_msg: messagebox.showerror("API Fehler", f"Fehler beim Abrufen der Marktdaten:\n{err}"))
                 self.after(0, lambda: self.charts_loading_lbl.configure(text="Fehler beim Laden der Daten."))
 
-        threading.Thread(target=fetch_and_plot, daemon=True).start()
+        threading.Thread(target=fetch_and_plot, args=(current_tf_str,), daemon=True).start()
+
+    def _render_charts_from_data(self, chart_data, style):
+        try:
+            figures = []
+            for title, df, tf_str in chart_data:
+                fig = Figure(figsize=(5, 3.5), facecolor='#1E1E1E')
+                ax = fig.add_subplot(111)
+                ax.set_title(title + f" ({tf_str.split(' ')[0]})", color='white')
+                ax.tick_params(colors='white')
+                
+                mpf.plot(df, type='candle', ax=ax, style=style, show_nontrading=False, warn_too_much_data=1000)
+                fig.tight_layout()
+                figures.append((title, fig))
+            
+            self._render_charts(figures)
+        except Exception as e:
+            err_msg = str(e)
+            self.write_terminal(f">> Fehler beim Chart-Erstellen: {err_msg}\n")
+            messagebox.showerror("API Fehler", f"Fehler beim Erstellen der Marktdaten-Charts:\n{err_msg}")
 
     def _render_charts(self, figures):
         # Remove loading label
@@ -4215,7 +1853,7 @@ class ModernFinGPTGUI(ctk.CTk):
         self.load_forex_charts()
 
     def test_ollama_connection(self):
-        url = self.url_entry.get()
+        url = self.config_view.url_entry.get()
         self.write_terminal(f">> Testing ping to {url}...\n")
         # Simulierter Erfolg
         self.after(500, lambda: self.write_terminal(">> SUCCESS: Ollama is reachable.\n"))
@@ -4232,6 +1870,7 @@ class SplashScreen(ctk.CTk):
     def __init__(self):
         super().__init__()
         
+        self.app_config = app_config_manager.load()
         self.title("FinGPT Startup")
         
         # Center the splash screen
@@ -4247,17 +1886,17 @@ class SplashScreen(ctk.CTk):
         self.configure(fg_color="#121212")
         
         # UI Elements
-        self.logo_lbl = ctk.CTkLabel(self, text="FinGPT", font=ctk.CTkFont(size=42, weight="bold"), text_color="#5EBA7D")
+        self.logo_lbl = ctk.CTkLabel(self, text="FinGPT", font=ctk.CTkFont(family="Inter", size=42, weight="bold"), text_color="#5EBA7D")
         self.logo_lbl.pack(pady=(60, 10))
         
-        self.sub_lbl = ctk.CTkLabel(self, text="AI Trading Assistant", font=ctk.CTkFont(size=16), text_color="gray70")
+        self.sub_lbl = ctk.CTkLabel(self, text="AI Trading Assistant", font=ctk.CTkFont(family="Inter", size=16), text_color="gray70")
         self.sub_lbl.pack(pady=(0, 30))
         
         self.progress = ctk.CTkProgressBar(self, width=350, height=10, progress_color="#5EBA7D", fg_color="#1E1E1E", corner_radius=5)
         self.progress.pack(pady=10)
         self.progress.set(0)
         
-        self.status_lbl = ctk.CTkLabel(self, text="Initialisiere System...", font=ctk.CTkFont(size=12), text_color="gray50")
+        self.status_lbl = ctk.CTkLabel(self, text="Initialisiere System...", font=ctk.CTkFont(family="Inter", size=12), text_color="gray50")
         self.status_lbl.pack(pady=5)
         
         # Startup variables

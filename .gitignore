@@ -1,15 +1,58 @@
+# Python
 __pycache__/
 *.py[cod]
+*.pyo
 $py.class
-*.So
+*.so
+
+# Virtual Environments
 .Python
 env/
 venv/
+.venv/
+
+# Secrets & Config
 .env
 .EnPoint.json
+config/*.json
+
+# Build & Distribution
+build/
+dist/
+*.spec.bak
+
+# PyInstaller (keep the .spec file itself, ignore build output)
+*.exe
+
+# Testing & Cache
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs & Runtime Data
+*.log
+logs/*
+!logs/.gitkeep
+
+# RL Model weights (large binary files)
+rl_models/*.h5
+rl_models/*.keras
+rl_models/*.pkl
+rl_models/*.zip
+!rl_models/.gitkeep
+
+# IDEs
 .idea/
 .vscode/
-*.log
-logs/
-config/*.json
+.trae/
+
+# macOS
 .DS_Store
+
+# Storage Data & Cache
+storage/trade_journal/*.json
+!storage/trade_journal/.gitkeep
+storage/*.db
+storage/calendar_cache.json
+config/backups/*.json
+!config/backups/.gitkeep

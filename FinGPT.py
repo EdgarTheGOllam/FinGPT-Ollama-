@@ -12,15 +12,14 @@ import requests
 import json
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 import subprocess
-import warnings
 import re
-import numpy as np
 import threading
 import os
 import signal
 import queue
+import warnings
 warnings.filterwarnings("ignore")
 
 if sys.stdout.encoding != 'utf-8':
@@ -44,6 +43,8 @@ from trading.rl_trading_agent import RLTradingManager
 from core.mt5_broker import MT5Broker
 from core.ai_analyzer import AIAnalyzer
 from core.market_analyzer import MarketAnalyzer
+from core.exception_handler import ErrorHandler
+from core.performance_optimizer import PerformanceMetrics, ResourceLimiter
 from gui.cli_menu import CLIMenu
 
 class MT5FinGPT:
@@ -53,7 +54,7 @@ class MT5FinGPT:
         # GRUNDLEGENDE EINSTELLUNGEN ZUERST
         self.default_lot_size = 0.5
         self.max_risk_percent = 2.0
-        self.auto_trading = False
+        self.auto_trading = True
         self.auto_trade_symbols = ["EURUSD"]
         self.analysis_interval = 300
     
@@ -70,12 +71,37 @@ class MT5FinGPT:
         
         # Backward compatibility for existing code that checks these flags
         self.mt5_connected = False # Managed by broker mostly now
-        self.selected_model = None # Managed by AI Analyzer
+        self.selected_model = "gpt-oss:120b-cloud" # Default wie gewünscht
+        
+        # Sync the manual model to AI
+        if self.ai:
+            self.ai.selected_model = self.selected_model
+
+        # ENHANCED MODE FLAG
+        self.enhanced_mode = True  # Enhanced modules are available
+
+        # ERROR HANDLER
+        try:
+            self.error_handler = ErrorHandler(logger=self.logger)
+            self.log("INFO", "✅ Error Handler erfolgreich initialisiert", "SYSTEM")
+        except Exception as e:
+            self.log("ERROR", f"Error Handler Initialisierung Fehler: {e}", "SYSTEM")
+            self.error_handler = None
+
+        # PERFORMANCE METRICS & RESOURCE LIMITER
+        try:
+            self.performance_metrics = PerformanceMetrics()
+            self.resource_limiter = ResourceLimiter()
+            self.log("INFO", "✅ Performance Monitoring erfolgreich initialisiert", "SYSTEM")
+        except Exception as e:
+            self.log("ERROR", f"Performance Monitoring Initialisierung Fehler: {e}", "SYSTEM")
+            self.performance_metrics = None
+            self.resource_limiter = None
 
         # TRADING COMPANION INTEGRATION
         self.companion_process = None
         self.companion_enabled = False
-        self.auto_start_companion = False
+        self.auto_start_companion = True  # Companion automatisch beim Start aktivieren
 
         # TIMEFRAME NAMES
         self.timeframe_names = {
@@ -153,7 +179,7 @@ class MT5FinGPT:
         self.trailing_stop_step_pips = 5
         self.trailing_stop_start_profit_pips = 15
 
-        self.trading_enabled = False
+        self.trading_enabled = True
 
         # RL INTEGRATION - NACH LOGGING!
         try:
@@ -165,9 +191,105 @@ class MT5FinGPT:
             self.rl_manager = None
             self.rl_enabled = False
 
-        # RL SETTINGS
+        # RL SETTINGS (Basic)
         self.rl_training_mode = False
         self.rl_recommendation_weight = 0.3  # Gewichtung der RL-Empfehlung (30%)
+
+        # RL HYPERPARAMETER (GUI-Parität: config_tab.py → Reinforcement Learning Tab)
+        self.rl_algorithm = "PPO"               # PPO | DQN | A2C | SAC
+        self.rl_learning_rate = 0.0003
+        self.rl_gamma = 0.99                    # Discount-Faktor
+        self.rl_training_steps = 100000
+        self.rl_reward_function = "Profit + Sharpe Ratio"  # Belohnungsfunktion
+        self.rl_buffer_size = 10000             # Replay Buffer Size
+        self.rl_batch_size = 64
+        self.rl_epochs = 10                     # Epochs (PPO)
+        self.rl_target_update = 1000            # Target Update Frequenz (DQN)
+        self.rl_epsilon_start = 1.0
+        self.rl_epsilon_min = 0.01
+        self.rl_epsilon_decay = 0.995
+        self.rl_training_timeframe = "M15"      # Training-Zeitrahmen
+        self.rl_training_bars = 5000            # Anzahl der Datenpunkte
+        self.rl_nn_architecture = "Mittel (128-128)"  # Klein | Mittel | Groß
+        self.rl_checkpoint_path = "storage/rl_agents/model.zip"
+        self.rl_live_trading_enabled = False    # RL für Live-Trading (Experimentell)
+        self.rl_use_gpu = True                  # GPU-Beschleunigung
+
+        # AI & OLLAMA SETTINGS (GUI-Parität: config_tab.py → KI & Ollama Tab)
+        self.ai_provider = "Ollama (Lokal)"     # Ollama | OpenAI | Anthropic | DeepSeek
+        self.ollama_url = "http://localhost:11434"
+        self.ai_api_key = ""
+        self.ai_temperature = 0.3
+        self.ai_max_tokens = 500
+        self.ai_prompt_language = "Deutsch"
+        self.ai_system_prompt = (
+            "Du bist ein professioneller Trading-Analyst. Bewerte den Markt objektiv "
+            "basierend auf der technischen Ausgangslage und nutze eine klare, sachliche Sprache."
+        )
+        self.ai_min_confidence = 75             # Min. Konfidenz für Trade-Signale (%)
+        self.auto_trade_interval = 5            # Auto-Trading Intervall in Sekunden
+
+        # TRADING STYLE SETTINGS (GUI-Parität: config_tab.py → Trading Style Tab)
+        self.trading_style = "Swing Trading"    # Scalping | Day Trading | Swing Trading | Position Trading |
+                                                # Price Action | Breakout-Trading | Mean Reversion | AI-Fulldrive Mode
+        self.signal_strategy = "KI-gesteuert (Ollama)"  # KI | Technische Indikatoren | Hybrid
+        self.risk_profile = "Moderat"           # Konservativ | Moderat | Aggressiv
+        self.max_risk_per_trade_pct = 1.0       # Max Risiko pro Trade (%)
+        self.max_daily_loss_pct = 3.0           # Max Daily Loss (%)
+        self.max_open_positions = 3
+        self.break_even_enabled = False
+        self.break_even_distance_pips = 10
+        self.weekend_exit_enabled = False       # Trades Freitags schließen
+
+        # TRADING SESSIONS (GUI-Parität)
+        self.sessions_london = True
+        self.sessions_ny = True
+        self.sessions_asia = False
+        self.active_days = ["Mo", "Di", "Mi", "Do", "Fr"]
+        self.trade_time_from = "07:00"
+        self.trade_time_to = "22:00"
+        self.time_filter_enabled = True
+
+        # NEWS FILTER SETTINGS
+        self.news_filter_enabled = True
+        self.news_filter_high = True
+        self.news_filter_medium = False
+        self.news_filter_low = False
+        self.news_before_minutes = 30
+        self.news_after_minutes = 15
+
+        # EXECUTION QUALITY (GUI-Parität)
+        self.max_spread_pips = 3
+        self.max_slippage_pips = 2
+        self.spread_check_enabled = True
+
+        # RISK MANAGER (GUI-Parität: config_tab.py → 🛡️ Risk Manager)
+        self.rm_max_daily_loss_eur = 500.0
+        self.rm_max_weekly_loss_eur = 1500.0
+        self.rm_cooldown_seconds = 300
+        self.rm_max_trades_per_day = 10
+
+        # AI-FULLDRIVE MODE SETTINGS (GUI-Parität: config_tab.py → 🚀 AI-Fulldrive)
+        self.fulldrive_min_confidence = 70      # Min. Konfidenz für AI-Fulldrive (%)
+        self.fulldrive_sharpe_target = 1.5      # Sharpe Ratio Ziel
+        self.fulldrive_max_drawdown = 15.0      # Max. Drawdown Limit (%)
+        self.fulldrive_self_optimization = True # Auto-Retraining alle 50 Trades
+        self.fulldrive_engine = None            # AIFulldriveEngine Instanz
+
+        # NOTIFICATION SETTINGS (GUI-Parität: config_tab.py → Benachrichtigungen)
+        self.telegram_token = ""
+        self.telegram_chat_id = ""
+        self.discord_webhook = ""
+        self.notify_sl_hit = True
+        self.notify_tp_hit = True
+        self.notify_new_trade = True
+        self.notify_error = True
+        self.sound_alerts_enabled = False
+
+        # MT5 CURRENCY PAIRS PRESETS
+        self.pairs_preset = "Majors (6 Paare)"
+        self.active_pairs_str = "EURUSD, GBPUSD, USDJPY, USDCHF, AUDUSD, USDCAD"
+        self.debug_mode = False
 
         # ABSCHLUSS UND STATUS
         self.log("INFO", "FinGPT System mit Core Modulen initialisiert")
@@ -390,7 +512,8 @@ class MT5FinGPT:
                 env["PYTHONIOENCODING"] = "utf-8"
                 
                 self.companion_process = subprocess.Popen(
-                    [sys.executable, companion_script],
+                    [sys.executable, companion_script, "--daemon"],
+                    stdin=subprocess.DEVNULL,
                     stdout=subprocess.PIPE, 
                     stderr=subprocess.PIPE,
                     text=True,
@@ -464,355 +587,463 @@ class MT5FinGPT:
             return False
     
     # ==========================================
-    # 3. INTERACTIVE CLI MENU
+    # 3. INTERACTIVE CLI MENU (Moved to gui/cli_menu.py)
     # ==========================================
-    def interactive_menu(self):
-        """Korrigierte interaktive Benutzeroberfläche - Vollständige Menü-Anzeige"""
-    
-        # Companion automatisch starten (leise)
-        if self.auto_start_companion and not self.companion_enabled:
-            self.companion_silent_mode = True
-            print("🔧 Starte Trading Companion...")
-            self.start_trading_companion()
-            self.companion_silent_mode = False
-    
+
+    # ==========================================
+    # 3b. GLOBAL CONFIG MENUS (GUI-Parität)
+    # ==========================================
+
+    def ai_ki_settings_menu(self):
+        """KI & Ollama Einstellungen — Parität mit GUI config_tab.py → KI & Ollama Tab"""
         while True:
-            # COMPANION KOMPLETT PAUSIEREN FÜR SAUBERE EINGABE
-            companion_was_active = self.companion_enabled
-            if companion_was_active:
-                import time
-                time.sleep(0.1)  # Kurz warten bis laufende Ausgaben fertig sind
-    
-            # Dynamischer Header basierend auf verfügbaren Features
-            header_title = "FinGPT TRADING SYSTEM"
-            if getattr(self, 'has_extended_indicators', False):
-                header_title += " (ERWEITERT)"
-            if getattr(self, 'rl_enabled', False):
-                header_title += " + RL"
-        
-            self.print_header(header_title)
-    
-            # Status-Leiste
-            self.print_status_bar()
-    
-            # GRUPPIERTES HAUPTMENÜ
-            print("\n📋 HAUPTMENÜ:")
-            print("─" * 40)
-            
-            print("🟢 TRADING & POSITIONEN")
-            print("  1. 💰 Trade ausführen")
-            print("  2. 📈 Offene Positionen verwalten")
-            print("  3. 🔄 Auto-Trading umschalten")
-            print("  4. 🔓 Trading global aktivieren/deaktivieren")
-            
-            print("\n🔵 ANALYSE & DATEN")
-            print("  5. 📊 Live-Daten (Quotes)")
-            print("  6. 🤖 KI-Analyse (inkl. Indikatoren)")
-            print("  7. 🎯 Signal-Generator (Multi-Indikator)")
-            print("  8. 📉 Indikator-Scanner & Vergleich")
-            
-            print("\n⚙️ EINSTELLUNGEN & SYSTEM")
-            print("  9. 🛡️ Risk Management (Stop-Loss, Limits)")
-            print(" 10. 🎯 Partial Close & Trailing Stop")
-            print(" 11. 📈 Indikator- & Timeframe-Settings")
-            print(" 12. 🔗 MT5 Verbindung / Währungspaare")
-            print(" 13. 🔧 Trading Companion")
-            print(" 14. 🤖 Reinforcement Learning")
-            
-            print("\n 15. ❌ Beenden")
-            print("─" * 40)
+            self.print_header("🤖 KI & OLLAMA EINSTELLUNGEN")
 
-            # EINGABE MIT THREAD-SCHUTZ
-            max_option = 15
-            choice = ""
-            try:
-                choice = input(f"🎯 Ihre Wahl (1-{max_option}): ").strip()
-            except KeyboardInterrupt:
-                choice = str(max_option)  # Beenden bei Ctrl+C
-            
-            if not choice:
-                continue
-    
-            # Menü-Handler aufrufen
-            if not self.handle_menu_choice(choice):
+            print("📌 AKTUELLE KONFIGURATION:")
+            print("─" * 48)
+            print(f"   KI Provider           : {self.ai_provider}")
+            print(f"   Ollama URL            : {self.ollama_url}")
+            print(f"   API Key               : {'*****' if self.ai_api_key else '(leer)'}")
+            print(f"   LLM Modell            : {getattr(self.ai, 'selected_model', self.selected_model or '(keins)')}")
+            print(f"   Intervall (Auto-Trade): {self.auto_trade_interval}s")
+            print(f"   Temperatur            : {self.ai_temperature:.1f}")
+            print(f"   Max. Tokens           : {self.ai_max_tokens}")
+            print(f"   Prompt-Sprache        : {self.ai_prompt_language}")
+            print(f"   Min. Confidence       : {self.ai_min_confidence}%")
+            print(f"   System Prompt         : {self.ai_system_prompt[:60]}...")
+
+            print("\n🛠️  EDITIEROPTIONEN:")
+            print("─" * 48)
+            print("  1. 🤖 KI Provider (Ollama / OpenAI / Anthropic / DeepSeek)")
+            print("  2. 🌐 Ollama URL")
+            print("  3. 🔑 API Key")
+            print("  4. 🤖 LLM Modell (free text)")
+            print("  5. ⏱️  Auto-Trading Intervall (Sekunden)")
+            print("  6. 🌡️  KI Temperatur (0.0–1.0)")
+            print("  7. 📝 Max. Tokens")
+            print("  8. 🌍 Prompt-Sprache")
+            print("  9. 🔒 Min. Confidence (%)")
+            print(" 10. 📜 System Prompt bearbeiten")
+            print(" 11. 🔄 Ollama Modelle abrufen (Test)")
+            print("  0. ⬅️  Zurück")
+
+            choice = input("\n🎯 Ihre Wahl (0-11): ").strip()
+
+            if choice == "0":
                 break
-    
-    def print_status_bar(self):
-        """Status-Leiste - Funktioniert mit und ohne erweiterte Features"""
-        try:
-            with self.ui_lock:
-                # Risk Manager Status prüfen
-                risk_status = "❌"
-                if hasattr(self, 'risk_manager') and self.risk_manager:
-                    try:
-                        summary = self.risk_manager.get_risk_summary()
-                        if summary is not None:
-                            risk_status = "✅"
-                            daily_pnl = summary.get('daily_pnl', 0)
-                            # Erweiterte Risk-Checks nur wenn Risk Manager Attribute verfügbar
-                            if hasattr(self.risk_manager, 'max_daily_loss'):
-                                if daily_pnl <= self.risk_manager.max_daily_loss * 0.8:
-                                    risk_status = "🟡"  # Warnung
-                                elif daily_pnl <= self.risk_manager.max_daily_loss:
-                                    risk_status = "🔴"  # Kritisch
-                    except Exception:
-                        risk_status = "⚠️"  # Fehler
 
-                # Basis Status-Items (immer verfügbar)
-                status_items = [
-                    f"📱 MT5: {'✅' if self.mt5_connected else '❌'}",
-                    f"🤖 KI: {'✅' if self.selected_model else '❌'}",
-                    f"💰 Trading: {'✅' if self.trading_enabled else '❌'}",
-                    f"🔄 Auto: {'✅' if self.auto_trading else '❌'}",
-                    f"🛡️ Risk: {risk_status}",
-                ]
-
-                # Erweiterte Features (nur wenn verfügbar)
-                if getattr(self, 'has_extended_indicators', False):
-                    indicators_count = "7+"
-                    indicators_status = "✅"
-                else:
-                    indicators_count = "3"
-                    indicators_status = "📊"  # Basis-Indikatoren verfügbar
-        
-                status_items.append(f"📊 Indicators: {indicators_status}({indicators_count})")
-
-                # RL Status (nur wenn verfügbar)
-                if hasattr(self, 'rl_enabled'):
-                    rl_status = "✅" if self.rl_enabled else "❌"
-                    status_items.append(f"🤖 RL: {rl_status}")
-
-                # Companion Status
-                status_items.append(f"🔧 Companion: {'✅' if self.companion_enabled else '❌'}")
-
-                # Dynamische Breite basierend auf Anzahl der Items
-                total_width = max(75, len(' | '.join(status_items)) + 4)
-        
-                print("\n┌" + "─" * total_width + "┐")
-                print(f"│ {' | '.join(status_items):<{total_width-2}} │")
-                print("└" + "─" * total_width + "┘")
-            
-        except Exception as e:
-            # Fallback bei Fehlern
-            print("\n┌─────────────────────────────────────────────────────────────────┐")
-            print(f"│ Status-Bar Fehler: {str(e)[:50]:<50} │")
-            print("└─────────────────────────────────────────────────────────────────┘")
-
-    def print_status_bar_basic(self):
-        """Basis Status-Leiste (Fallback)"""
-        with self.ui_lock:
-            # Risk Manager Status
-            risk_status = "❌"
-            if hasattr(self, 'risk_manager') and self.risk_manager:
+            elif choice == "1":
+                providers = ["Ollama (Lokal)", "OpenAI (ChatGPT)", "Anthropic (Claude)", "DeepSeek"]
+                for i, p in enumerate(providers, 1):
+                    print(f"  {i}. {p}")
                 try:
-                    summary = self.risk_manager.get_risk_summary()
-                    if summary is not None:
-                        risk_status = "✅"
-                except:
-                    risk_status = "⚠️"
+                    idx = int(input("Wahl (1-4): ")) - 1
+                    if 0 <= idx < len(providers):
+                        self.ai_provider = providers[idx]
+                        print(f"✅ KI Provider → {self.ai_provider}")
+                except ValueError:
+                    print("❌ Ungültige Eingabe")
 
-            status_items = [
-                f"📱 MT5: {'✅' if self.mt5_connected else '❌'}",
-                f"🤖 KI: {'✅' if self.selected_model else '❌'}",
-                f"💰 Trading: {'✅' if self.trading_enabled else '❌'}",
-                f"🔄 Auto: {'✅' if self.auto_trading else '❌'}",
-                f"🛡️ Risk: {risk_status}",
-                f"🔧 Companion: {'✅' if self.companion_enabled else '❌'}"
-            ]
+            elif choice == "2":
+                val = input(f"Ollama URL (aktuell: {self.ollama_url}): ").strip()
+                if val:
+                    self.ollama_url = val
+                    print(f"✅ URL → {self.ollama_url}")
 
-            print("\n┌" + "─" * 65 + "┐")
-            print(f"│ {' | '.join(status_items):<63} │")
-            print("└" + "─" * 65 + "┘")
+            elif choice == "3":
+                val = input("API Key (leer = unverändert): ").strip()
+                if val:
+                    self.ai_api_key = val
+                    print("✅ API Key gespeichert")
 
+            elif choice == "4":
+                val = input(f"LLM Modell (aktuell: {self.selected_model or '(keins)'}): ").strip()
+                if val:
+                    self.selected_model = val
+                    if hasattr(self, 'ai'):
+                        self.ai.selected_model = val
+                    print(f"✅ Modell → {self.selected_model}")
 
-    def handle_menu_choice(self, choice):
-        """Kombinierte Menü-Behandlung mit übersichtlichen Gruppen"""
-        self.log_debug_menu(choice, "handle_menu_choice")
-    
-        # 1. Trade ausführen
-        if choice == "1":
-            self.log("INFO", "Trade-Ausführung angefordert", "USER")
-            if not self.trading_enabled:
-                self.log("WARNING", "Trade abgelehnt - Trading nicht aktiviert", "TRADE")
-                print("Trading nicht aktiviert!")
-            else:
-                symbol = input("Symbol: ").upper()
-                action = input("Aktion (BUY/SELL): ").upper()
-                if symbol and action in ["BUY", "SELL"]:
-                    self.log("INFO", f"Trade wird ausgeführt: {action} {symbol}", "TRADE")
-                    # Placeholder for lot_size, as it's not requested in the input
-                    lot_size = self.default_lot_size 
-                    result = self.execute_trade(symbol, action, lot_size)
-                    self.log_trade(symbol, action, result, lot_size=lot_size)
-                    print(result)
-            input("\nDrücken Sie Enter zum Fortfahren...")
-            return True
-    
-        # 2. Offene Positionen (Kombi aus alt 4 & 7)
-        elif choice == "2":
-            self.log("INFO", "Position Management gestartet", "USER")
-            self.print_header("POSITION MANAGEMENT")
-            positions = self.get_open_positions()
-            print(positions)
-            self.manage_open_positions()
-            input("\nDrücken Sie Enter zum Fortfahren...")
-            return True
-            
-        # 3. Auto-Trading (alt 6)
-        elif choice == "3":
-            self.log("INFO", "Auto-Trading Menü aufgerufen", "USER")
-            if not self.trading_enabled:
-                print("❌ Erst Trading aktivieren! (Option 4)")
-            elif self.auto_trading:
-                print(f"\n🔄 AUTO-TRADING LÄUFT ({len(self.auto_trade_symbols)} Symbole)")
-                if input("Auto-Trading stoppen? (ja/nein): ").lower() == "ja":
-                    self.auto_trading = False
-                    print("✅ Auto-Trading gestoppt")
-            else:
-                print("\n🤖 AUTO-TRADING SETUP (GEFÄHRLICH!)")
-                if input("Aktivieren? (GEFÄHRLICH/nein): ") == "GEFÄHRLICH":
-                    pairs_input = input("Symbole (kommagetrennt, Enter für Majors): ").upper()
-                    if pairs_input:
-                        self.auto_trade_symbols = [p.strip() for p in pairs_input.split(',')]
+            elif choice == "5":
+                try:
+                    val = int(input(f"Intervall in Sekunden (aktuell: {self.auto_trade_interval}, 1–120): "))
+                    if 1 <= val <= 120:
+                        self.auto_trade_interval = val
+                        self.analysis_interval = val
+                        print(f"✅ Intervall → {self.auto_trade_interval}s")
                     else:
-                        self.auto_trade_symbols = ["EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD", "USDCAD", "NZDUSD"]
+                        print("❌ Bereich: 1–120")
+                except ValueError:
+                    print("❌ Ungültige Eingabe")
+
+            elif choice == "6":
+                try:
+                    val = float(input(f"Temperatur (aktuell: {self.ai_temperature:.1f}, 0.0–1.0): "))
+                    if 0.0 <= val <= 1.0:
+                        self.ai_temperature = val
+                        print(f"✅ Temperatur → {self.ai_temperature:.1f}")
+                    else:
+                        print("❌ Bereich: 0.0–1.0")
+                except ValueError:
+                    print("❌ Ungültige Eingabe")
+
+            elif choice == "7":
+                try:
+                    val = int(input(f"Max. Tokens (aktuell: {self.ai_max_tokens}, 100–4096): "))
+                    if 100 <= val <= 4096:
+                        self.ai_max_tokens = val
+                        print(f"✅ Max. Tokens → {self.ai_max_tokens}")
+                    else:
+                        print("❌ Bereich: 100–4096")
+                except ValueError:
+                    print("❌ Ungültige Eingabe")
+
+            elif choice == "8":
+                langs = ["Deutsch", "Englisch", "Gemischt"]
+                print("Optionen:", " | ".join(f"{i+1}. {l}" for i, l in enumerate(langs)))
+                try:
+                    idx = int(input("Wahl (1-3): ")) - 1
+                    if 0 <= idx < len(langs):
+                        self.ai_prompt_language = langs[idx]
+                        print(f"✅ Sprache → {self.ai_prompt_language}")
+                except ValueError:
+                    print("❌ Ungültige Eingabe")
+
+            elif choice == "9":
+                try:
+                    val = int(input(f"Min. Confidence % (aktuell: {self.ai_min_confidence}, 50–100): "))
+                    if 50 <= val <= 100:
+                        self.ai_min_confidence = val
+                        print(f"✅ Min. Confidence → {self.ai_min_confidence}%")
+                    else:
+                        print("❌ Bereich: 50–100")
+                except ValueError:
+                    print("❌ Ungültige Eingabe")
+
+            elif choice == "10":
+                print(f"\nAktueller System Prompt:\n{self.ai_system_prompt}\n")
+                print("Neuen Prompt eingeben (leer lassen = unverändert):")
+                lines = []
+                while True:
+                    line = input()
+                    if line == "":
+                        break
+                    lines.append(line)
+                if lines:
+                    self.ai_system_prompt = " ".join(lines)
+                    print("✅ System Prompt aktualisiert")
+
+            elif choice == "11":
+                print(f"🔄 Teste Verbindung zu {self.ollama_url}...")
+                try:
+                    import requests
+                    resp = requests.get(f"{self.ollama_url}/api/tags", timeout=5)
+                    if resp.status_code == 200:
+                        models = [m['name'] for m in resp.json().get('models', [])]
+                        print(f"✅ Verbunden! {len(models)} Modell(e) gefunden:")
+                        for m in models:
+                            print(f"   - {m}")
+                    else:
+                        print(f"❌ HTTP {resp.status_code}")
+                except Exception as e:
+                    print(f"❌ Verbindung fehlgeschlagen: {e}")
+            else:
+                print("❌ Ungültige Auswahl")
+
+            input("\nDrücken Sie Enter zum Fortfahren...")
+
+    def trading_style_settings_menu(self):
+        """Trading Stil, AI-Fulldrive, Sessions, Nachrichten-Filter, Ausführungsqualität"""
+        while True:
+            self.print_header("📊 TRADING STIL & AUSFÜHRUNG")
+
+            print("📌 AKTUELLE KONFIGURATION:")
+            print("─" * 48)
+            print(f"   Trading Style         : {self.trading_style}")
+            print(f"   Signal-Strategie      : {self.signal_strategy}")
+            print(f"   Risikoprofil          : {self.risk_profile}")
+            print(f"   Max Risiko/Trade      : {self.max_risk_per_trade_pct}%")
+            print(f"   Max Daily Loss        : {self.max_daily_loss_pct}%")
+            print(f"   Max offene Positionen : {self.max_open_positions}")
+            print(f"   Trailing Stop         : {'✅' if self.trailing_stop_enabled else '❌'} | {self.trailing_stop_distance_pips}p Abstand")
+            print(f"   Break-Even Stop       : {'✅' if self.break_even_enabled else '❌'} | {self.break_even_distance_pips}p")
+            print(f"   Wochenend-Schutz      : {'✅' if self.weekend_exit_enabled else '❌'}")
+            print(f"   RM Max. Tagesverlust  : {self.rm_max_daily_loss_eur}€")
+            print(f"   RM Max. Wochenverlust : {self.rm_max_weekly_loss_eur}€")
+            print(f"   RM Cooldown           : {self.rm_cooldown_seconds}s")
+            print(f"   RM Max Trades/Tag     : {self.rm_max_trades_per_day}")
+            print(f"   Sessions              : {'London ' if self.sessions_london else ''}{'NY ' if self.sessions_ny else ''}{'Asia' if self.sessions_asia else ''}")
+            print(f"   Handelsfenster        : {self.trade_time_from}–{self.trade_time_to} UTC ({'✅' if self.time_filter_enabled else '❌'})")
+            print(f"   News-Filter           : {'✅' if self.news_filter_enabled else '❌'}")
+            print(f"   Max Spread            : {self.max_spread_pips}p | Max Slippage: {self.max_slippage_pips}p")
+            if "Fulldrive" in self.trading_style:
+                print(f"\n   🚀 AI-FULLDRIVE:")
+                print(f"   Min. Konfidenz        : {self.fulldrive_min_confidence}%")
+                print(f"   Sharpe-Ratio Ziel     : {self.fulldrive_sharpe_target}")
+                print(f"   Max. Drawdown         : {self.fulldrive_max_drawdown}%")
+                print(f"   Selbst-Optimierung    : {'✅' if self.fulldrive_self_optimization else '❌'}")
+
+            print("\n🛠️  EDITIEROPTIONEN:")
+            print("─" * 48)
+            print("  1. 📊 Trading Style")
+            print("  2. 🎯 Signal-Strategie")
+            print("  3. 🛡️  Risikoprofil")
+            print("  4. 💸 Max Risiko/Trade & Max Daily Loss %")
+            print("  5. 📦 Max. offene Positionen")
+            print("  6. 🎢 Trailing Stop Einstellungen")
+            print("  7. ✋ Break-Even Stop Einstellungen")
+            print("  8. 📅 Wochenend-Schutz umschalten")
+            print("  9. 🛡️  Risk Manager Limits (€)")
+            print(" 10. ⏰ Handelssitzungen & Zeitfenster")
+            print(" 11. 📰 Nachrichten-Filter")
+            print(" 12. ⚡ Spread & Slippage Limits")
+            print(" 13. 🚀 AI-Fulldrive Einstellungen")
+            print("  0. ⬅️  Zurück")
+
+            choice = input("\n🎯 Ihre Wahl (0-13): ").strip()
+
+            if choice == "0":
+                break
+
+            elif choice == "1":
+                styles = ["Scalping", "Day Trading", "Swing Trading", "Position Trading",
+                          "Price Action", "Breakout-Trading", "Mean Reversion", "AI-Fulldrive Mode 🤖"]
+                for i, s in enumerate(styles, 1):
+                    print(f"  {i}. {s}")
+                try:
+                    idx = int(input("Wahl: ")) - 1
+                    if 0 <= idx < len(styles):
+                        self.trading_style = styles[idx]
+                        print(f"✅ Trading Style → {self.trading_style}")
+                except ValueError:
+                    print("❌ Ungültige Eingabe")
+
+            elif choice == "2":
+                strategies = ["KI-gesteuert (Ollama)", "Technische Indikatoren", "Hybrid (KI + Indikatoren)"]
+                for i, s in enumerate(strategies, 1):
+                    print(f"  {i}. {s}")
+                try:
+                    idx = int(input("Wahl: ")) - 1
+                    if 0 <= idx < len(strategies):
+                        self.signal_strategy = strategies[idx]
+                        print(f"✅ Signal-Strategie → {self.signal_strategy}")
+                except ValueError:
+                    print("❌ Ungültige Eingabe")
+
+            elif choice == "3":
+                profiles = ["Konservativ", "Moderat", "Aggressiv"]
+                for i, p in enumerate(profiles, 1):
+                    print(f"  {i}. {p}")
+                try:
+                    idx = int(input("Wahl: ")) - 1
+                    if 0 <= idx < len(profiles):
+                        self.risk_profile = profiles[idx]
+                        print(f"✅ Risikoprofil → {self.risk_profile}")
+                except ValueError:
+                    print("❌ Ungültige Eingabe")
+
+            elif choice == "4":
+                try:
+                    rt = float(input(f"Max Risiko/Trade % (aktuell {self.max_risk_per_trade_pct}): ") or str(self.max_risk_per_trade_pct))
+                    dl = float(input(f"Max Daily Loss % (aktuell {self.max_daily_loss_pct}): ") or str(self.max_daily_loss_pct))
+                    if 0.1 <= rt <= 10 and 0.5 <= dl <= 20:
+                        self.max_risk_per_trade_pct = rt
+                        self.max_daily_loss_pct = dl
+                        print(f"✅ Risiko/Trade={rt}% | Daily Loss={dl}%")
+                    else:
+                        print("❌ Außerhalb des gültigen Bereichs")
+                except ValueError:
+                    print("❌ Ungültige Eingabe")
+
+            elif choice == "5":
+                try:
+                    val = int(input(f"Max. Positionen (aktuell {self.max_open_positions}): "))
+                    if 1 <= val <= 20:
+                        self.max_open_positions = val
+                        print(f"✅ Max. Positionen → {self.max_open_positions}")
+                    else:
+                        print("❌ Bereich: 1–20")
+                except ValueError:
+                    print("❌ Ungültige Eingabe")
+
+            elif choice == "6":
+                self.trailing_stop_enabled = not self.trailing_stop_enabled
+                print(f"✅ Trailing Stop → {'aktiviert' if self.trailing_stop_enabled else 'deaktiviert'}")
+                if self.trailing_stop_enabled:
                     try:
-                        iv = input(f"Intervall (Enter für {self.analysis_interval}s): ")
-                        if iv: self.analysis_interval = int(iv)
-                    except ValueError: pass
-                    
-                    self.auto_trading = True
-                    print(f"🚀 Starte Auto-Trading für {len(self.auto_trade_symbols)} Paare...")
-                    self.run_auto_trading()
-            input("\nDrücken Sie Enter zum Fortfahren...")
-            return True
-            
-        # 4. Trading On/Off (alt 5)
-        elif choice == "4":
-            self.trading_enabled = not self.trading_enabled
-            print(f"Trading ist nun {'AKTIVIERT' if self.trading_enabled else 'DEAKTIVIERT'}")
-            self.log("INFO", f"Trading-Status: {self.trading_enabled}", "TRADE")
-            input("\nDrücken Sie Enter zum Fortfahren...")
-            return True
+                        dist = int(input(f"Trailing Abstand Pips (aktuell {self.trailing_stop_distance_pips}): ") or str(self.trailing_stop_distance_pips))
+                        self.trailing_stop_distance_pips = max(1, dist)
+                        print(f"✅ Trailing Abstand → {self.trailing_stop_distance_pips}p")
+                    except ValueError:
+                        pass
 
-        # 5. Live Daten (alt 1)
-        elif choice == "5":
-            symbol = input("Symbol eingeben: ").upper()
-            if symbol:
-                print(f"\n{self.get_mt5_live_data(symbol)}")
-            input("\nDrücken Sie Enter zum Fortfahren...")
-            return True
-            
-        # 6. KI-Analyse (alt 2 & 24 kombiniert)
-        elif choice == "6":
-            symbol = input("Symbol für KI Analyse: ").upper()
-            if symbol:
-                # Kombiniere Basis-Metadaten und ggf. erweiterte Indikatoren
-                live_data = self.get_mt5_live_data(symbol)
-                if "Fehler" not in live_data:
-                    if getattr(self, 'has_extended_indicators', False) and self.integration:
-                         ext_signal = self.integration.create_trading_signal(symbol, use_advanced=True)
-                         if ext_signal:
-                             live_data += f"\n\n[ERWEITERTE TECHNIK-ANALYSE]\nSignal: {ext_signal.get('signal')}\nConf: {ext_signal.get('confidence')}\n"
-                             if ext_signal.get('supporting_signals'):
-                                 live_data += "Pro: " + ", ".join(ext_signal['supporting_signals'][:2]) + "\n"
-                    
-                    print(f"\n🤖 Analysiere {symbol}...")
-                    ai_response = self.chat_with_model("Analysiere Daten, bewerte S/R und Indikatoren. Mach es kurz und als BUY/SELL/WARTEN Empfehlung mit Begründung.", live_data)
-                    self.display_formatted_analysis(symbol, ai_response, live_data)
-            input("\nDrücken Sie Enter zum Fortfahren...")
-            return True
+            elif choice == "7":
+                self.break_even_enabled = not self.break_even_enabled
+                print(f"✅ Break-Even Stop → {'aktiviert' if self.break_even_enabled else 'deaktiviert'}")
+                if self.break_even_enabled:
+                    try:
+                        dist = int(input(f"Break-Even Abstand Pips (aktuell {self.break_even_distance_pips}): ") or str(self.break_even_distance_pips))
+                        self.break_even_distance_pips = max(1, dist)
+                        print(f"✅ Break-Even Abstand → {self.break_even_distance_pips}p")
+                    except ValueError:
+                        pass
 
-        # 7. Signal Generator (alt 22)
-        elif choice == "7":
-            if getattr(self, 'has_extended_indicators', False):
-                self.advanced_signal_generator()
+            elif choice == "8":
+                self.weekend_exit_enabled = not self.weekend_exit_enabled
+                print(f"✅ Wochenend-Schutz → {'aktiviert' if self.weekend_exit_enabled else 'deaktiviert'}")
+
+            elif choice == "9":
+                try:
+                    dl = float(input(f"Max. Tagesverlust € (aktuell {self.rm_max_daily_loss_eur}): ") or str(self.rm_max_daily_loss_eur))
+                    wl = float(input(f"Max. Wochenverlust € (aktuell {self.rm_max_weekly_loss_eur}): ") or str(self.rm_max_weekly_loss_eur))
+                    cd = int(input(f"Cooldown Sek. (aktuell {self.rm_cooldown_seconds}, 60–600): ") or str(self.rm_cooldown_seconds))
+                    mt = int(input(f"Max Trades/Tag (aktuell {self.rm_max_trades_per_day}): ") or str(self.rm_max_trades_per_day))
+                    self.rm_max_daily_loss_eur = max(0, dl)
+                    self.rm_max_weekly_loss_eur = max(0, wl)
+                    self.rm_cooldown_seconds = max(60, min(600, cd))
+                    self.rm_max_trades_per_day = max(1, mt)
+                    print(f"✅ RM Limits aktualisiert")
+                except ValueError:
+                    print("❌ Ungültige Eingabe")
+
+            elif choice == "10":
+                print("\n🌍 SESSIONEN:")
+                self.sessions_london = input(f"London aktiv? (j/n, aktuell {'j' if self.sessions_london else 'n'}): ").strip().lower() != "n"
+                self.sessions_ny = input(f"New York aktiv? (j/n, aktuell {'j' if self.sessions_ny else 'n'}): ").strip().lower() != "n"
+                self.sessions_asia = input(f"Asian aktiv? (j/n, aktuell {'j' if self.sessions_asia else 'n'}): ").strip().lower() == "j"
+                print("\n⏰ HANDELSFENSTER (UTC):")
+                tf = input(f"Von (HH:MM, aktuell {self.trade_time_from}): ").strip() or self.trade_time_from
+                tt = input(f"Bis (HH:MM, aktuell {self.trade_time_to}): ").strip() or self.trade_time_to
+                self.trade_time_from = tf
+                self.trade_time_to = tt
+                self.time_filter_enabled = input(f"Zeitfenster-Filter aktiv? (j/n): ").strip().lower() != "n"
+                print(f"✅ Sessions & Zeiten aktualisiert")
+
+            elif choice == "11":
+                self.news_filter_enabled = input(f"News-Filter aktiv? (j/n, aktuell {'j' if self.news_filter_enabled else 'n'}): ").lower() != "n"
+                if self.news_filter_enabled:
+                    self.news_filter_high = input(f"🔴 Hoch filtern? (j/n, aktuell {'j' if self.news_filter_high else 'n'}): ").lower() != "n"
+                    self.news_filter_medium = input(f"🟡 Mittel filtern? (j/n, aktuell {'j' if self.news_filter_medium else 'n'}): ").lower() == "j"
+                    try:
+                        self.news_before_minutes = int(input(f"Vorab-Sperrzeit Min. (aktuell {self.news_before_minutes}): ") or str(self.news_before_minutes))
+                        self.news_after_minutes = int(input(f"Nachher-Sperrzeit Min. (aktuell {self.news_after_minutes}): ") or str(self.news_after_minutes))
+                    except ValueError:
+                        pass
+                print("✅ News-Filter aktualisiert")
+
+            elif choice == "12":
+                try:
+                    sp = int(input(f"Max Spread Pips (aktuell {self.max_spread_pips}): ") or str(self.max_spread_pips))
+                    sl = int(input(f"Max Slippage Pips (aktuell {self.max_slippage_pips}): ") or str(self.max_slippage_pips))
+                    self.max_spread_pips = max(1, sp)
+                    self.max_slippage_pips = max(1, sl)
+                    self.spread_check_enabled = input("Spread-Prüfung aktiviert? (j/n): ").lower() != "n"
+                    print(f"✅ Spread/Slippage → {self.max_spread_pips}p / {self.max_slippage_pips}p")
+                except ValueError:
+                    print("❌ Ungültige Eingabe")
+
+            elif choice == "13":
+                print("\n🚀 AI-FULLDRIVE MODE EINSTELLUNGEN")
+                print("─" * 40)
+                try:
+                    conf = int(input(f"Min. Konfidenz % (aktuell {self.fulldrive_min_confidence}, 50–95): ") or str(self.fulldrive_min_confidence))
+                    sharpe = float(input(f"Sharpe Ratio Ziel (aktuell {self.fulldrive_sharpe_target}): ") or str(self.fulldrive_sharpe_target))
+                    dd = float(input(f"Max. Drawdown % (aktuell {self.fulldrive_max_drawdown}): ") or str(self.fulldrive_max_drawdown))
+                    if 50 <= conf <= 95:
+                        self.fulldrive_min_confidence = conf
+                    self.fulldrive_sharpe_target = max(0.1, sharpe)
+                    self.fulldrive_max_drawdown = max(1.0, dd)
+                    self.fulldrive_self_optimization = input(f"Selbst-Optimierung? (j/n, aktuell {'j' if self.fulldrive_self_optimization else 'n'}): ").lower() != "n"
+                    print(f"✅ Fulldrive: Konfidenz={self.fulldrive_min_confidence}% | Sharpe={self.fulldrive_sharpe_target} | Max-DD={self.fulldrive_max_drawdown}%")
+                except ValueError:
+                    print("❌ Ungültige Eingabe")
             else:
-                print("❌ Erweiterte Indikatoren nicht verfügbar")
-            input("\nDrücken Sie Enter zum Fortfahren...")
-            return True
+                print("❌ Ungültige Auswahl")
 
-        # 8. Scanner & Vergleich (alt 25 & 26)
-        elif choice == "8":
-            if getattr(self, 'has_extended_indicators', False):
-                sub = input("1. Multi-Scanner\n2. Indikator Vergleich (Single Symbol)\nWahl: ")
-                if sub == "1": self.multi_indicator_scanner()
-                elif sub == "2": self.indicator_comparison_analysis()
+            input("\nDrücken Sie Enter zum Fortfahren...")
+
+    def notifications_settings_menu(self):
+        """Benachrichtigungen — Parität mit GUI config_tab.py → Benachrichtigungen Tab"""
+        while True:
+            self.print_header("🔔 BENACHRICHTIGUNGEN")
+
+            print("📌 AKTUELLE KONFIGURATION:")
+            print("─" * 48)
+            print(f"   Telegram Token    : {'*****' if self.telegram_token else '(leer)'}")
+            print(f"   Telegram Chat ID  : {self.telegram_chat_id or '(leer)'}")
+            print(f"   Discord Webhook   : {'konfiguriert' if self.discord_webhook else '(leer)'}")
+            print(f"\n   🔔 FILTER:")
+            print(f"   SL Hit            : {'✅' if self.notify_sl_hit else '❌'}")
+            print(f"   TP Hit            : {'✅' if self.notify_tp_hit else '❌'}")
+            print(f"   Neuer Trade       : {'✅' if self.notify_new_trade else '❌'}")
+            print(f"   Fehler/Kritisch   : {'✅' if self.notify_error else '❌'}")
+            print(f"   Sound-Alerts       : {'✅' if self.sound_alerts_enabled else '❌'}")
+
+            print("\n🛠️  EDITIEROPTIONEN:")
+            print("─" * 48)
+            print("  1. 📱 Telegram Token")
+            print("  2. 💬 Telegram Chat ID")
+            print("  3. 🎯 Discord Webhook URL")
+            print("  4. 📤 Test-Nachricht senden (Telegram)")
+            print("  5. 🔔 Benachrichtigungsfilter konfigurieren")
+            print("  6. 🔊 Sound-Alerts umschalten")
+            print("  0. ⬅️  Zurück")
+
+            choice = input("\n🎯 Ihre Wahl (0-6): ").strip()
+
+            if choice == "0":
+                break
+
+            elif choice == "1":
+                val = input("Telegram Bot Token (leer = unverändert): ").strip()
+                if val:
+                    self.telegram_token = val
+                    print("✅ Telegram Token gesetzt")
+
+            elif choice == "2":
+                val = input(f"Telegram Chat ID (aktuell: {self.telegram_chat_id or '(leer)'}): ").strip()
+                if val:
+                    self.telegram_chat_id = val
+                    print(f"✅ Chat ID → {self.telegram_chat_id}")
+
+            elif choice == "3":
+                val = input("Discord Webhook URL (leer = unverändert): ").strip()
+                if val:
+                    self.discord_webhook = val
+                    print("✅ Discord Webhook gesetzt")
+
+            elif choice == "4":
+                if not self.telegram_token or not self.telegram_chat_id:
+                    print("❌ Bitte erst Token und Chat ID konfigurieren")
+                else:
+                    print("📤 Sende Test-Nachricht...")
+                    try:
+                        import requests
+                        url = f"https://api.telegram.org/bot{self.telegram_token}/sendMessage"
+                        resp = requests.post(url, json={"chat_id": self.telegram_chat_id, "text": "✅ FinGPT Terminal Test-Nachricht"}, timeout=5)
+                        if resp.status_code == 200:
+                            print("✅ Test-Nachricht erfolgreich gesendet!")
+                        else:
+                            print(f"❌ Fehler: {resp.status_code} — {resp.text[:100]}")
+                    except Exception as e:
+                        print(f"❌ Verbindungsfehler: {e}")
+
+            elif choice == "5":
+                print("\n🔔 BENACHRICHTIGUNGSFILTER (j = aktiv, n = inaktiv):")
+                self.notify_sl_hit = input(f"SL Hit ({('✅' if self.notify_sl_hit else '❌')}): ").strip().lower() != "n"
+                self.notify_tp_hit = input(f"TP Hit ({('✅' if self.notify_tp_hit else '❌')}): ").strip().lower() != "n"
+                self.notify_new_trade = input(f"Neuer Trade ({('✅' if self.notify_new_trade else '❌')}): ").strip().lower() != "n"
+                self.notify_error = input(f"Fehler/Kritisch ({('✅' if self.notify_error else '❌')}): ").strip().lower() != "n"
+                print("✅ Filter aktualisiert")
+
+            elif choice == "6":
+                self.sound_alerts_enabled = not self.sound_alerts_enabled
+                print(f"✅ Sound-Alerts → {'aktiviert' if self.sound_alerts_enabled else 'deaktiviert'}")
+
             else:
-                print("❌ Erweiterte Indikatoren nicht verfügbar")
+                print("❌ Ungültige Auswahl")
+
             input("\nDrücken Sie Enter zum Fortfahren...")
-            return True
-
-        # 9. Risk Manager (alt 16)
-        elif choice == "9":
-            if hasattr(self, 'risk_manager') and self.risk_manager:
-                self.risk_management_menu()
-            else:
-                print("❌ Risk Manager nicht verfügbar")
-            input("\nDrücken Sie Enter zum Fortfahren...")
-            return True
-
-        # 10. Partial Close & Trailing (alt 8 & 14)
-        elif choice == "10":
-            sub = input("1. Partial Close Einstellungen\n2. Trailing Stop Einstellungen\nWahl: ")
-            if sub == "1":
-                self.print_header("PARTIAL CLOSE")
-                self.partial_close_enabled = not self.partial_close_enabled
-                print(f"Partial Close umgeschaltet auf: {self.partial_close_enabled}")
-            elif sub == "2":
-                self.trailing_stop_settings_menu()
-            input("\nDrücken Sie Enter zum Fortfahren...")
-            return True
-
-        # 11. Indikator-Settings (alt 9, 10, 13, 15, 23)
-        elif choice == "11":
-            print("\n1. RSI Settings\n2. S/R Settings\n3. MACD Settings\n4. Multi-Timeframe Settings")
-            if getattr(self, 'has_extended_indicators', False):
-                print("5. Erweiterte Indikatoren Settings")
-            sub = input("Wahl: ")
-            
-            if sub == "1":
-                new_rsi = input(f"Neue RSI Periode (aktuell {self.rsi_period}): ")
-                if new_rsi.isdigit(): self.rsi_period = int(new_rsi)
-            elif sub == "2": self.sr_settings_menu()
-            elif sub == "3": self.macd_settings_menu()
-            elif sub == "4": self.mtf_settings_menu()
-            elif sub == "5" and getattr(self, 'has_extended_indicators', False): self.advanced_indicator_settings_menu()
-            input("\nDrücken Sie Enter zum Fortfahren...")
-            return True
-
-        # 12. MT5 / Currency (alt 12 & 17)
-        elif choice == "12":
-            sub = input("1. Währungspaar Management\n2. MT5 Reconnect\nWahl: ")
-            if sub == "1": self.currency_pair_management_menu()
-            elif sub == "2": 
-                if self.mt5_connected: self.disconnect_mt5()
-                self.connect_mt5()
-            input("\nDrücken Sie Enter zum Fortfahren...")
-            return True
-
-        # 13. Trading Companion (alt 11)
-        elif choice == "13":
-            self.companion_menu()
-            return True
-
-        # 14. Reinforcement Learning (alt 18)
-        elif choice == "14":
-            if getattr(self, 'rl_enabled', False):
-                self.rl_menu_enhanced()
-            else:
-                print("❌ Reinforcement Learning nicht verfügbar (pip install tensorflow)")
-            input("\nDrücken Sie Enter zum Fortfahren...")
-            return True
-
-        # 15. Beenden
-        elif choice == "15":
-            return self.shutdown_system()
-
-        else:
-            print("❌ Ungültige Option")
-            input("\nDrücken Sie Enter zum Fortfahren...")
-            return True
 
     # ==========================================
     # 4. ADVANCED INDICATORS & SIGNALS
@@ -1204,16 +1435,16 @@ class MT5FinGPT:
             print("─" * 30)
         
             # RSI
-            rsi_value = self.calculate_rsi(symbol)
+            rsi_value = self.market.calculate_rsi(symbol, mt5.TIMEFRAME_H1 if MT5_AVAILABLE else 16385)
             if rsi_value:
-                rsi_signal, rsi_desc = self.get_rsi_signal(rsi_value)
+                rsi_signal, rsi_desc = self.market.get_rsi_signal(rsi_value)
                 icon = "🟢" if rsi_signal == "BUY" else "🔴" if rsi_signal == "SELL" else "🟡"
                 print(f"{icon} RSI: {rsi_value} - {rsi_desc}")
         
             # MACD
-            macd_data = self.calculate_macd(symbol)
+            macd_data = self.market.calculate_macd(symbol, mt5.TIMEFRAME_H1 if MT5_AVAILABLE else 16385)
             if macd_data:
-                macd_signal, macd_desc = self.get_macd_signal(macd_data)
+                macd_signal, macd_desc = self.market.get_macd_signal(macd_data)
                 icon = "🟢" if macd_signal == "BUY" else "🔴" if macd_signal == "SELL" else "🟡"
                 print(f"{icon} MACD: {macd_desc}")
         
@@ -1438,9 +1669,9 @@ class MT5FinGPT:
             indicators_data = {}
         
             # RSI
-            rsi_value = self.calculate_rsi(symbol)
+            rsi_value = self.market.calculate_rsi(symbol, mt5.TIMEFRAME_H1 if MT5_AVAILABLE else 16385)
             if rsi_value:
-                rsi_signal, rsi_desc = self.get_rsi_signal(rsi_value)
+                rsi_signal, rsi_desc = self.market.get_rsi_signal(rsi_value)
                 indicators_data['RSI'] = {
                     'signal': rsi_signal,
                     'value': rsi_value,
@@ -1449,9 +1680,9 @@ class MT5FinGPT:
                 }
         
             # MACD
-            macd_data = self.calculate_macd(symbol)
+            macd_data = self.market.calculate_macd(symbol, mt5.TIMEFRAME_H1 if MT5_AVAILABLE else 16385)
             if macd_data:
-                macd_signal, macd_desc = self.get_macd_signal(macd_data)
+                macd_signal, macd_desc = self.market.get_macd_signal(macd_data)
                 indicators_data['MACD'] = {
                     'signal': macd_signal,
                     'value': f"{macd_data['macd']:.6f}",
@@ -1630,7 +1861,7 @@ class MT5FinGPT:
         
             # RSI Test
             rsi_start = time.time()
-            rsi_value = self.calculate_rsi(symbol)
+            rsi_value = self.market.calculate_rsi(symbol, mt5.TIMEFRAME_H1 if MT5_AVAILABLE else 16385)
             rsi_time = time.time() - rsi_start
             if rsi_value:
                 indicators_tested.append(('RSI', rsi_time, 'Erfolgreich'))
@@ -1639,7 +1870,7 @@ class MT5FinGPT:
         
             # MACD Test
             macd_start = time.time()
-            macd_data = self.calculate_macd(symbol)
+            macd_data = self.market.calculate_macd(symbol, mt5.TIMEFRAME_H1 if MT5_AVAILABLE else 16385)
             macd_time = time.time() - macd_start
             if macd_data:
                 indicators_tested.append(('MACD', macd_time, 'Erfolgreich'))
@@ -1714,15 +1945,15 @@ class MT5FinGPT:
             original_period = self.rsi_period
         
             for period in periods_to_test:
-                self.rsi_period = period
-                rsi_value = self.calculate_rsi(symbol)
+                self.market.rsi_period = period
+                rsi_value = self.market.calculate_rsi(symbol, mt5.TIMEFRAME_H1 if MT5_AVAILABLE else 16385)
                 if rsi_value:
-                    signal, desc = self.get_rsi_signal(rsi_value)
+                    signal, desc = self.market.get_rsi_signal(rsi_value)
                     results.append((period, rsi_value, signal))
                     print(f"Periode {period}: RSI={rsi_value:.1f}, Signal={signal}")
         
             # Setze ursprüngliche Periode zurück
-            self.rsi_period = original_period
+            self.market.rsi_period = original_period
         
             print(f"\n📊 RSI-OPTIMIERUNG ERGEBNISSE:")
             print("─" * 40)
@@ -1756,14 +1987,14 @@ class MT5FinGPT:
             signals = {}
         
             # Basis-Indikatoren
-            rsi_value = self.calculate_rsi(symbol)
+            rsi_value = self.market.calculate_rsi(symbol, mt5.TIMEFRAME_H1 if MT5_AVAILABLE else 16385)
             if rsi_value:
-                rsi_signal, _ = self.get_rsi_signal(rsi_value)
+                rsi_signal, _ = self.market.get_rsi_signal(rsi_value)
                 signals['RSI'] = 1 if rsi_signal == 'BUY' else -1 if rsi_signal == 'SELL' else 0
         
-            macd_data = self.calculate_macd(symbol)
+            macd_data = self.market.calculate_macd(symbol, mt5.TIMEFRAME_H1 if MT5_AVAILABLE else 16385)
             if macd_data:
-                macd_signal, _ = self.get_macd_signal(macd_data)
+                macd_signal, _ = self.market.get_macd_signal(macd_data)
                 signals['MACD'] = 1 if macd_signal == 'BUY' else -1 if macd_signal == 'SELL' else 0
         
             # Erweiterte Indikatoren
@@ -2273,15 +2504,15 @@ class MT5FinGPT:
                 print("─" * 45)
             
                 # RSI
-                rsi = self.calculate_rsi(symbol)
+                rsi = self.market.calculate_rsi(symbol, mt5.TIMEFRAME_H1 if MT5_AVAILABLE else 16385)
                 if rsi:
-                    rsi_signal, rsi_desc = self.get_rsi_signal(rsi)
+                    rsi_signal, rsi_desc = self.market.get_rsi_signal(rsi)
                     print(f"📈 RSI: {rsi_signal} ({rsi_desc})")
             
                 # MACD
-                macd_data = self.calculate_macd(symbol)
+                macd_data = self.market.calculate_macd(symbol, mt5.TIMEFRAME_H1 if MT5_AVAILABLE else 16385)
                 if macd_data:
-                    macd_signal, macd_desc = self.get_macd_signal(macd_data)
+                    macd_signal, macd_desc = self.market.get_macd_signal(macd_data)
                     print(f"📊 MACD: {macd_signal} ({macd_desc[:30]}...)")
             
                 # Consensus
@@ -2448,51 +2679,228 @@ class MT5FinGPT:
                 print(f"❌ Model Directory nicht gefunden: {models_dir}")
 
     def rl_settings(self):
-        """RL Einstellungen verwalten"""
-    
-        print("\n⚙️ RL EINSTELLUNGEN")
-        print("─" * 20)
-    
-        print(f"Aktuelle Einstellungen:")
-        print(f"   🎯 RL Empfehlungsgewicht: {self.rl_recommendation_weight}")
-        print(f"   📊 Training Episodes: {self.rl_manager.training_episodes}")
-        print(f"   💾 Save Frequency: {self.rl_manager.model_save_frequency}")
-    
-        print(f"\nOptionen:")
-        print("1. 🎯 Empfehlungsgewicht ändern")
-        print("2. 📊 Training-Parameter anpassen")
-        print("3. 🔄 Zurück")
-    
-        choice = input("\nWählen (1-3): ").strip()
-    
-        if choice == "1":
-            try:
-                new_weight = float(input(f"Neues Gewicht (0.0-1.0, aktuell {self.rl_recommendation_weight}): "))
-                if 0.0 <= new_weight <= 1.0:
-                    old_weight = self.rl_recommendation_weight
-                    self.rl_recommendation_weight = new_weight
-                    print(f"✅ Gewicht geändert: {old_weight} -> {new_weight}")
+        """RL Einstellungen verwalten — vollständige GUI-Parität"""
+
+        while True:
+            self.print_header("⚙️ RL EINSTELLUNGEN")
+
+            print("📌 AKTUELLE KONFIGURATION:")
+            print("─" * 45)
+            print(f"   Algorithmus           : {self.rl_algorithm}")
+            print(f"   Lernrate              : {self.rl_learning_rate:.5f}")
+            print(f"   Gamma (Discount)      : {self.rl_gamma:.2f}")
+            print(f"   Training Steps        : {self.rl_training_steps}")
+            print(f"   Belohnungsfunktion    : {self.rl_reward_function}")
+            print(f"   Replay Buffer Size    : {self.rl_buffer_size}")
+            print(f"   Batch Size            : {self.rl_batch_size}")
+            print(f"   Epochs (PPO)          : {self.rl_epochs}")
+            print(f"   Target Update (DQN)   : {self.rl_target_update}")
+            print(f"   Epsilon Start         : {self.rl_epsilon_start:.2f}")
+            print(f"   Epsilon Min           : {self.rl_epsilon_min:.3f}")
+            print(f"   Epsilon Decay         : {self.rl_epsilon_decay:.4f}")
+            print(f"   Training Timeframe    : {self.rl_training_timeframe}")
+            print(f"   Training Bars         : {self.rl_training_bars}")
+            print(f"   Netzwerk-Architektur  : {self.rl_nn_architecture}")
+            print(f"   Checkpoint Pfad       : {self.rl_checkpoint_path}")
+            print(f"   GPU Beschleunigung    : {'✅' if self.rl_use_gpu else '❌'}")
+            print(f"   RL Live-Trading       : {'✅ (Experimentell)' if self.rl_live_trading_enabled else '❌'}")
+            print(f"   Empfehlungsgewicht    : {self.rl_recommendation_weight}")
+            if self.rl_manager:
+                print(f"   Manager Episodes      : {self.rl_manager.training_episodes}")
+                print(f"   Save Frequency        : {self.rl_manager.model_save_frequency}")
+
+            print("\n🛠️  EDITIEROPTIONEN:")
+            print("─" * 45)
+            print("  1. 🤖 Algorithmus (PPO/DQN/A2C/SAC)")
+            print("  2. 📈 Lernrate")
+            print("  3. 🎯 Gamma (Discount-Faktor)")
+            print("  4. 📊 Training Steps")
+            print("  5. 🏆 Belohnungsfunktion")
+            print("  6. 💾 Replay Buffer Size")
+            print("  7. 📦 Batch Size")
+            print("  8. 🔄 Epochs (PPO) & Target Update (DQN)")
+            print("  9. 🎰 Epsilon (Start / Min / Decay)")
+            print(" 10. ⏱️  Training Timeframe & Bars")
+            print(" 11. 🧠 Netzwerk-Architektur")
+            print(" 12. 💾 Checkpoint Pfad")
+            print(" 13. 🖥️  GPU Beschleunigung umschalten")
+            print(" 14. ⚡ RL Live-Trading umschalten")
+            print(" 15. 🎯 RL Empfehlungsgewicht")
+            print(" 16. 📊 Manager Training Episodes & Save Freq")
+            print("  0. ⬅️  Zurück")
+
+            choice = input("\n🎯 Ihre Wahl (0-16): ").strip()
+
+            if choice == "0":
+                break
+
+            elif choice == "1":
+                print("\nVerfügbar: PPO | DQN | A2C | SAC")
+                val = input(f"Algorithmus (aktuell: {self.rl_algorithm}): ").strip().upper()
+                if val in ["PPO", "DQN", "A2C", "SAC"]:
+                    self.rl_algorithm = val
+                    print(f"✅ Algorithmus → {self.rl_algorithm}")
                 else:
-                    print("❌ Gewicht muss zwischen 0.0 und 1.0 liegen")
-            except ValueError:
-                print("❌ Ungültige Eingabe")
-    
-        elif choice == "2":
-            try:
-                print(f"\nTraining-Parameter:")
-            
-                new_episodes = int(input(f"Episodes (aktuell {self.rl_manager.training_episodes}): ") or str(self.rl_manager.training_episodes))
-                if 100 <= new_episodes <= 10000:
-                    self.rl_manager.training_episodes = new_episodes
-                    print(f"✅ Training Episodes: {new_episodes}")
-            
-                new_save_freq = int(input(f"Save Frequency (aktuell {self.rl_manager.model_save_frequency}): ") or str(self.rl_manager.model_save_frequency))
-                if 10 <= new_save_freq <= 1000:
-                    self.rl_manager.model_save_frequency = new_save_freq
-                    print(f"✅ Save Frequency: {new_save_freq}")
-                
-            except ValueError:
-                print("❌ Ungültige Eingabe")
+                    print("❌ Ungültig — bitte PPO, DQN, A2C oder SAC eingeben")
+
+            elif choice == "2":
+                try:
+                    val = float(input(f"Lernrate (aktuell: {self.rl_learning_rate:.5f}): ") or str(self.rl_learning_rate))
+                    if 0.00001 <= val <= 0.1:
+                        self.rl_learning_rate = val
+                        print(f"✅ Lernrate → {self.rl_learning_rate:.5f}")
+                    else:
+                        print("❌ Lernrate muss zwischen 0.00001 und 0.1 liegen")
+                except ValueError:
+                    print("❌ Ungültige Eingabe")
+
+            elif choice == "3":
+                try:
+                    val = float(input(f"Gamma (aktuell: {self.rl_gamma:.2f}, 0.8–1.0): ") or str(self.rl_gamma))
+                    if 0.8 <= val <= 1.0:
+                        self.rl_gamma = val
+                        print(f"✅ Gamma → {self.rl_gamma:.2f}")
+                    else:
+                        print("❌ Gamma muss zwischen 0.8 und 1.0 liegen")
+                except ValueError:
+                    print("❌ Ungültige Eingabe")
+
+            elif choice == "4":
+                try:
+                    val = int(input(f"Training Steps (aktuell: {self.rl_training_steps}): ") or str(self.rl_training_steps))
+                    if val > 0:
+                        self.rl_training_steps = val
+                        print(f"✅ Training Steps → {self.rl_training_steps}")
+                    else:
+                        print("❌ Muss positiv sein")
+                except ValueError:
+                    print("❌ Ungültige Eingabe")
+
+            elif choice == "5":
+                options = ["Profit + Sharpe Ratio", "Reiner Profit", "Sortino Ratio", "Custom"]
+                print("Optionen:", " | ".join(f"{i+1}. {o}" for i, o in enumerate(options)))
+                try:
+                    idx = int(input("Wahl (1-4): ")) - 1
+                    if 0 <= idx < len(options):
+                        self.rl_reward_function = options[idx]
+                        print(f"✅ Belohnungsfunktion → {self.rl_reward_function}")
+                except ValueError:
+                    print("❌ Ungültige Eingabe")
+
+            elif choice == "6":
+                try:
+                    val = int(input(f"Replay Buffer Size (aktuell: {self.rl_buffer_size}): ") or str(self.rl_buffer_size))
+                    if val >= 100:
+                        self.rl_buffer_size = val
+                        print(f"✅ Buffer Size → {self.rl_buffer_size}")
+                    else:
+                        print("❌ Mindestens 100")
+                except ValueError:
+                    print("❌ Ungültige Eingabe")
+
+            elif choice == "7":
+                try:
+                    val = int(input(f"Batch Size (aktuell: {self.rl_batch_size}): ") or str(self.rl_batch_size))
+                    if val >= 8:
+                        self.rl_batch_size = val
+                        print(f"✅ Batch Size → {self.rl_batch_size}")
+                    else:
+                        print("❌ Mindestens 8")
+                except ValueError:
+                    print("❌ Ungültige Eingabe")
+
+            elif choice == "8":
+                try:
+                    ep = int(input(f"Epochs/PPO (aktuell: {self.rl_epochs}): ") or str(self.rl_epochs))
+                    tu = int(input(f"Target Update/DQN (aktuell: {self.rl_target_update}): ") or str(self.rl_target_update))
+                    self.rl_epochs = max(1, ep)
+                    self.rl_target_update = max(1, tu)
+                    print(f"✅ Epochs → {self.rl_epochs} | Target Update → {self.rl_target_update}")
+                except ValueError:
+                    print("❌ Ungültige Eingabe")
+
+            elif choice == "9":
+                try:
+                    es = float(input(f"Epsilon Start (aktuell: {self.rl_epsilon_start:.2f}, 0.1–1.0): ") or str(self.rl_epsilon_start))
+                    em = float(input(f"Epsilon Min (aktuell: {self.rl_epsilon_min:.3f}, 0.001–0.5): ") or str(self.rl_epsilon_min))
+                    ed = float(input(f"Epsilon Decay (aktuell: {self.rl_epsilon_decay:.4f}, 0.990–0.9999): ") or str(self.rl_epsilon_decay))
+                    if 0.1 <= es <= 1.0 and 0.001 <= em <= 0.5 and 0.99 <= ed <= 0.9999:
+                        self.rl_epsilon_start = es
+                        self.rl_epsilon_min = em
+                        self.rl_epsilon_decay = ed
+                        print(f"✅ Epsilon: Start={es:.2f} | Min={em:.3f} | Decay={ed:.4f}")
+                    else:
+                        print("❌ Werte außerhalb des gültigen Bereichs")
+                except ValueError:
+                    print("❌ Ungültige Eingabe")
+
+            elif choice == "10":
+                tfs = ["M1", "M5", "M15", "M30", "H1", "H4"]
+                print("Timeframes:", " | ".join(tfs))
+                tf = input(f"Timeframe (aktuell: {self.rl_training_timeframe}): ").strip().upper()
+                bars_raw = input(f"Training Bars (aktuell: {self.rl_training_bars}): ").strip()
+                if tf in tfs:
+                    self.rl_training_timeframe = tf
+                    print(f"✅ Timeframe → {self.rl_training_timeframe}")
+                elif tf:
+                    print("❌ Ungültiger Timeframe")
+                if bars_raw.isdigit() and int(bars_raw) >= 100:
+                    self.rl_training_bars = int(bars_raw)
+                    print(f"✅ Training Bars → {self.rl_training_bars}")
+
+            elif choice == "11":
+                archs = ["Klein (64-64)", "Mittel (128-128)", "Groß (256-256)"]
+                print("Architekturen:", " | ".join(f"{i+1}. {a}" for i, a in enumerate(archs)))
+                try:
+                    idx = int(input("Wahl (1-3): ")) - 1
+                    if 0 <= idx < len(archs):
+                        self.rl_nn_architecture = archs[idx]
+                        print(f"✅ Architektur → {self.rl_nn_architecture}")
+                except ValueError:
+                    print("❌ Ungültige Eingabe")
+
+            elif choice == "12":
+                path = input(f"Checkpoint Pfad (aktuell: {self.rl_checkpoint_path}): ").strip()
+                if path:
+                    self.rl_checkpoint_path = path
+                    print(f"✅ Checkpoint Pfad → {self.rl_checkpoint_path}")
+
+            elif choice == "13":
+                self.rl_use_gpu = not self.rl_use_gpu
+                print(f"✅ GPU Beschleunigung → {'aktiviert' if self.rl_use_gpu else 'deaktiviert'}")
+
+            elif choice == "14":
+                self.rl_live_trading_enabled = not self.rl_live_trading_enabled
+                status = "aktiviert ⚠️ EXPERIMENTELL" if self.rl_live_trading_enabled else "deaktiviert"
+                print(f"✅ RL Live-Trading → {status}")
+
+            elif choice == "15":
+                try:
+                    val = float(input(f"Empfehlungsgewicht (aktuell: {self.rl_recommendation_weight}, 0.0–1.0): "))
+                    if 0.0 <= val <= 1.0:
+                        self.rl_recommendation_weight = val
+                        print(f"✅ Empfehlungsgewicht → {self.rl_recommendation_weight}")
+                    else:
+                        print("❌ Wert außerhalb 0.0–1.0")
+                except ValueError:
+                    print("❌ Ungültige Eingabe")
+
+            elif choice == "16" and self.rl_manager:
+                try:
+                    ep = int(input(f"Manager Episodes (aktuell: {self.rl_manager.training_episodes}): ") or str(self.rl_manager.training_episodes))
+                    sf = int(input(f"Save Frequency (aktuell: {self.rl_manager.model_save_frequency}): ") or str(self.rl_manager.model_save_frequency))
+                    if 100 <= ep <= 100000:
+                        self.rl_manager.training_episodes = ep
+                    if 10 <= sf <= 5000:
+                        self.rl_manager.model_save_frequency = sf
+                    print(f"✅ Episodes → {self.rl_manager.training_episodes} | Save Freq → {self.rl_manager.model_save_frequency}")
+                except ValueError:
+                    print("❌ Ungültige Eingabe")
+
+            else:
+                print("❌ Ungültige Auswahl")
+
+            input("\nDrücken Sie Enter zum Fortfahren...")
 
     def toggle_rl_auto_trading(self):
         """Aktiviert/Deaktiviert RL Auto-Trading"""
@@ -2543,9 +2951,9 @@ class MT5FinGPT:
             rl_result = self.rl_manager.get_rl_recommendation(symbol)
         
             # Traditionelle Indikatoren
-            rsi = self.calculate_rsi(symbol)
-            macd_data = self.calculate_macd(symbol)
-            sr_data = self.calculate_support_resistance(symbol)
+            rsi = self.market.calculate_rsi(symbol, mt5.TIMEFRAME_H1 if MT5_AVAILABLE else 16385)
+            macd_data = self.market.calculate_macd(symbol, mt5.TIMEFRAME_H1 if MT5_AVAILABLE else 16385)
+            sr_data = self.market.calculate_support_resistance(symbol, mt5.TIMEFRAME_H1 if MT5_AVAILABLE else 16385)
         
             print(f"\n📊 SIGNALE VERGLEICH:")
             print("─" * 25)
@@ -2556,18 +2964,18 @@ class MT5FinGPT:
         
             # RSI
             if rsi:
-                rsi_signal, rsi_desc = self.get_rsi_signal(rsi)
+                rsi_signal, rsi_desc = self.market.get_rsi_signal(rsi)
                 print(f"📈 RSI: {rsi_signal} ({rsi})")
         
             # MACD
             if macd_data:
-                macd_signal, macd_desc = self.get_macd_signal(macd_data)
+                macd_signal, macd_desc = self.market.get_macd_signal(macd_data)
                 print(f"📊 MACD: {macd_signal}")
         
             # Support/Resistance
             if sr_data:
                 current_price = sr_data['current_price']
-                sr_signal, sr_desc = self.get_sr_signal(sr_data, current_price)
+                sr_signal, sr_desc = self.market.get_sr_signal(sr_data, current_price)
                 print(f"🎯 S/R: {sr_signal}")
         
             # Consensus Berechnung
@@ -2575,13 +2983,13 @@ class MT5FinGPT:
             if rl_result:
                 signals.append(('RL', rl_result['recommendation'], self.rl_recommendation_weight))
             if rsi:
-                rsi_signal, _ = self.get_rsi_signal(rsi)
+                rsi_signal, _ = self.market.get_rsi_signal(rsi)
                 signals.append(('RSI', rsi_signal, 0.2))
             if macd_data:
-                macd_signal, _ = self.get_macd_signal(macd_data)
+                macd_signal, _ = self.market.get_macd_signal(macd_data)
                 signals.append(('MACD', macd_signal, 0.3))
             if sr_data:
-                sr_signal, _ = self.get_sr_signal(sr_data, current_price)
+                sr_signal, _ = self.market.get_sr_signal(sr_data, current_price)
                 signals.append(('S/R', sr_signal, 0.2))
         
             # Gewichteter Consensus
@@ -3065,207 +3473,9 @@ class MT5FinGPT:
                 input("\n📝 Drücken Sie Enter zum Fortfahren...")
 
     # ==========================================
-    # 8. TECHNICAL PIPELINE & CORE INDICATORS
+    # 8. TECHNICAL PIPELINE & CORE INDICATORS (Delegated to MarketAnalyzer)
     # ==========================================
-    def calculate_macd(self, symbol, timeframe=None, fast_period=None, slow_period=None, signal_period=None):
-        """Berechnet MACD für ein Symbol"""
-        if not self.mt5_connected:
-            return None
-    
-        try:
-            if timeframe is None:
-                timeframe = self.macd_timeframe
-            if fast_period is None:
-                fast_period = self.macd_fast_period
-            if slow_period is None:
-                slow_period = self.macd_slow_period
-            if signal_period is None:
-                signal_period = self.macd_signal_period
-        
-            # Hole historische Daten (mehr für EMA-Berechnung)
-            required_bars = max(slow_period, signal_period) + signal_period + 20
-            rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, required_bars)
-        
-            if rates is None or len(rates) < required_bars:
-                return None
-        
-            # Extrahiere Schlusskurse
-            closes = np.array([rate['close'] for rate in rates])
-        
-            # Berechne EMAs
-            def calculate_ema(data, period):
-                """Berechnet Exponential Moving Average"""
-                alpha = 2 / (period + 1)
-                ema = np.zeros_like(data)
-                ema[0] = data[0]
-            
-                for i in range(1, len(data)):
-                    ema[i] = alpha * data[i] + (1 - alpha) * ema[i-1]
-            
-                return ema
-        
-            # Berechne Fast und Slow EMA
-            fast_ema = calculate_ema(closes, fast_period)
-            slow_ema = calculate_ema(closes, slow_period)
-        
-            # MACD Line = Fast EMA - Slow EMA
-            macd_line = fast_ema - slow_ema
-        
-            # Signal Line = EMA von MACD Line
-            signal_line = calculate_ema(macd_line, signal_period)
-        
-            # Histogram = MACD Line - Signal Line
-            histogram = macd_line - signal_line
-        
-            # Aktuelle Werte (letzte 3 für Trend-Analyse)
-            current_macd = macd_line[-1]
-            current_signal = signal_line[-1]
-            current_histogram = histogram[-1]
-        
-            # Vorherige Werte für Kreuzungen
-            prev_macd = macd_line[-2] if len(macd_line) > 1 else current_macd
-            prev_signal = signal_line[-2] if len(signal_line) > 1 else current_signal
-            prev_histogram = histogram[-2] if len(histogram) > 1 else current_histogram
-        
-            # Histogram Trend (letzte 3 Balken)
-            if len(histogram) >= 3:
-                histogram_trend = "STEIGEND" if histogram[-1] > histogram[-2] > histogram[-3] else \
-                                "FALLEND" if histogram[-1] < histogram[-2] < histogram[-3] else "SEITWÄRTS"
-            else:
-                histogram_trend = "UNBEKANNT"
-        
-            return {
-                'macd': round(current_macd, 6),
-                'signal': round(current_signal, 6),
-                'histogram': round(current_histogram, 6),
-                'prev_macd': round(prev_macd, 6),
-                'prev_signal': round(prev_signal, 6),
-                'prev_histogram': round(prev_histogram, 6),
-                'histogram_trend': histogram_trend,
-                'macd_line': macd_line[-10:],  # Letzte 10 Werte für erweiterte Analyse
-                'signal_line': signal_line[-10:],
-                'histogram_values': histogram[-10:]
-            }
-        
-        except Exception as e:
-            print(f"MACD Berechnung Fehler: {e}")
-            return None
-   
-    def get_macd_signal(self, macd_data):
-        """Interpretiert MACD-Werte für Trading-Signal"""
-        if not macd_data:
-            return "NEUTRAL", "MACD nicht verfügbar"
-    
-        try:
-            macd = macd_data['macd']
-            signal = macd_data['signal']
-            histogram = macd_data['histogram']
-            prev_macd = macd_data['prev_macd']
-            prev_signal = macd_data['prev_signal']
-            prev_histogram = macd_data['prev_histogram']
-            histogram_trend = macd_data['histogram_trend']
-        
-            signals = []
-            signal_strength = 0
-        
-            # 1. MACD Line Kreuzung mit Signal Line
-            macd_above_signal = macd > signal
-            prev_macd_above_signal = prev_macd > prev_signal
-        
-            # Bullische Kreuzung (MACD kreuzt Signal von unten)
-            if macd_above_signal and not prev_macd_above_signal:
-                signals.append("BULLISCHE KREUZUNG")
-                signal_strength += 2
-            
-            # Bearische Kreuzung (MACD kreuzt Signal von oben)
-            elif not macd_above_signal and prev_macd_above_signal:
-                signals.append("BEARISCHE KREUZUNG")
-                signal_strength -= 2
-        
-            # 2. Nulllinie Kreuzung
-            macd_above_zero = macd > 0
-            prev_macd_above_zero = prev_macd > 0
-        
-            # MACD kreuzt Nulllinie nach oben
-            if macd_above_zero and not prev_macd_above_zero:
-                signals.append("NULLLINIE BULLISCH")
-                signal_strength += 1
-            
-            # MACD kreuzt Nulllinie nach unten
-            elif not macd_above_zero and prev_macd_above_zero:
-                signals.append("NULLLINIE BEARISCH")
-                signal_strength -= 1
-        
-            # 3. Histogram Analyse
-            histogram_above_zero = histogram > 0
-            prev_histogram_above_zero = prev_histogram > 0
-        
-            # Histogram wird positiv
-            if histogram_above_zero and not prev_histogram_above_zero:
-                signals.append("MOMENTUM BULLISCH")
-                signal_strength += 1
-            
-            # Histogram wird negativ
-            elif not histogram_above_zero and prev_histogram_above_zero:
-                signals.append("MOMENTUM BEARISCH")
-                signal_strength -= 1
-        
-            # 4. Histogram Trend
-            if histogram_trend == "STEIGEND":
-                if histogram > 0:
-                    signals.append("AUFWÄRTS-MOMENTUM")
-                    signal_strength += 1
-                else:
-                    signals.append("MOMENTUM ERHOLT SICH")
-            elif histogram_trend == "FALLEND":
-                if histogram < 0:
-                    signals.append("ABWÄRTS-MOMENTUM")
-                    signal_strength -= 1
-                else:
-                    signals.append("MOMENTUM SCHWÄCHT AB")
-        
-            # 5. Position relativ zur Nulllinie
-            if macd > 0 and signal > 0:
-                signals.append("ÜBER NULLLINIE")
-            elif macd < 0 and signal < 0:
-                signals.append("UNTER NULLLINIE")
-        
-            # Signal-Bewertung
-            if signal_strength >= 3:
-                main_signal = "BUY"
-                description = f"Starkes Kaufsignal ({signal_strength}): {', '.join(signals[:2])}"
-            elif signal_strength >= 1:
-                main_signal = "BUY"
-                description = f"Kaufsignal ({signal_strength}): {', '.join(signals[:2])}"
-            elif signal_strength <= -3:
-                main_signal = "SELL"
-                description = f"Starkes Verkaufssignal ({signal_strength}): {', '.join(signals[:2])}"
-            elif signal_strength <= -1:
-                main_signal = "SELL"
-                description = f"Verkaufssignal ({signal_strength}): {', '.join(signals[:2])}"
-            else:
-                main_signal = "NEUTRAL"
-                if signals:
-                    description = f"Neutral: {', '.join(signals[:2])}"
-                else:
-                    description = f"Seitwärts (MACD: {macd:.6f}, Signal: {signal:.6f})"
-        
-            # Zusätzliche Informationen
-            detailed_info = {
-                'signal': main_signal,
-                'description': description,
-                'strength': signal_strength,
-                'all_signals': signals,
-                'macd_above_signal': macd_above_signal,
-                'macd_above_zero': macd_above_zero,
-                'histogram_positive': histogram_above_zero,
-                'trend': histogram_trend
-            }
-        
-            return main_signal, description
-        
-        except Exception as e:
-            return "NEUTRAL", f"MACD Analyse Fehler: {e}"
+    # Old methods removed as they are now in core/market_analyzer.py
 
 
 
@@ -3992,153 +4202,7 @@ class MT5FinGPT:
                     break
         
         print(f"\r✅ {text} - Abgeschlossen!    ")
-
-    def get_sr_signal(self, sr_data, current_price):
-        """Interpretiert S/R-Werte für Trading-Signal"""
-        if not sr_data or not sr_data['nearest_support'] and not sr_data['nearest_resistance']:
-            return "NEUTRAL", "Keine signifikanten S/R Levels gefunden"
-        
-        try:
-            signals = []
-            
-            # Prüfe Nähe zu Support
-            if sr_data['nearest_support']:
-                support_level, support_strength = sr_data['nearest_support']
-                distance_to_support = abs(current_price - support_level) / current_price * 100
-                
-                if distance_to_support < 0.1:  # Sehr nah an Support
-                    signals.append(f"BUY - An starkem Support ({support_level:.5f}, Stärke: {support_strength})")
-                elif distance_to_support < 0.2:
-                    signals.append(f"WATCH - Nahe Support ({support_level:.5f})")
-            
-            # Prüfe Nähe zu Resistance
-            if sr_data['nearest_resistance']:
-                resistance_level, resistance_strength = sr_data['nearest_resistance']
-                distance_to_resistance = abs(current_price - resistance_level) / current_price * 100
-                
-                if distance_to_resistance < 0.1:  # Sehr nah an Resistance
-                    signals.append(f"SELL - An starker Resistance ({resistance_level:.5f}, Stärke: {resistance_strength})")
-                elif distance_to_resistance < 0.2:
-                    signals.append(f"WATCH - Nahe Resistance ({resistance_level:.5f})")
-            
-            if not signals:
-                return "NEUTRAL", "Zwischen S/R Levels"
-            
-            # Bestimme stärkstes Signal
-            if any("BUY" in signal for signal in signals):
-                buy_signals = [s for s in signals if "BUY" in s]
-                return "BUY", buy_signals[0]
-            elif any("SELL" in signal for signal in signals):
-                sell_signals = [s for s in signals if "SELL" in s]
-                return "SELL", sell_signals[0]
-            else:
-                return "WATCH", signals[0]
-                
-        except Exception as e:
-            return "NEUTRAL", f"S/R Analyse Fehler: {e}"
     
-    def calculate_rsi(self, symbol, timeframe=None, period=None):
-        """Berechnet RSI für ein Symbol"""
-        if not self.mt5_connected:
-            return None
-        
-        try:
-            if timeframe is None:
-                timeframe = self.rsi_timeframe
-            if period is None:
-                period = self.rsi_period
-            
-            # Hole historische Daten (mehr als RSI-Periode für bessere Berechnung)
-            rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, period + 10)
-            
-            if rates is None or len(rates) < period + 1:
-                return None
-            
-            # Extrahiere Schlusskurse
-            closes = np.array([rate['close'] for rate in rates])
-            
-            # Berechne Preisänderungen
-            deltas = np.diff(closes)
-            
-            # Trenne Gewinne und Verluste
-            gains = np.where(deltas > 0, deltas, 0)
-            losses = np.where(deltas < 0, -deltas, 0)
-            
-            # Berechne Average Gain und Average Loss
-            avg_gain = np.mean(gains[-period:])
-            avg_loss = np.mean(losses[-period:])
-            
-            if avg_loss == 0:
-                return 100
-            
-            # RSI Formel
-            rs = avg_gain / avg_loss
-            rsi = 100 - (100 / (1 + rs))
-            
-            return round(rsi, 2)
-            
-        except Exception as e:
-            print(f"RSI Berechnung Fehler: {e}")
-            return None
-    
-    def get_rsi_signal(self, rsi_value):
-        """Interpretiert RSI-Wert für Trading-Signal"""
-        if rsi_value is None:
-            return "NEUTRAL", "RSI nicht verfügbar"
-        
-        if rsi_value >= self.rsi_overbought:
-            return "SELL", f"Überkauft (RSI: {rsi_value})"
-        elif rsi_value <= self.rsi_oversold:
-            return "BUY", f"Überverkauft (RSI: {rsi_value})"
-        elif rsi_value > 60:
-            return "NEUTRAL", f"Leicht überkauft (RSI: {rsi_value})"
-        elif rsi_value < 40:
-            return "NEUTRAL", f"Leicht überverkauft (RSI: {rsi_value})"
-        else:
-            return "NEUTRAL", f"Neutral (RSI: {rsi_value})"
-        """Berechnet RSI für ein Symbol"""
-        if not self.mt5_connected:
-            return None
-        
-        try:
-            if timeframe is None:
-                timeframe = self.rsi_timeframe
-            if period is None:
-                period = self.rsi_period
-            
-            # Hole historische Daten (mehr als RSI-Periode für bessere Berechnung)
-            rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, period + 10)
-            
-            if rates is None or len(rates) < period + 1:
-                return None
-            
-            # Extrahiere Schlusskurse
-            closes = np.array([rate['close'] for rate in rates])
-            
-            # Berechne Preisänderungen
-            deltas = np.diff(closes)
-            
-            # Trenne Gewinne und Verluste
-            gains = np.where(deltas > 0, deltas, 0)
-            losses = np.where(deltas < 0, -deltas, 0)
-            
-            # Berechne Average Gain und Average Loss
-            avg_gain = np.mean(gains[-period:])
-            avg_loss = np.mean(losses[-period:])
-            
-            if avg_loss == 0:
-                return 100
-            
-            # RSI Formel
-            rs = avg_gain / avg_loss
-            rsi = 100 - (100 / (1 + rs))
-            
-            return round(rsi, 2)
-            
-        except Exception as e:
-            print(f"RSI Berechnung Fehler: {e}")
-            return None
-
     # ==========================================
     # KERN-FUNKTIONEN (Delegated to MT5Broker)
     # ==========================================
@@ -4176,16 +4240,16 @@ class MT5FinGPT:
             spread = tick.ask - tick.bid
         
             # RSI berechnen
-            rsi_value = self.calculate_rsi(symbol)
-            rsi_signal, rsi_desc = self.get_rsi_signal(rsi_value)
+            rsi_value = self.market.calculate_rsi(symbol, mt5.TIMEFRAME_H1 if MT5_AVAILABLE else 16385)
+            rsi_signal, rsi_desc = self.market.get_rsi_signal(rsi_value)
         
             # MACD berechnen
-            macd_data = self.calculate_macd(symbol)
-            macd_signal, macd_desc = self.get_macd_signal(macd_data)
+            macd_data = self.market.calculate_macd(symbol, mt5.TIMEFRAME_H1 if MT5_AVAILABLE else 16385)
+            macd_signal, macd_desc = self.market.get_macd_signal(macd_data)
         
             # Support/Resistance berechnen
-            sr_data = self.calculate_support_resistance(symbol)
-            sr_signal, sr_desc = self.get_sr_signal(sr_data, current_price)
+            sr_data = self.market.calculate_support_resistance(symbol, mt5.TIMEFRAME_H1 if MT5_AVAILABLE else 16385)
+            sr_signal, sr_desc = self.market.get_sr_signal(sr_data, current_price)
         
             rsi_info = f"RSI: {rsi_desc}" if rsi_value else "RSI: Nicht verfügbar"
             macd_info = f"MACD: {macd_desc}" if macd_data else "MACD: Nicht verfügbar"
@@ -4194,13 +4258,15 @@ class MT5FinGPT:
             # Formatiere S/R Levels für Anzeige
             sr_levels_info = ""
             if sr_data:
-                if sr_data['nearest_support']:
-                    level, strength = sr_data['nearest_support']
+                if sr_data['support_levels']:
+                    level = sr_data['support_levels'][0]['price']
+                    strength = sr_data['support_levels'][0]['strength']
                     distance = abs(current_price - level) / current_price * 10000  # in Pips
                     sr_levels_info += f"\nSupport: {level:.5f} (Stärke: {strength}, {distance:.1f} Pips)"
             
-                if sr_data['nearest_resistance']:
-                    level, strength = sr_data['nearest_resistance']
+                if sr_data['resistance_levels']:
+                    level = sr_data['resistance_levels'][0]['price']
+                    strength = sr_data['resistance_levels'][0]['strength']
                     distance = abs(current_price - level) / current_price * 10000  # in Pips
                     sr_levels_info += f"\nResistance: {level:.5f} (Stärke: {strength}, {distance:.1f} Pips)"
         
@@ -4236,6 +4302,10 @@ class MT5FinGPT:
     def get_available_models(self):
         """Holt die Liste der installierten Ollama-Modelle via ai module"""
         return self.ai.get_available_models()
+    
+    def get_ollama_models(self):
+        """Alias für get_available_models - wird von Tests erwartet"""
+        return self.get_available_models()
     
     def mtf_settings_menu(self):
         """Multi-Timeframe Einstellungen Menü"""
@@ -4401,12 +4471,24 @@ class MT5FinGPT:
     # 11. AI INTEGRATION & EXECUTOR
     # ==========================================
     def select_finance_model(self):
-        """Wählt automatisch das beste finanzspezifische Modell (z.B. Llama3) via ai module"""
-        return self.ai.select_finance_model()
+        """Wählt automatisch das beste finanzspezifische Modell via ai module"""
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running(): return False
+            return loop.run_until_complete(self.ai.select_finance_model())
+        except RuntimeError:
+            return asyncio.run(self.ai.select_finance_model())
     
     def chat_with_model(self, message, context=""):
         """Sendet einen Prompt an Ollama und gibt die Antwort zurück via ai module"""
-        return self.ai.chat_with_model(message, context)
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running(): return "Aktuell blockiert (Async Loop läuft bereits)"
+            return loop.run_until_complete(self.ai.chat_with_model(message, context))
+        except RuntimeError:
+            return asyncio.run(self.ai.chat_with_model(message, context))
     
     def enable_trading(self):
         print("\nTRADING AKTIVIEREN")
@@ -4640,37 +4722,39 @@ class MT5FinGPT:
             print("─" * 50)
         
             # RSI
-            rsi_value = self.calculate_rsi(symbol)
+            rsi_value = self.market.calculate_rsi(symbol, mt5.TIMEFRAME_H1 if MT5_AVAILABLE else 16385)
             if rsi_value:
-                rsi_signal, rsi_desc = self.get_rsi_signal(rsi_value)
+                rsi_signal, rsi_desc = self.market.get_rsi_signal(rsi_value)
                 rsi_icon = "🟢" if rsi_signal == "BUY" else "🔴" if rsi_signal == "SELL" else "🟡"
-                print(f"{rsi_icon} RSI ({self.rsi_period}): {rsi_value} - {rsi_desc}")
+                print(f"{rsi_icon} RSI ({self.market.rsi_period}): {rsi_value} - {rsi_desc}")
         
             # MACD
-            macd_data = self.calculate_macd(symbol)
+            macd_data = self.market.calculate_macd(symbol, mt5.TIMEFRAME_H1 if MT5_AVAILABLE else 16385)
             if macd_data:
-                macd_signal, macd_desc = self.get_macd_signal(macd_data)
+                macd_signal, macd_desc = self.market.get_macd_signal(macd_data)
                 macd_icon = "🟢" if macd_signal == "BUY" else "🔴" if macd_signal == "SELL" else "🟡"
                 print(f"{macd_icon} MACD: {macd_data['macd']:.6f} - {macd_desc[:50]}...")
         
             # Support/Resistance
-            sr_data = self.calculate_support_resistance(symbol)
+            sr_data = self.market.calculate_support_resistance(symbol, mt5.TIMEFRAME_H1 if MT5_AVAILABLE else 16385)
             if sr_data:
                 current_price = sr_data['current_price']
             
-                if sr_data['nearest_support']:
-                    sup_level, sup_strength = sr_data['nearest_support']
+                if sr_data['support_levels']:
+                    sup_level = sr_data['support_levels'][0]['price']
+                    sup_strength = sr_data['support_levels'][0]['strength']
                     distance = abs(current_price - sup_level) / current_price * 10000
                     print(f"🔵 Nächster Support: {sup_level:.5f} ({distance:.1f} Pips, Stärke: {sup_strength})")
             
-                if sr_data['nearest_resistance']:
-                    res_level, res_strength = sr_data['nearest_resistance']
+                if sr_data['resistance_levels']:
+                    res_level = sr_data['resistance_levels'][0]['price']
+                    res_strength = sr_data['resistance_levels'][0]['strength']
                     distance = abs(current_price - res_level) / current_price * 10000
                     print(f"🔴 Nächste Resistance: {res_level:.5f} ({distance:.1f} Pips, Stärke: {res_strength})")
         
             # Multi-Timeframe Trend (falls aktiviert)
             if self.mtf_enabled:
-                trend_data = self.get_higher_timeframe_trend(symbol)
+                trend_data = self.market.get_higher_timeframe_trend(symbol, self.trend_timeframe)
                 if trend_data:
                     trend_icon = "🟢" if "BULLISH" in trend_data['direction'] else "🔴" if "BEARISH" in trend_data['direction'] else "🟡"
                     tf_name = self.timeframe_names.get(self.trend_timeframe, "H1")
@@ -4683,15 +4767,31 @@ class MT5FinGPT:
 
     def parse_ai_recommendation(self, ai_text):
         try:
+            import re
             text_upper = ai_text.upper()
             
             action = None
-            if "BUY" in text_upper or "KAUFEN" in text_upper:
-                action = "BUY"
-            elif "SELL" in text_upper or "VERKAUFEN" in text_upper:
-                action = "SELL"
-            elif "WARTEN" in text_upper or "HOLD" in text_upper:
+            
+            # Suche gezielt nach den isolierten Wörtern am Anfang oder als klare Aussage
+            buy_match = re.search(r'\b(BUY|KAUFEN)\b', text_upper)
+            sell_match = re.search(r'\b(SELL|VERKAUFEN)\b', text_upper)
+            wait_match = re.search(r'\b(WARTEN|HOLD)\b', text_upper)
+            
+            # Finde die Positionen der ersten Treffer
+            pos_buy = buy_match.start() if buy_match else 9999
+            pos_sell = sell_match.start() if sell_match else 9999
+            pos_wait = wait_match.start() if wait_match else 9999
+            
+            min_pos = min(pos_buy, pos_sell, pos_wait)
+            
+            if min_pos == 9999:
                 return None
+            elif min_pos == pos_wait:
+                return None  # WARTEN = False/None
+            elif min_pos == pos_buy:
+                action = "BUY"
+            elif min_pos == pos_sell:
+                action = "SELL"
             
             if not action:
                 return None
@@ -4731,38 +4831,34 @@ class MT5FinGPT:
     
             # 3. MULTI-TIMEFRAME TREND-FILTER
             if self.mtf_enabled and self.require_trend_confirmation:
-                trend_data = self.get_higher_timeframe_trend(symbol)
+                trend_data = self.market.get_higher_timeframe_trend(symbol, self.trend_timeframe)
                 if not trend_data:
                     print(f"{symbol}: Trend-Analyse fehlgeschlagen")
                     return False
         
                 trend_direction = trend_data['direction']
-                trend_strength = trend_data['strength']
-        
-                # Trend-Filter anwenden
-                if trend_direction == "NEUTRAL" or trend_strength < self.trend_strength_threshold:
-                    print(f"{symbol}: Kein klarer Trend ({trend_direction}, Stärke: {trend_strength:.5f})")
-                    return False
+                # trend_strength = trend_data['strength'] # Not available in new impl directly, check return dict
+                
+                # NUR in Trendrichtung handeln
+                if trend_direction == "NEUTRAL":
+                     print(f"{symbol}: Kein klarer Trend")
+                     return False
     
             # 4. LIVE-DATEN UND KI-ANALYSE
-            live_data = self.get_mt5_live_data(symbol)
-            if "Fehler" in live_data or "nicht" in live_data:
+            live_data = self.broker.get_live_data(symbol)
+            if not live_data:
                 print(f"{symbol}: Fehler beim Laden der Marktdaten")
                 return False
             
-            # RSI, MACD und S/R in Prompt erwähnen
-            prompt = f"""Analysiere {symbol} für Trading-Entscheidung. 
+            # Formuliere den kompletten Prompt inkl. Trading Style
+            prompt = (
+                f"Analysiere {symbol} für {self.trading_style} mit Risikoprofil '{self.risk_profile}'. "
+                f"Berücksichtige die aktuellen M15/H1 Indikatoren und S/R Level. "
+                "Gib am Anfang in Großbuchstaben strikt 'BUY', 'SELL' oder 'WARTEN' aus, gefolgt von einer extrem kurzen Begründung (max 1 Satz)."
+            )
 
-    Berücksichtige besonders:
-    - RSI-Wert und ob überkauft/überverkauft
-    - MACD-Signale (Kreuzungen, Histogram, Nulllinie) 
-    - Support/Resistance Levels und deren Stärke
-    - Breakouts oder Bounces an S/R Levels
-    - Trend-Richtung und Momentum
-
-    Gib eine klare BUY/SELL/WARTEN Empfehlung mit kurzer technischer Begründung."""
-
-            ai_response = self.chat_with_model(prompt, live_data)
+            # Use sync wrapper to avoid Coroutine errors!
+            ai_response = self.chat_with_model(prompt, str(live_data))
             recommendation = self.parse_ai_recommendation(ai_response)
         
             if not recommendation:
@@ -4774,11 +4870,11 @@ class MT5FinGPT:
     
             # 5. MULTI-TIMEFRAME BESTÄTIGUNG
             if self.mtf_enabled and self.require_trend_confirmation:
-                if action == "BUY" and trend_direction == "BEARISH":
-                    print(f"{symbol}: H1-Trend bearish - BUY abgelehnt")
+                if action == "BUY" and "BEARISH" in trend_direction:
+                    print(f"{symbol}: Trend bearish - BUY abgelehnt")
                     return False
-                elif action == "SELL" and trend_direction == "BULLISH":
-                    print(f"{symbol}: H1-Trend bullish - SELL abgelehnt")
+                elif action == "SELL" and "BULLISH" in trend_direction:
+                    print(f"{symbol}: Trend bullish - SELL abgelehnt")
                     return False
     
             # 6. PRÜFE OB BEREITS POSITION OFFEN
@@ -4788,19 +4884,19 @@ class MT5FinGPT:
                 return False
             
             # 7. RSI-FILTER
-            rsi_value = self.calculate_rsi(symbol)
+            rsi_value = self.market.calculate_rsi(symbol, mt5.TIMEFRAME_H1 if MT5_AVAILABLE else 16385)
             if rsi_value:
-                if action == "BUY" and rsi_value > self.rsi_overbought:
+                if action == "BUY" and rsi_value > self.market.rsi_overbought:
                     print(f"{symbol}: RSI überkauft ({rsi_value}) - BUY abgelehnt")
                     return False
-                elif action == "SELL" and rsi_value < self.rsi_oversold:
+                elif action == "SELL" and rsi_value < self.market.rsi_oversold:
                     print(f"{symbol}: RSI überverkauft ({rsi_value}) - SELL abgelehnt")
                     return False
 
             # 8. MACD-FILTER
-            macd_data = self.calculate_macd(symbol)
+            macd_data = self.market.calculate_macd(symbol, mt5.TIMEFRAME_H1 if MT5_AVAILABLE else 16385)
             if macd_data:
-                macd_signal, _ = self.get_macd_signal(macd_data)
+                macd_signal, _ = self.market.get_macd_signal(macd_data)
                 if action == "BUY" and macd_signal == "SELL":
                     print(f"{symbol}: MACD bearisch - BUY abgelehnt")
                     return False
@@ -4817,19 +4913,19 @@ class MT5FinGPT:
                     return False
 
             # 9. SUPPORT/RESISTANCE FILTER
-            sr_data = self.calculate_support_resistance(symbol)
+            sr_data = self.market.calculate_support_resistance(symbol, mt5.TIMEFRAME_H1 if MT5_AVAILABLE else 16385)
             if sr_data:
                 current_price = tick.ask if action == "BUY" else tick.bid
             
-                if action == "BUY" and sr_data['nearest_resistance']:
-                    res_level, _ = sr_data['nearest_resistance']
+                if action == "BUY" and sr_data['resistance_levels']:
+                    res_level = sr_data['resistance_levels'][0]['price']
                     distance_to_res = abs(current_price - res_level) / current_price * 10000
                     if distance_to_res < 5:
                         print(f"{symbol}: Zu nah an Resistance ({distance_to_res:.1f} Pips) - BUY abgelehnt")
                         return False
                     
-                elif action == "SELL" and sr_data['nearest_support']:
-                    sup_level, _ = sr_data['nearest_support']
+                elif action == "SELL" and sr_data['support_levels']:
+                    sup_level = sr_data['support_levels'][0]['price']
                     distance_to_sup = abs(current_price - sup_level) / current_price * 10000
                     if distance_to_sup < 5:
                         print(f"{symbol}: Zu nah an Support ({distance_to_sup:.1f} Pips) - SELL abgelehnt")
@@ -4839,55 +4935,65 @@ class MT5FinGPT:
             current_price = tick.ask if action == "BUY" else tick.bid
             min_distance = symbol_info.trade_stops_level * symbol_info.point * 2
 
-            # Smarte SL/TP basierend auf S/R
+            stop_loss = 0.0
+            take_profit = 0.0
+
             if sr_data and action == "BUY":
                 # Stop-Loss unter nächstem Support
-                if sr_data['nearest_support']:
-                    sup_level, _ = sr_data['nearest_support']
+                if sr_data['support_levels']:
+                    sup_level = sr_data['support_levels'][0]['price']
                     suggested_sl = sup_level - (symbol_info.point * 10)
-                    stop_loss = max(suggested_sl, current_price - max(min_distance, current_price * 0.01))
+                    stop_loss = max(suggested_sl, current_price - 0.0050) # Fallback wenn Support zu tief
                 else:
-                    stop_loss = current_price - max(min_distance, current_price * 0.01)
+                    stop_loss = current_price - 0.0050
                 
                 # Take-Profit an nächster Resistance
-                if sr_data['nearest_resistance']:
-                    res_level, _ = sr_data['nearest_resistance']
+                if sr_data['resistance_levels']:
+                    res_level = sr_data['resistance_levels'][0]['price']
                     suggested_tp = res_level - (symbol_info.point * 10)
-                    take_profit = min(suggested_tp, current_price + max(min_distance, current_price * 0.02))
+                    take_profit = min(suggested_tp, current_price + 0.0100)
                 else:
-                    take_profit = current_price + max(min_distance, current_price * 0.02)
+                    take_profit = current_price + 0.0100
                 
             elif sr_data and action == "SELL":
                 # Stop-Loss über nächster Resistance
-                if sr_data['nearest_resistance']:
-                    res_level, _ = sr_data['nearest_resistance']
+                if sr_data['resistance_levels']:
+                    res_level = sr_data['resistance_levels'][0]['price']
                     suggested_sl = res_level + (symbol_info.point * 10)
-                    stop_loss = min(suggested_sl, current_price + max(min_distance, current_price * 0.01))
+                    stop_loss = min(suggested_sl, current_price + 0.0050)
                 else:
-                    stop_loss = current_price + max(min_distance, current_price * 0.01)
+                    stop_loss = current_price + 0.0050
                 
                 # Take-Profit an nächstem Support
-                if sr_data['nearest_support']:
-                    sup_level, _ = sr_data['nearest_support']
+                if sr_data['support_levels']:
+                    sup_level = sr_data['support_levels'][0]['price']
                     suggested_tp = sup_level + (symbol_info.point * 10)
-                    take_profit = max(suggested_tp, current_price - max(min_distance, current_price * 0.02))
+                    take_profit = max(suggested_tp, current_price - 0.0100)
                 else:
-                    take_profit = current_price - max(min_distance, current_price * 0.02)
+                    take_profit = current_price - 0.0100
             else:
                 # Fallback zu Standard-Levels
                 if action == "BUY":
-                    stop_loss = current_price - max(min_distance, current_price * 0.01)
-                    take_profit = current_price + max(min_distance, current_price * 0.02)
+                    stop_loss = current_price - 0.0050
+                    take_profit = current_price + 0.0100
                 else:
-                    stop_loss = current_price + max(min_distance, current_price * 0.01)
-                    take_profit = current_price - max(min_distance, current_price * 0.02)
+                    stop_loss = current_price + 0.0050
+                    take_profit = current_price - 0.0100
 
             # 11. TRADE AUSFÜHREN
             print(f"🔄 Analysiere {symbol}...")
-            result = self.execute_trade(symbol, action, self.default_lot_size, stop_loss, take_profit)
+            # Ensure SL/TP are within allowed distances
+            if action == "BUY":
+                 if stop_loss >= current_price - min_distance: stop_loss = current_price - min_distance - symbol_info.point
+                 if take_profit <= current_price + min_distance: take_profit = current_price + min_distance + symbol_info.point
+            else:
+                 if stop_loss <= current_price + min_distance: stop_loss = current_price + min_distance + symbol_info.point
+                 if take_profit >= current_price - min_distance: take_profit = current_price - min_distance - symbol_info.point
+
+            result = self.execute_trade(symbol, action, self.default_lot_size, sl=stop_loss, tp=take_profit)
 
             # 12. ERGEBNIS UND BEGRÜNDUNG ANZEIGEN
-            if "✅" in result:
+            if "✅" in str(result): # Convert dict/result to str to be safe
                 inds_used = []
                 if rsi_value: inds_used.append("RSI")
                 if macd_data: inds_used.append("MACD")
@@ -4901,31 +5007,49 @@ class MT5FinGPT:
                                lot_size=self.default_lot_size)
                                
                 print(f"📊 Begründung: {reasoning}")
-                if self.mtf_enabled and 'trend_data' in locals():
-                    print(f"📈 H1-Trend: {trend_data['direction']} (Stärke: {trend_data['strength']:.5f})")
+                if self.mtf_enabled and 'trend_data' in locals() and trend_data:
+                    print(f"📈 H1-Trend: {trend_data['direction']} (Stärke: {trend_data.get('strength', 0):.5f})")
                 if rsi_value:
                     print(f"📈 RSI: {rsi_value}")
                 if macd_data:
                     print(f"📊 MACD: {macd_data['macd']:.6f} (Signal: {macd_data['signal']:.6f})")
                     print(f"📊 Histogram: {macd_data['histogram']:.6f} ({macd_data['histogram_trend']})")
-                if sr_data and sr_data['nearest_support']:
-                    sup_level, sup_strength = sr_data['nearest_support']
+                if sr_data and sr_data['support_levels']:
+                    sup_level = sr_data['support_levels'][0]['price']
+                    sup_strength = sr_data['support_levels'][0]['strength']
                     print(f"🔵 Support: {sup_level:.5f} (Stärke: {sup_strength})")
-                if sr_data and sr_data['nearest_resistance']:
-                    res_level, res_strength = sr_data['nearest_resistance']
+                if sr_data and sr_data['resistance_levels']:
+                    res_level = sr_data['resistance_levels'][0]['price']
+                    res_strength = sr_data['resistance_levels'][0]['strength']
                     print(f"🔴 Resistance: {res_level:.5f} (Stärke: {res_strength})")
 
             print(result)
-            return "✅" in result
+            return "✅" in str(result)
 
         except Exception as e:
             print(f"{symbol}: Unerwarteter Fehler - {e}")
             self.log_error("auto_trade_cycle", e, f"Symbol: {symbol}")
             return False
+            
+    def _stoppable_sleep(self, seconds):
+        """Pausiert für 'seconds' Sekunden, bricht ab wenn '0' gedrückt wird."""
+        import msvcrt
+        iterations = int(seconds * 10)
+        for _ in range(iterations):
+            if not self.auto_trading: # Falls extern gestoppt
+                return False
+            if msvcrt.kbhit():
+                key = msvcrt.getch()
+                if key == b'0':
+                    self.auto_trading = False
+                    self.log("INFO", "Auto-Trading durch Benutzer (Taste 0) gestoppt!", "SYSTEM")
+                    return False
+            time.sleep(0.1)
+        return True
     
     def run_auto_trading(self):
         """Auto-Trading mit MT5 Auto-Reconnect bei Verbindungsverlust."""
-        self.log("INFO", "STARTE AUTO-TRADING | STOPP: Ctrl+C", "SYSTEM")
+        self.log("INFO", "STARTE AUTO-TRADING | STOPP: Taste '0' oder Ctrl+C", "SYSTEM")
         self.log("INFO", f"Symbole: {self.auto_trade_symbols} | Intervall: {self.analysis_interval}s", "SYSTEM")
 
         cycle = 0
@@ -4950,7 +5074,7 @@ class MT5FinGPT:
                 if cycle % 10 == 0:
                     if not self.system_health_check():
                         self.log("WARNING", "Health Check fehlgeschlagen - 60s Pause", "SYSTEM")
-                        time.sleep(60)
+                        if not self._stoppable_sleep(60): break
                         continue
 
                 # ── Position Management alle 2 Zyklen ─────────────────────
@@ -4962,7 +5086,7 @@ class MT5FinGPT:
                         self.log("WARNING", f"Position Management Fehler: {e}", "SYSTEM")
                         self.log_error("position_management", e)
 
-                cycle_success = False
+                cycle_errors = 0
 
                 # ── Symbole iterieren ──────────────────────────────────────
                 for i, symbol in enumerate(self.auto_trade_symbols):
@@ -4970,22 +5094,24 @@ class MT5FinGPT:
                         self.log("INFO", f"[{i+1}/{len(self.auto_trade_symbols)}] {symbol}", "SYSTEM")
                         success = self.auto_trade_cycle_with_timeout(symbol, timeout=30)
                         if success:
-                            cycle_success = True
                             consecutive_errors = 0
-                        time.sleep(2)
+                        
+                        if not self._stoppable_sleep(2): break
                     except Exception as e:
                         consecutive_errors += 1
+                        cycle_errors += 1
                         self.log("ERROR", f"{symbol}: Fehler - {e}", "SYSTEM")
                         self.log_error("auto_trade_symbol", e, f"Symbol: {symbol}, Zyklus: {cycle}")
                         if consecutive_errors >= max_consecutive_errors:
                             self.log("WARNING",
                                      f"Zu viele Fehler ({consecutive_errors}) - 5 Min Pause", "SYSTEM")
-                            time.sleep(300)
+                            if not self._stoppable_sleep(300): break
                             consecutive_errors = 0
 
                 # ── Zyklus-Zusammenfassung ─────────────────────────────────
+                status_text = "OK" if cycle_errors == 0 else "Warnung (Teilfehler)" if cycle_errors < len(self.auto_trade_symbols) else "FEHLER"
                 self.log("INFO",
-                         f"{'OK' if cycle_success else 'FEHLER'} Zyklus #{cycle} abgeschlossen", "SYSTEM")
+                         f"{status_text} Zyklus #{cycle} abgeschlossen", "SYSTEM")
 
                 if hasattr(self, 'risk_manager') and self.risk_manager and cycle % 5 == 0:
                     try:
@@ -4996,8 +5122,9 @@ class MT5FinGPT:
                     except Exception as e:
                         self.log("WARNING", f"Risk Summary Fehler: {e}", "SYSTEM")
 
-                self.log("INFO", f"Warte {self.analysis_interval}s...", "SYSTEM")
-                time.sleep(self.analysis_interval)
+                self.log("INFO", f"Warte {self.analysis_interval}s... (Drücke '0' zum Beenden)", "SYSTEM")
+                if not self._stoppable_sleep(self.analysis_interval):
+                    break
 
         except KeyboardInterrupt:
             self.log("INFO", "Auto-Trading durch Benutzer gestoppt!", "SYSTEM")
@@ -5026,7 +5153,7 @@ class MT5FinGPT:
                 checks['mt5_connection'] = test_tick is not None
         
             # 2. Ollama Verbindung prüfen
-            checks['ollama_connection'] = self.check_ollama_status()
+            checks['ollama_connection'] = self.ai.check_ollama_status()
         
             # 3. Risk Manager Status prüfen
             if hasattr(self, 'risk_manager') and self.risk_manager:
@@ -5320,30 +5447,35 @@ def main():
 
         # Ollama Status prüfen
         print("\n📋 SCHRITT 3: Ollama Server")
-        if not bot.check_ollama_status():
-            print("❌ Ollama starten: 'ollama serve'")
+        if not bot.ai.check_ollama_status():
+            print("❌ Ollama nicht erreichbar. Starten mit: 'ollama serve'")
             print("💡 Tipp: Öffnen Sie ein neues Terminal und führen Sie 'ollama serve' aus")
-            return
+            print("⚠️ System läuft weiter, aber KI-Analyse ist nicht verfügbar")
+        else:
+            print("✅ Ollama Server erreichbar")
 
-        # Modelle laden
-        print("\n📋 SCHRITT 4: KI-Modelle")
-        if not bot.get_available_models():
-            print("❌ Keine Ollama-Modelle gefunden")
-            print("💡 Tipp: Installieren Sie ein Modell mit 'ollama pull llama3.1:8b'")
-            return
-
-        if not bot.select_finance_model():
-            print("❌ Kein passendes Finanz-Modell gefunden")
-            print("💡 Tipp: Installieren Sie ein empfohlenes Modell")
-            return
+            # Modelle laden
+            print("\n📋 SCHRITT 4: KI-Modelle")
+            if not bot.ai.get_available_models():
+                print("❌ Keine Ollama-Modelle gefunden")
+                print("💡 Tipp: Installieren Sie ein Modell mit 'ollama pull llama3.1:8b'")
+            elif not bot.ai.select_finance_model():
+                print("❌ Kein passendes Finanz-Modell gefunden")
+                print("💡 Tipp: Installieren Sie ein empfohlenes Modell")
+            else:
+                # Sync selected_model für Status-Anzeige
+                bot.selected_model = bot.ai.selected_model
 
         # MT5 Verbindung
         print("\n📋 SCHRITT 5: MetaTrader 5")
-        if bot.connect_mt5():
+        if bot.broker.connect_mt5():
+            # Sync mt5_connected für Status-Anzeige
+            bot.mt5_connected = bot.broker.mt5_connected
+
             # Test der MT5-Daten
-            test = bot.get_mt5_live_data("EURUSD")
-            if "nicht" not in test:
-                print("✅ MT5-Daten mit RSI + S/R verfügbar!")
+            test = bot.broker.get_mt5_live_data("EURUSD")
+            if "Fehler" not in test:
+                print("✅ MT5-Daten verfügbar!")
                 
                 # Risk Manager mit MT5 testen (falls verfügbar)
                 if hasattr(bot, 'risk_manager') and bot.risk_manager:
@@ -5361,9 +5493,8 @@ def main():
                             
                     except Exception as e:
                         print(f"⚠️ Risk Calculator Test Fehler: {e}")
-                        
             else:
-                print("⚠️ MT5 verbunden, aber Datentest fehlgeschlagen")
+                print(f"⚠️ MT5 verbunden, aber Datentest fehlgeschlagen: {test}")
         else:
             print("⚠️ MT5 nicht verbunden - Trading-Features eingeschränkt")
             print("💡 Risk Management funktioniert trotzdem für Demo-Zwecke")
@@ -5401,8 +5532,8 @@ def main():
         # Signal Handler registrieren
         signal.signal(signal.SIGINT, signal_handler)
 
-        # Hauptmenü starten
-        bot.interactive_menu()
+        # Hauptmenü starten (über CLIMenu)
+        bot.cli.interactive_menu()
 
     except KeyboardInterrupt:
         print("\n🛑 Beendet durch Ctrl+C")

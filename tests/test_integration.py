@@ -62,14 +62,13 @@ class TestFinGPTSystemIntegration(unittest.TestCase):
         # Mock für requests (Ollama)
         self.requests_patcher = patch('FinGPT.requests')
         self.mock_requests = self.requests_patcher.start()
-        self.mock_requests.get.return_value = Mock(
-            status_code=200,
-            json.return_value={"models": [{"name": "test-model"}]}
-        )
-        self.mock_requests.post.return_value = Mock(
-            status_code=200,
-            json.return_value={"response": "Test response"}
-        )
+        _mock_get = Mock(status_code=200)
+        _mock_get.json.return_value = {"models": [{"name": "test-model"}]}
+        self.mock_requests.get.return_value = _mock_get
+
+        _mock_post = Mock(status_code=200)
+        _mock_post.json.return_value = {"response": "Test response"}
+        self.mock_requests.post.return_value = _mock_post
     
     def tearDown(self):
         """Cleanup nach Tests"""

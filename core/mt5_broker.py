@@ -2,12 +2,76 @@ import logging
 import time
 import MetaTrader5 as mt5
 from datetime import datetime, timedelta
+from typing import Dict, Any, Optional
+from core.interfaces import IBroker
 
-class MT5Broker:
+# MT5 error code mapping
+MT5_ERROR_CODES = {
+    10004: "Requote",
+    10006: "Request rejected",
+    10007: "Request canceled by trader",
+    10008: "Order placed",
+    10009: "Request completed",
+    10010: "Only part of the request was completed",
+    10011: "Error in processing a request",
+    10012: "Request canceled by timeout",
+    10013: "Invalid request",
+    10014: "Invalid volume in the request",
+    10015: "Invalid price in the request",
+    10016: "Invalid stops in the request",
+    10017: "Trade is disabled",
+    10018: "Insufficient margin",
+    10019: "No money",
+    10020: "Price changed",
+    10021: "Off quotes",
+    10022: "Broker is busy",
+    10023: "Invalid price or volume in the request",
+    10024: "Invalid order",
+    10025: "Position is closed",
+    10026: "Invalid order expiration in the request",
+    10027: "Number of open and pending orders limit has been reached",
+    10028: "No history data",
+    10029: "No history data for calculation",
+    10030: "Maximal allowed price of the market order has been reached",
+    10031: "Maximal allowed price of the limit order has been reached",
+    10032: "Maximal allowed price of the stop order has been reached",
+    10033: "No money for bank operations",
+    10034: "Server error",
+    10035: "Module is busy",
+    10036: "Invalid order volume in the request",
+    10037: "Invalid order stop price in the request",
+    10038: "Invalid order stop price limit in the request",
+    10039: "Invalid order expiration time in the request",
+    10040: "Too many requests",
+    10041: "No changes in the request",
+    10042: "Autotrading disabled",
+    10043: "Invalid expert properties in the request",
+    10044: "Invalid signal properties in the request",
+}
+
+class MT5Broker(IBroker):
     def __init__(self, logger=None):
         self.logger = logger or logging.getLogger(__name__)
         self.mt5_connected = False
         self._reconnect_in_progress = False
+
+    def connect(self) -> bool:
+        """Stellt eine Verbindung zu MetaTrader 5 her"""
+        return self.connect_mt5()
+
+    def disconnect(self) -> None:
+        """Trennt die Verbindung zu MetaTrader 5"""
+        self.disconnect_mt5()
+
+    def is_connected(self) -> bool:
+        """Prüft, ob die MT5 Verbindung noch aktiv ist"""
+        return self.mt5_connected and self.is_mt5_alive()
+
+    def get_live_data(self, symbol: str) -> Dict[str, Any]:
+        """Holt die aktuellen Live-Daten aus MT5"""
+        data_str = self.get_mt5_live_data(symbol)
+        # Return as dict for interface consistency
+        return {"raw_data": data_str, "symbol": symbol, "timestamp": datetime.now()}
 
     def log(self, level, message, category="MT5"):
         # Helper to maintain consistent logging format
@@ -148,6 +212,35 @@ class MT5Broker:
         order_type = mt5.ORDER_TYPE_BUY if action == "BUY" else mt5.ORDER_TYPE_SELL
         price = tick.ask if action == "BUY" else tick.bid
 
+        # MARGIN VALIDATION - Adjust lot_size if insufficient margin
+        try:
+            account_info = mt5.account_info()
+            if account_info:
+                free_margin = account_info.margin_free
+                # Calculate required margin for the requested lot size
+                req_margin = mt5.order_calc_margin(order_type, symbol, float(lot_size), price)
+                if req_margin is not None and req_margin > free_margin * 0.8:
+                    # Not enough margin - calculate maximum feasible lot size
+                    lot_step = symbol_info.volume_step
+                    lot_min = symbol_info.volume_min
+                    lot_max = symbol_info.volume_max
+                    
+                    # Calculate max lot size that fits in margin (with 10% safety buffer)
+                    max_lot_by_margin = (free_margin * 0.9) / req_margin * float(lot_size)
+                    adjusted_lot = round(round(max_lot_by_margin / lot_step) * lot_step, 2)
+                    adjusted_lot = max(lot_min, min(adjusted_lot, lot_max))
+                    
+                    if adjusted_lot < float(lot_size):
+                        self.log("WARNING",
+                            f"Margin insufficient for {lot_size} lots (req: {req_margin:.2f}, free: {free_margin:.2f}). "
+                            f"Adjusting to {adjusted_lot} lots.",
+                            "MT5")
+                        lot_size = adjusted_lot
+                        if lot_size < lot_min:
+                            return f"Trade fehlgeschlagen: Nicht genug Margin für Minimal-Lot ({lot_min})"
+        except Exception as e:
+            self.log("WARNING", f"Margin validation error: {e}", "MT5")
+
         request = {
             "action": mt5.TRADE_ACTION_DEAL,
             "symbol": symbol,
@@ -166,11 +259,53 @@ class MT5Broker:
         if take_profit is not None:
              request["tp"] = float(take_profit)
 
-        # Pre-check
+        # Pre-check with logging
+        self.log("INFO", f"Pre-Check request: {request}", "MT5")
+        account_info = mt5.account_info()
+        if account_info:
+            self.log("INFO", f"Account balance: {account_info.balance}, Free margin: {account_info.margin_free}", "MT5")
+        else:
+            self.log("WARNING", "Could not get account info for logging", "MT5")
+        
+        # DEBUG: Log MT5 constants
+        self.log("DEBUG", f"TRADE_RETCODE_DONE value: {mt5.TRADE_RETCODE_DONE}", "MT5")
+        
         check_result = mt5.order_check(request)
+        
+        # DEBUG: Log full check_result details
+        if check_result is None:
+            self.log("DEBUG", "check_result is None - checking last_error()", "MT5")
+            last_err = mt5.last_error()
+            self.log("DEBUG", f"mt5.last_error(): {last_err}", "MT5")
+        else:
+            self.log("DEBUG", f"check_result type: {type(check_result)}", "MT5")
+            self.log("DEBUG", f"check_result.retcode: {check_result.retcode}", "MT5")
+            self.log("DEBUG", f"check_result.comment: {check_result.comment}", "MT5")
+            # Use getattr with defaults for safety
+            self.log("DEBUG", f"check_result.balance: {getattr(check_result, 'balance', 'N/A')}", "MT5")
+            self.log("DEBUG", f"check_result.equity: {getattr(check_result, 'equity', 'N/A')}", "MT5")
+            self.log("DEBUG", f"check_result.margin: {getattr(check_result, 'margin', 'N/A')}", "MT5")
+            self.log("DEBUG", f"check_result.margin_free: {getattr(check_result, 'margin_free', 'N/A')}", "MT5")
+            self.log("DEBUG", f"check_result.order: {getattr(check_result, 'order', 'N/A')}", "MT5")
+        
         if check_result is None or check_result.retcode != mt5.TRADE_RETCODE_DONE:
              err = check_result.retcode if check_result else mt5.last_error()
-             return f"Pre-Check fehlgeschlagen (Fehler {err})"
+             # Improved error handling: handle retcode=0 specifically
+             if err == 0:
+                 # retcode 0 often means success or no error - let's check the comment
+                 comment = check_result.comment if check_result else ""
+                 if comment and "done" in comment.lower():
+                     self.log("INFO", f"Pre-Check returned retcode=0 but comment suggests success: {comment}", "MT5")
+                     # Treat as success - continue to order_send
+                     pass
+                 else:
+                     error_description = f"Retcode 0 (possibly success) - Comment: {check_result.comment if check_result else 'N/A'}"
+                     self.log("ERROR", f"Pre-Check with retcode=0: {error_description}", "MT5")
+                     return f"Pre-Check fehlgeschlagen (Fehler {err}: {error_description})"
+             else:
+                 error_description = MT5_ERROR_CODES.get(err, f"Unknown error code {err}")
+                 self.log("ERROR", f"Pre-Check failed with error: {err} - {error_description}", "MT5")
+                 return f"Pre-Check fehlgeschlagen (Fehler {err}: {error_description})"
 
         # Send order
         result = mt5.order_send(request)

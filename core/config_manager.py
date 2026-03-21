@@ -6,9 +6,11 @@ Geschäftslogik für die Verwaltung von Konfigurationsparametern
 
 import json
 import datetime
+import os
 from typing import Optional, List
 from dataclasses import dataclass, asdict
 from pathlib import Path
+from dotenv import load_dotenv
 
 
 @dataclass
@@ -16,6 +18,7 @@ class FinGPTConfig:
     """Konfigurationsklasse für FinGPT Basis-Parameter"""
     # Grundlegende Einstellungen
     ollama_url: str = "http://localhost:11434"
+    ai_api_key: str = ""
     selected_model: Optional[str] = None
     trading_enabled: bool = False
     default_lot_size: float = 0.5
@@ -54,9 +57,15 @@ class FinGPTConfig:
     profit_target_2: float = 3.0
     
     def __post_init__(self):
-        """Post-Init für Default-Werte"""
+        """Post-Init für Default-Werte und Env-Variablen"""
         if self.auto_trade_symbols is None:
             self.auto_trade_symbols = ["EURUSD"]
+            
+        # Env-Variablen nur setzen, wenn noch Default-Werte vorhanden
+        if self.ollama_url == "http://localhost:11434":
+            self.ollama_url = os.getenv("OLLAMA_URL", self.ollama_url)
+        if not self.ai_api_key:
+            self.ai_api_key = os.getenv("AI_API_KEY", self.ai_api_key)
 
 
 @dataclass
@@ -95,6 +104,9 @@ class ConfigManager:
     - Backup und Wiederherstellung von Konfigurationen
     """
     
+    # Basis-Verzeichnis des Projekts (immer absolut, egal von wo gestartet)
+    _PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
     def __init__(self, config_dir: str = "config"):
         """
         Initialisiert den ConfigManager
@@ -102,8 +114,15 @@ class ConfigManager:
         Args:
             config_dir: Verzeichnis für Konfigurationsdateien
         """
-        self.config_dir = Path(config_dir)
-        self.config_dir.mkdir(exist_ok=True)
+        # Umgebungsvariablen laden
+        load_dotenv(self._PROJECT_ROOT / ".env")
+        
+        # Absoluten Pfad sicherstellen – relativ zum Projektordner, nicht zum CWD
+        config_path = Path(config_dir)
+        if not config_path.is_absolute():
+            config_path = self._PROJECT_ROOT / config_path
+        self.config_dir = config_path
+        self.config_dir.mkdir(parents=True, exist_ok=True)
         
         # Konfigurationsdateien
         self.fingpt_config_file = self.config_dir / "fingpt_config.json"
@@ -121,7 +140,7 @@ class ConfigManager:
     def load_configs(self) -> bool:
         """
         Lädt alle Konfigurationsdateien
-        
+
         Returns:
             bool: True wenn erfolgreich, False bei Fehlern
         """
@@ -130,16 +149,21 @@ class ConfigManager:
             if self.fingpt_config_file.exists():
                 with open(self.fingpt_config_file, 'r', encoding='utf-8') as f:
                     config_data = json.load(f)
-                    self.fingpt_config = FinGPTConfig(**config_data)
-            
+                    # Nur bekannte Felder laden (rückwärtskompatibel)
+                    known_fields = set(FinGPTConfig.__dataclass_fields__.keys())
+                    filtered = {k: v for k, v in config_data.items() if k in known_fields}
+                    self.fingpt_config = FinGPTConfig(**filtered)
+
             # FinGPT Extended-Konfiguration laden
             if self.fingpt_extended_config_file.exists():
                 with open(self.fingpt_extended_config_file, 'r', encoding='utf-8') as f:
                     config_data = json.load(f)
-                    self.fingpt_extended_config = FinGPTExtendedConfig(**config_data)
-            
+                    known_fields = set(FinGPTExtendedConfig.__dataclass_fields__.keys())
+                    filtered = {k: v for k, v in config_data.items() if k in known_fields}
+                    self.fingpt_extended_config = FinGPTExtendedConfig(**filtered)
+
             return True
-            
+
         except Exception as e:
             print(f"Fehler beim Laden der Konfiguration: {e}")
             return False
@@ -172,31 +196,39 @@ class ConfigManager:
     def create_backup(self) -> bool:
         """
         Erstellt ein Backup der aktuellen Konfiguration
-        
+        Maximale Anzahl von Backups: 10 (älteste werden gelöscht)
+
         Returns:
             bool: True wenn erfolgreich, False bei Fehlern
         """
+        MAX_BACKUPS = 10
         try:
             import datetime
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             backup_suffix = f"_{timestamp}"
-            
+
             # FinGPT Basis-Backup
             if self.fingpt_config_file.exists():
                 backup_file = self.backup_dir / f"fingpt_config{backup_suffix}.json"
                 with open(self.fingpt_config_file, 'r', encoding='utf-8') as src:
                     with open(backup_file, 'w', encoding='utf-8') as dst:
                         dst.write(src.read())
-            
+
             # FinGPT Extended-Backup
             if self.fingpt_extended_config_file.exists():
                 backup_file = self.backup_dir / f"fingpt_extended_config{backup_suffix}.json"
                 with open(self.fingpt_extended_config_file, 'r', encoding='utf-8') as src:
                     with open(backup_file, 'w', encoding='utf-8') as dst:
                         dst.write(src.read())
-            
+
+            # Backup-Rotation: älteste Backups löschen wenn Limit überschritten
+            all_backups = sorted(self.backup_dir.glob("fingpt_config_*.json"))
+            if len(all_backups) > MAX_BACKUPS:
+                for old_backup in all_backups[:len(all_backups) - MAX_BACKUPS]:
+                    old_backup.unlink(missing_ok=True)
+
             return True
-            
+
         except Exception as e:
             print(f"Fehler beim Erstellen des Backups: {e}")
             return False
@@ -299,11 +331,13 @@ class ConfigManager:
             response = requests.get("http://localhost:11434/api/tags", timeout=5)
             if response.status_code == 200:
                 models = response.json().get('models', [])
-                return [model['name'] for model in models]
+                all_models = [model['name'] for model in models]
+                # Filter out 'coder' models which are not optimal for trading/reasoning
+                return [m for m in all_models if "coder" not in m.lower() and "code" not in m.lower()]
         except:
             pass
         
-        return ["llama2", "mistral", "codellama", "neural-chat", "starling-lm"]
+        return ["llama2", "mistral", "neural-chat", "starling-lm"]
     
     def reset_to_defaults(self, config_type: str = "both") -> bool:
         """
@@ -368,19 +402,23 @@ class ConfigManager:
         try:
             with open(filepath, 'r', encoding='utf-8') as f:
                 import_data = json.load(f)
-            
+
             # Backup erstellen
             self.create_backup()
-            
-            # Konfigurationen importieren
+
+            # Konfigurationen sicher importieren (unbekannte Felder ignorieren)
             if "fingpt_config" in import_data:
-                self.fingpt_config = FinGPTConfig(**import_data["fingpt_config"])
-            
+                known = set(FinGPTConfig.__dataclass_fields__.keys())
+                filtered = {k: v for k, v in import_data["fingpt_config"].items() if k in known}
+                self.fingpt_config = FinGPTConfig(**filtered)
+
             if "fingpt_extended_config" in import_data:
-                self.fingpt_extended_config = FinGPTExtendedConfig(**import_data["fingpt_extended_config"])
-            
+                known = set(FinGPTExtendedConfig.__dataclass_fields__.keys())
+                filtered = {k: v for k, v in import_data["fingpt_extended_config"].items() if k in known}
+                self.fingpt_extended_config = FinGPTExtendedConfig(**filtered)
+
             return self.save_configs()
-            
+
         except Exception as e:
             print(f"Fehler beim Importieren: {e}")
             return False

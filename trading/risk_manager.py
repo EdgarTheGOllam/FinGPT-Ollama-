@@ -9,37 +9,44 @@ from datetime import datetime, timedelta
 import logging
 
 class RiskManager:
-    def __init__(self, logger=None):
+    def __init__(self, logger=None, max_daily_loss: float = -500.0,
+                 max_weekly_loss: float = -1500.0, max_drawdown: float = -2000.0,
+                 max_risk_per_trade: float = 2.0, max_total_positions: int = 3):
         """
         Initialisiert den Risk Manager
-        
+
         Args:
             logger: Logger-Instanz (optional)
+            max_daily_loss: Maximaler Tagesverlust (negativ, z.B. -500.0)
+            max_weekly_loss: Maximaler Wochenverlust (negativ)
+            max_drawdown: Maximaler Drawdown (negativ)
+            max_risk_per_trade: Risiko in % des Kontos pro Trade
+            max_total_positions: Max Gesamtpositionen
         """
-        self.logger = logger
-        
-        # Grundlegende Risk Limits
-        self.max_daily_loss = -500.0  # Euro - Maximaler Tagesverlust
-        self.max_weekly_loss = -1500.0  # Euro - Maximaler Wochenverlust
-        self.max_drawdown = -2000.0  # Euro - Maximaler Drawdown
-        self.max_risk_per_trade = 2.0  # Prozent des Kontos pro Trade
-        
+        self.logger = logger or logging.getLogger(__name__)
+
+        # Grundlegende Risk Limits (konfigurierbar)
+        self.max_daily_loss = max_daily_loss
+        self.max_weekly_loss = max_weekly_loss
+        self.max_drawdown = max_drawdown
+        self.max_risk_per_trade = max_risk_per_trade
+
         # Position Limits
         self.max_positions_per_symbol = 1  # Max Positionen pro Symbol
-        self.max_total_positions = 3  # Max Gesamtpositionen
+        self.max_total_positions = max_total_positions
         self.max_correlation_exposure = 0.7  # Max Korrelationsexposure
-        
+
         # Lot Size Limits
         self.min_lot_size = 0.01
         self.max_lot_size = 1.0
         self.default_lot_size = 0.1
-        
+
         # Time-based Limits
         self.trading_start_hour = 8  # Frühester Trading-Beginn
         self.trading_end_hour = 22   # Spätester Trading-Schluss
         self.max_trades_per_day = 10
         self.min_time_between_trades = 300  # Sekunden zwischen Trades
-        
+
         # Tracking Variablen
         self.daily_pnl = 0.0
         self.weekly_pnl = 0.0
@@ -47,18 +54,23 @@ class RiskManager:
         self.trades_today = 0
         self.last_trade_time = None
         self.daily_reset_time = None
-        
+
         # Korrelationen (wird später erweitert)
         self.symbol_correlations = {}
-        
+
         self.log("INFO", "RiskManager initialisiert", "RISK")
     
-    def log(self, level, message, category="RISK"):
-        """Logging-Funktion"""
-        if self.logger:
-            timestamp = datetime.now().strftime('%H:%M:%S')
-            formatted_message = f"[{category}] {message}"
-            print(f"{timestamp} 🛡️ {formatted_message}")
+    def log(self, level: str, message: str, category: str = "RISK"):
+        """Logging-Funktion — verwendet den echten Logger"""
+        formatted_message = f"[{category}] {message}"
+        if level == "INFO":
+            self.logger.info(formatted_message)
+        elif level == "WARNING":
+            self.logger.warning(formatted_message)
+        elif level == "ERROR":
+            self.logger.error(formatted_message)
+        elif level == "DEBUG":
+            self.logger.debug(formatted_message)
     
     def update_daily_stats(self):
         """Aktualisiert tägliche Statistiken"""
@@ -140,6 +152,8 @@ class RiskManager:
             # Lot-Größe berechnen
             if stop_loss_distance > 0 and pip_value > 0:
                 lot_size = risk_amount / (stop_loss_distance * pip_value)
+                # Apply safety margin to avoid margin issues
+                lot_size = lot_size * 0.95
             else:
                 lot_size = self.default_lot_size
             

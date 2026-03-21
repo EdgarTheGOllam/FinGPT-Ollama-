@@ -1,15 +1,23 @@
 import re
 import json
-import requests
+import httpx
 import logging
+import asyncio
 
 class AIAnalyzer:
-    def __init__(self, logger=None):
+    def __init__(self, logger=None, ollama_url=None):
         self.logger = logger or logging.getLogger(__name__)
-        self.ollama_url = "http://localhost:11434"
+        self.ollama_url = ollama_url or "http://localhost:11434"
         self.available_models = []
         self.selected_model = None
+        self._client = httpx.AsyncClient(base_url=self.ollama_url, timeout=30.0)
         
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self._client.aclose()
+
     def log(self, level, message, category="AI"):
         if self.logger:
             formatted_message = f"[{category}] {message}"
@@ -18,34 +26,40 @@ class AIAnalyzer:
             elif level == "ERROR": self.logger.error(formatted_message)
             elif level == "DEBUG": self.logger.debug(formatted_message)
             
-    def check_ollama_status(self):
-        """Überprüft die Verfügbarkeit des Ollama-Servers"""
+    async def check_ollama_status(self):
+        """Überprüft die Verfügbarkeit des Ollama-Servers (Async)"""
         try:
-            response = requests.get(f"{self.ollama_url}/api/version", timeout=2)
+            response = await self._client.get("/api/version")
             return response.status_code == 200
-        except:
+        except Exception:
             return False
 
-    def get_available_models(self):
-        """Holt die Liste der installierten Ollama-Modelle"""
+    async def get_available_models(self):
+        """Holt die Liste der installierten Ollama-Modelle (Async)"""
         try:
-            response = requests.get(f"{self.ollama_url}/api/tags", timeout=5)
+            response = await self._client.get("/api/tags")
             if response.status_code == 200:
                 models = response.json().get('models', [])
-                self.available_models = [m['name'] for m in models]
+                all_models = [m['name'] for m in models]
+                self.available_models = [m for m in all_models if "coder" not in m.lower() and "code" not in m.lower()]
                 return self.available_models
         except Exception as e:
             self.log("ERROR", f"Modell-Abruf fehlgeschlagen: {e}")
         return []
 
-    def select_finance_model(self):
-        """Wählt automatisch das beste finanzspezifische Modell (z.B. Llama3)"""
-        models = self.get_available_models()
+    async def select_finance_model(self):
+        """Wählt automatisch das beste Modell aus (Async)"""
+        models = await self.get_available_models()
         if not models:
-             print("❌ Keine Ollama Modelle gefunden. Bitte installieren (z.B. 'ollama run llama3')")
+             print("❌ Keine Ollama Modelle gefunden. Bitte installieren.")
              return False
              
-        # Prefer llama models if available
+        for m in models:
+             if 'gpt' in m.lower() or '120b' in m.lower():
+                 self.selected_model = m
+                 self.log("INFO", f"Modell automatisch ausgewählt: {m}")
+                 return True
+                 
         for m in models:
              if 'llama3' in m.lower():
                  self.selected_model = m
@@ -56,10 +70,10 @@ class AIAnalyzer:
         self.log("INFO", f"Standard-Modell ausgewählt: {self.selected_model}")
         return True
 
-    def chat_with_model(self, message, context=""):
-        """Sendet einen Prompt an Ollama und gibt die Antwort zurück"""
+    async def chat_with_model(self, message, context=""):
+        """Sendet einen Prompt an Ollama (Async)"""
         if not self.selected_model:
-            if not self.select_finance_model():
+            if not await self.select_finance_model():
                  return "Fehler: Kein KI-Modell verfügbar"
 
         system_prompt = (
@@ -80,20 +94,20 @@ class AIAnalyzer:
             "system": system_prompt,
             "stream": False,
             "options": {
-                "temperature": 0.2, # Low temperature for more analytical responses
+                "temperature": 0.2,
                 "top_p": 0.9,
             }
         }
 
         try:
-            response = requests.post(f"{self.ollama_url}/api/generate", json=data, timeout=30)
+            response = await self._client.post("/api/generate", json=data)
             if response.status_code == 200:
                 result = response.json()
                 return result.get("response", "Keine Antwort erhalten")
             else:
                 return f"Fehler vom KI-Server (Code: {response.status_code})"
-        except requests.exceptions.Timeout:
-            return "Fehler: Timeout bei der KI-Anfrage (Modell braucht zu lange)"
+        except httpx.TimeoutException:
+            return "Fehler: Timeout bei der KI-Anfrage"
         except Exception as e:
             return f"Fehler bei der KI-Anfrage: {str(e)}"
 

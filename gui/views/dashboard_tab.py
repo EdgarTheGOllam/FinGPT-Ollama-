@@ -2,6 +2,9 @@ import customtkinter as ctk
 import tkinter as tk
 from gui.components.metric_card import MetricCard
 from gui.components.live_data_row import LiveDataRow
+from gui.design_system import DesignSystem
+from gui.config.dashboard_config import get_dashboard_config, get_metric_config, get_symbols, get_update_interval
+
 
 class DashboardView:
     def __init__(self, master_tab, app):
@@ -11,131 +14,307 @@ class DashboardView:
         """
         self.tab = master_tab
         self.app = app
+        self._window_width = 1400  # Default, wird bei Größenänderung aktualisiert
         self.setup_ui()
         self.populate_sample_data()
+        
+        # Responsive Event-Bindung
+        self.tab.bind("<Configure>", self._on_tab_configure)
+        self.tab.bind("<<ResponsiveLayoutChanged>>", self._on_responsive_change)
+
+    def _on_tab_configure(self, event):
+        """Wird aufgerufen, wenn sich die Tab-Größe ändert."""
+        if hasattr(self.tab, 'winfo_width'):
+            new_width = self.tab.winfo_width()
+            if new_width > 100 and abs(new_width - self._window_width) > 50:
+                self._window_width = new_width
+                self.tab.event_generate("<<ResponsiveLayoutChanged>>", when='tail')
+
+    def _on_responsive_change(self, event):
+        """Reagiert auf Größenänderungen und passt das Layout an."""
+        self._adjust_layout()
+
+    def _adjust_layout(self):
+        """Passt das Layout basierend auf der Fenstergröße an."""
+        ds = DesignSystem
+        breakpoint = ds.get_current_breakpoint(self._window_width)
+        
+        # Passe Spacing basierend auf Breakpoint an
+        if breakpoint in ['xs', 'sm']:
+            # Sehr schmal: Reduziere Spacing
+            metric_spacing = ds.get_responsive_spacing('md', self._window_width)
+            container_spacing = ds.get_responsive_spacing('sm', self._window_width)
+        elif breakpoint == 'md':
+            metric_spacing = ds.get_spacing('md')
+            container_spacing = ds.get_spacing('sm')
+        else:
+            metric_spacing = ds.get_spacing('md')
+            container_spacing = ds.get_spacing('md')
+        
+        # Update Metric Card Spacing
+        if hasattr(self.app, 'balance_card'):
+            for card in [self.app.balance_card, self.app.positions_card, self.app.trades_card,
+                        self.app.pnl_card, self.app.winrate_card, self.app.risk_card]:
+                if card and card.winfo_exists():
+                    card.grid_configure(padx=metric_spacing//2, pady=metric_spacing//2)
+        
+        # Passe AI Visualizer Canvas-Größe an
+        if hasattr(self.app, 'sonar_canvas') and self.app.sonar_canvas.winfo_exists():
+            new_sonar_width = max(250, min(400, self._window_width // 4))
+            self.app.sonar_canvas.configure(width=new_sonar_width)
+            self.app.sonar_width = new_sonar_width
 
     def setup_ui(self):
-        self.tab.grid_columnconfigure((0, 1, 2), weight=1)
-        self.tab.grid_rowconfigure(3, weight=1)
+        ds = DesignSystem
         
-        # Top Cards
-        self.app.balance_card = self.create_metric_card(self.tab, "Kontostand", "€--", 0, 0)
-        self.app.positions_card = self.create_metric_card(self.tab, "Offene Positionen", "-", 0, 1)
-        self.app.trades_card = self.create_metric_card(self.tab, "Heutige Trades", "-", 0, 2)
+        # Lade Konfiguration
+        config = get_dashboard_config()
         
-        self.app.pnl_card = self.create_metric_card(self.tab, "Gewinn/Verlust", "€--", 1, 0)
-        self.app.winrate_card = self.create_metric_card(self.tab, "Margin Level", "-%", 1, 1)
-        self.app.risk_card = self.create_metric_card(self.tab, "Freie Margin", "€--", 1, 2)
+        # Responsive Grid-Konfiguration
+        # Für kleine Bildschirme: Weniger Spalten
+        num_columns = ds.calculate_grid_columns(self._window_width)
+        
+        # Grid-Spalten: metric cards (3 spalten), dann unten 2:1 aufteilung
+        for col in range(3):
+            self.tab.grid_columnconfigure(col, weight=1, uniform="metric_col")
+        
+        # Row-Konfiguration:
+        # Row 0-1: Metric Cards
+        # Row 2: AI Visualizer (flexible Höhe)
+        # Row 3: Content Area (weight=1 für flexible Höhe)
+        self.tab.grid_rowconfigure(2, weight=0)  # AI Visualizer
+        self.tab.grid_rowconfigure(3, weight=1)  # Content Area
+        
+        # Top Cards - Konsistente Padding-Werte aus Design-System
+        # Verwende minimum width um Abschneiden zu verhindern
+        min_card_width = ds.get_min_width_for_breakpoint('metric_card')
+        
+        # Lade Metriken aus Konfiguration
+        metric_configs = {m.key: m for m in config.metrics}
+        
+        # Erstelle Metric Cards mit Konfigurationswerten
+        balance_cfg = metric_configs.get('balance')
+        self.app.balance_card = self.create_metric_card(
+            self.tab, 
+            balance_cfg.title if balance_cfg else "Kontostand", 
+            balance_cfg.default_value if balance_cfg else "€--", 
+            0, 0, min_width=min_card_width, icon_type='balance'
+        )
+        
+        positions_cfg = metric_configs.get('positions')
+        self.app.positions_card = self.create_metric_card(
+            self.tab, 
+            positions_cfg.title if positions_cfg else "Offene Positionen", 
+            positions_cfg.default_value if positions_cfg else "-", 
+            0, 1, min_width=min_card_width, icon_type='positions'
+        )
+        
+        trades_cfg = metric_configs.get('trades')
+        self.app.trades_card = self.create_metric_card(
+            self.tab, 
+            trades_cfg.title if trades_cfg else "Heutige Trades", 
+            trades_cfg.default_value if trades_cfg else "-", 
+            0, 2, min_width=min_card_width, icon_type='trades'
+        )
+        
+        pnl_cfg = metric_configs.get('pnl')
+        self.app.pnl_card = self.create_metric_card(
+            self.tab, 
+            pnl_cfg.title if pnl_cfg else "Gewinn/Verlust", 
+            pnl_cfg.default_value if pnl_cfg else "€--", 
+            1, 0, min_width=min_card_width, icon_type='pnl'
+        )
+        
+        winrate_cfg = metric_configs.get('winrate')
+        self.app.winrate_card = self.create_metric_card(
+            self.tab, 
+            winrate_cfg.title if winrate_cfg else "Win Rate", 
+            winrate_cfg.default_value if winrate_cfg else "-%", 
+            1, 1, min_width=min_card_width, icon_type='winrate'
+        )
+        
+        risk_cfg = metric_configs.get('risk')
+        self.app.risk_card = self.create_metric_card(
+            self.tab, 
+            risk_cfg.title if risk_cfg else "Freie Margin", 
+            risk_cfg.default_value if risk_cfg else "€--", 
+            1, 2, min_width=min_card_width, icon_type='risk'
+        )
 
         # AI Agent Visualizer & Lückenfüller-Widgets (Middle Banner)
-        # We increase height significantly for a more premium, large "Pinterest" feel.
-        self.app.ai_visualizer_frame = ctk.CTkFrame(self.tab, height=140, corner_radius=15, fg_color=("gray85", "gray17"))
-        self.app.ai_visualizer_frame.grid(row=2, column=0, columnspan=3, sticky="ew", padx=10, pady=(10, 0))
-        self.app.ai_visualizer_frame.grid_propagate(False) # Keep fixed height
-        self.app.ai_visualizer_frame.grid_columnconfigure(0, weight=1) # Goal
-        self.app.ai_visualizer_frame.grid_columnconfigure(1, weight=2) # Center Sonar gets more space
-        self.app.ai_visualizer_frame.grid_columnconfigure(2, weight=1) # Best Trade
+        # Responsive Höhe: Auf kleinen Bildschirmen reduzieren
+        ai_height = 120 if self._window_width < ds.BREAKPOINTS['md'] else 150
+        self.app.ai_visualizer_frame = ctk.CTkFrame(self.tab, 
+                                                    height=ai_height, 
+                                                    corner_radius=ds.get_radius('lg'), 
+                                                    fg_color="transparent",
+                                                    border_width=1, border_color="#2A2D34")
+        self.app.ai_visualizer_frame.grid(row=2, column=0, columnspan=3, 
+                                          sticky="ew", 
+                                          padx=ds.get_spacing('lg'), 
+                                          pady=(ds.get_spacing('lg'), ds.get_spacing('sm')))
+        self.app.ai_visualizer_frame.grid_propagate(False)
+        self.app.ai_visualizer_frame.grid_columnconfigure(0, weight=1)
+        self.app.ai_visualizer_frame.grid_columnconfigure(1, weight=2)
+        self.app.ai_visualizer_frame.grid_columnconfigure(2, weight=1)
         
-        # 1. Daily Goal Widget (Left now)
+        # Responsive padding für AI Visualizer
+        ai_padding = ds.get_responsive_spacing('lg', self._window_width)
+        
+        # 1. Daily Goal Widget (Left)
         goal_container = ctk.CTkFrame(self.app.ai_visualizer_frame, fg_color="transparent")
-        goal_container.grid(row=0, column=0, sticky="nsew", padx=20, pady=20)
+        goal_container.grid(row=0, column=0, sticky="nsew", padx=ai_padding, pady=ai_padding)
         
-        ctk.CTkLabel(goal_container, text="🎯 Tages-Ziel (100€)", font=ctk.CTkFont(size=13, weight="bold"), text_color="gray60").pack(anchor="w")
-        self.app.goal_progress = ctk.CTkProgressBar(goal_container, height=12, progress_color="#F1C40F")
-        self.app.goal_progress.pack(fill="x", pady=(15, 5))
+        ctk.CTkLabel(goal_container, text="🎯 Tages-Ziel (100€)", 
+                     font=ds.get_font('sm', 'medium'), 
+                     text_color=ds.get_semantic_color('neutral')).pack(anchor="w")
+        self.app.goal_progress = ctk.CTkProgressBar(goal_container, height=12, progress_color=ds.get_color('warning'))
+        self.app.goal_progress.pack(fill="x", pady=(ds.get_spacing('md'), ds.get_spacing('sm')))
         self.app.goal_progress.set(0.0)
-        self.app.goal_lbl = ctk.CTkLabel(goal_container, text="0.00€ / 100€", font=ctk.CTkFont(size=12), text_color="gray50")
+        self.app.goal_lbl = ctk.CTkLabel(goal_container, text="0.00€ / 100€", 
+                                         font=ds.get_font('sm', 'normal', mono=True), 
+                                         text_color=ds.get_color('neutral', 'medium'))
         self.app.goal_lbl.pack(anchor="e")
         
         # 2. AI Sonar Canvas (Center - Large & Premium)
         sonar_container = ctk.CTkFrame(self.app.ai_visualizer_frame, fg_color="transparent")
-        sonar_container.grid(row=0, column=1, sticky="nsew", padx=10, pady=5)
-        # Center the canvas within this column
+        sonar_container.grid(row=0, column=1, sticky="nsew", padx=ds.get_spacing('md'), pady=ds.get_spacing('sm'))
         sonar_container.grid_columnconfigure(0, weight=1)
         sonar_container.grid_rowconfigure(0, weight=1)
         
-        # Much larger canvas for a "Pinterest" style floating orb array
-        # bg matches gray17 #2b2b2b
-        self.app.sonar_width = 300
-        self.app.sonar_height = 120
-        self.app.sonar_canvas = tk.Canvas(sonar_container, bg="#2b2b2b", width=self.app.sonar_width, height=self.app.sonar_height, highlightthickness=0)
-        self.app.sonar_canvas.grid(row=0, column=0, pady=(5, 0)) # Centered
+        # Responsive Canvas-Größe
+        sonar_width = max(180, min(300, self._window_width // 4))
+        sonar_height = 100 if self._window_width < ds.BREAKPOINTS['md'] else 120
+        self.app.sonar_width = sonar_width
+        self.app.sonar_height = sonar_height
+        self.app.sonar_canvas = tk.Canvas(sonar_container, bg=ds.get_color('neutral', 'darker'),
+                                          width=sonar_width, height=sonar_height, highlightthickness=0)
+        self.app.sonar_canvas.grid(row=0, column=0, pady=(ds.get_spacing('sm'), 0))
         
-        self.app.ai_status_lbl = ctk.CTkLabel(sonar_container, text="Zzz... Warte auf Live-Stream", font=ctk.CTkFont(size=13, slant="italic"), text_color="gray50")
-        self.app.ai_status_lbl.grid(row=1, column=0, pady=(5, 5))
+        self.app.ai_status_lbl = ctk.CTkLabel(sonar_container, text="Zzz... Warte auf Live-Stream", 
+                                              font=ds.get_font('sm', 'normal', mono=False), 
+                                              text_color=ds.get_color('neutral', 'medium'))
+        self.app.ai_status_lbl.grid(row=1, column=0, pady=(ds.get_spacing('sm'), ds.get_spacing('sm')))
         
         # Set up dynamic orb lists
         self.app.sonar_circles = []
         cx, cy = self.app.sonar_width / 2, self.app.sonar_height / 2
-        # Center core dot
-        self.app._sonar_base_dot = self.app.sonar_canvas.create_oval(cx-8, cy-8, cx+8, cy+8, fill="gray40", outline="")
+        self.app._sonar_base_dot = self.app.sonar_canvas.create_oval(cx-8, cy-8, cx+8, cy+8, fill=ds.get_color('neutral', 'medium'), outline="")
         
         # 3. MVP Trade Widget (Right)
         mvp_container = ctk.CTkFrame(self.app.ai_visualizer_frame, fg_color="transparent")
-        mvp_container.grid(row=0, column=2, sticky="nsew", padx=20, pady=20)
+        mvp_container.grid(row=0, column=2, sticky="nsew", padx=ai_padding, pady=ai_padding)
         
-        ctk.CTkLabel(mvp_container, text="🏆 Bester Trade Heute", font=ctk.CTkFont(size=13, weight="bold"), text_color="gray60").pack(anchor="e")
-        self.app.mvp_trade_lbl = ctk.CTkLabel(mvp_container, text="Noch keine Trades", font=ctk.CTkFont(size=18, weight="bold"), text_color="#5EBA7D")
-        self.app.mvp_trade_lbl.pack(anchor="e", pady=10)
+        ctk.CTkLabel(mvp_container, text="🏆 Bester Trade Heute", 
+                     font=ds.get_font('sm', 'medium'), 
+                     text_color=ds.get_semantic_color('neutral')).pack(anchor="e")
+        self.app.mvp_trade_lbl = ctk.CTkLabel(mvp_container, text="Noch keine Trades", 
+                                               font=ds.get_font('xl', 'bold', mono=True), 
+                                               text_color=ds.get_semantic_color('profit'))
+        self.app.mvp_trade_lbl.pack(anchor="e", pady=ds.get_spacing('md'))
         
         # State variables for animation
         self.app.ai_animation_idx = 0
         self.app.ai_current_symbol = None
-        self.app._sonar_radii = [5, 15, 25] # Starting radii for expanding rings
+        self.app._sonar_radii = [5, 15, 25]
 
+        # Live Data List & P&L Chart - Responsive Aufteilung
+        # Berechne Spaltenaufteilung basierend auf Fensterbreite
+        if self._window_width < ds.BREAKPOINTS['sm']:
+            # Sehr schmal: untereinander
+            live_data_colspan = 3
+            chart_column = 0
+            chart_colspan = 3
+            chart_row = 4
+        elif self._window_width < ds.BREAKPOINTS['md']:
+            # Schmal: Live Data bekommt mehr Platz (2/3)
+            live_data_colspan = 2
+            chart_column = 2
+            chart_colspan = 1
+            chart_row = 3
+        else:
+            # Normal: 2:1 Aufteilung
+            live_data_colspan = 2
+            chart_column = 2
+            chart_colspan = 1
+            chart_row = 3
+        
+        # Responsive Spacing
+        content_spacing = ds.get_responsive_spacing('sm', self._window_width)
+        
         # Live Data List (Left Side)
-        data_frame = ctk.CTkFrame(self.tab, corner_radius=15, fg_color=("gray90", "gray13"))
-        data_frame.grid(row=3, column=0, columnspan=2, sticky="nsew", padx=(10, 5), pady=10)
+        data_frame = ctk.CTkFrame(self.tab, corner_radius=ds.get_radius('lg'), fg_color="transparent", border_width=1, border_color="#2A2D34")
+        data_frame.grid(row=chart_row, column=0, columnspan=live_data_colspan, 
+                       sticky="nsew", padx=content_spacing, pady=content_spacing)
         data_frame.grid_rowconfigure(1, weight=1)
         data_frame.grid_columnconfigure(0, weight=1)
 
-        header_lbl = ctk.CTkLabel(data_frame, text="Live Markt-Übersicht", font=ctk.CTkFont(size=16, weight="bold"))
-        header_lbl.grid(row=0, column=0, sticky="w", padx=20, pady=15)
+        header_lbl = ctk.CTkLabel(data_frame, text="Live Markt-Übersicht", 
+                                  font=ds.get_font('lg', 'bold'), 
+                                  text_color=ds.get_semantic_color('neutral'))
+        header_lbl.grid(row=0, column=0, sticky="w", padx=ds.get_spacing('lg'), pady=ds.get_spacing('lg'))
         
         self.app.scroll_list = ctk.CTkScrollableFrame(data_frame, fg_color="transparent")
-        self.app.scroll_list.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 10))
+        self.app.scroll_list.grid(row=1, column=0, sticky="nsew", padx=ds.get_spacing('md'), pady=(0, ds.get_spacing('md')))
 
-        # Table Header
+        # Table Header - Lade Spalten aus Konfiguration
         header_row = ctk.CTkFrame(self.app.scroll_list, fg_color="transparent", height=30)
-        header_row.pack(fill="x", pady=(0, 5))
+        header_row.pack(fill="x", pady=(0, ds.get_spacing('sm')))
         header_row.grid_columnconfigure((0,1,2,3,4), weight=1, uniform="col")
         
-        for i, col_name in enumerate(["Symbol", "Preis", "Änderung", "Trend (M15|H1|H4)", "Signal"]):
-            lbl = ctk.CTkLabel(header_row, text=col_name, font=ctk.CTkFont(weight="bold", size=12), text_color="gray50")
-            lbl.grid(row=0, column=i, sticky="w", padx=10)
-
-        ctk.CTkFrame(self.app.scroll_list, height=1, fg_color=("gray70", "gray30")).pack(fill="x", pady=(0, 5))
-
-        # Live P&L Chart (Right Side)
-        self.app.chart_frame = ctk.CTkFrame(self.tab, corner_radius=15, fg_color=("gray90", "gray13"))
-        self.app.chart_frame.grid(row=3, column=2, sticky="nsew", padx=(5, 10), pady=10)
-        self.app.chart_frame.grid_rowconfigure(1, weight=1)
-        self.app.chart_frame.grid_columnconfigure(0, weight=1)
+        # Verwende konfigurierte Spaltennamen
+        live_data_cols = config.live_data_columns
+        col_names = [col.get('title', col.get('key', '')) for col in live_data_cols]
         
-        chart_hdr = ctk.CTkLabel(self.app.chart_frame, text="Live P&L Laufzeit", font=ctk.CTkFont(size=16, weight="bold"))
-        chart_hdr.grid(row=0, column=0, sticky="w", padx=20, pady=15)
-        
-        # We use a native Tkinter canvas for high-performance smooth drawing
-        self.app.pnl_canvas = tk.Canvas(self.app.chart_frame, bg="#212121", highlightthickness=0)
-        self.app.pnl_canvas.grid(row=1, column=0, sticky="nsew", padx=15, pady=(0, 15))
+        for i, col_name in enumerate(col_names):
+            lbl = ctk.CTkLabel(header_row, text=col_name, 
+                               font=ds.get_font('xs', 'medium'), 
+                               text_color=ds.get_color('neutral', 'medium'))
+            lbl.grid(row=0, column=i, sticky="w", padx=ds.get_spacing('md'))
+
+        ctk.CTkFrame(self.app.scroll_list, height=1, fg_color=ds.get_color('neutral', 'medium')).pack(fill="x", pady=(0, ds.get_spacing('sm')))
+
+        # Live P&L Chart (Right Side) - nur wenn genug Platz
+        if chart_colspan > 0:
+            self.app.chart_frame = ctk.CTkFrame(self.tab, corner_radius=ds.get_radius('lg'), fg_color="transparent", border_width=1, border_color="#2A2D34")
+            self.app.chart_frame.grid(row=chart_row, column=chart_column, columnspan=chart_colspan, 
+                                      sticky="nsew", padx=(ds.get_spacing('md'), content_spacing), 
+                                      pady=content_spacing)
+            self.app.chart_frame.grid_rowconfigure(1, weight=1)
+            self.app.chart_frame.grid_columnconfigure(0, weight=1)
+            
+            chart_hdr = ctk.CTkLabel(self.app.chart_frame, text="Live P&L Laufzeit", 
+                                     font=ds.get_font('lg', 'bold'), 
+                                     text_color=ds.get_semantic_color('neutral'))
+            chart_hdr.grid(row=0, column=0, sticky="w", padx=ds.get_spacing('lg'), pady=ds.get_spacing('lg'))
+            
+            self.app.pnl_canvas = tk.Canvas(self.app.chart_frame, 
+                                            bg=ds.get_color('neutral', 'darker'),
+                                            highlightthickness=0)
+            self.app.pnl_canvas.grid(row=1, column=0, sticky="nsew", padx=ds.get_spacing('md'), pady=(0, ds.get_spacing('md')))
 
 
-    def create_metric_card(self, parent, title, value, row, col):
-        card = MetricCard(parent, title=title, value=value)
-        card.grid(row=row, column=col, padx=10, pady=10, sticky="nsew")
+    def create_metric_card(self, parent, title, value, row, col, min_width=None, **kwargs):
+        card = MetricCard(parent, title=title, value=value, min_width=min_width, **kwargs)
+        card.grid(row=row, column=col, padx=DesignSystem.get_spacing('md'), pady=DesignSystem.get_spacing('md'), sticky="nsew")
         return card
 
     def populate_sample_data(self):
         """Initialise dashboard rows. Called once on startup; load_settings will override."""
+        # Lade Symbole aus Konfiguration
+        config_symbols = get_symbols()
+        symbols_str = ", ".join(config_symbols)
+        
         self.app.live_data_rows = []
-        self._rebuild_symbol_rows("EURUSD, GBPUSD, USDJPY, USDCHF, AUDUSD, USDCAD")
+        self._rebuild_symbol_rows(symbols_str)
 
     def _rebuild_symbol_rows(self, raw_pairs: str):
         """Parse comma-separated pairs string, rebuild app.dashboard_symbols and
         the live-data rows in the dashboard.  Safe to call at any time."""
         split_pairs = [p.strip().upper() for p in raw_pairs.split(',') if p.strip()]
         if not split_pairs:
-            return
+            # Fallback to display dummy symbols if empty
+            split_pairs = ["EURUSD", "USDJPY", "GBPUSD", "AUDUSD"]
 
         self.app.dashboard_symbols = [
             (f"{p[:3]}/{p[3:]}" if len(p) == 6 else p, p)
@@ -156,6 +335,7 @@ class DashboardView:
         for display_name, symbol in self.app.dashboard_symbols:
             row = LiveDataRow(self.app.scroll_list, display_name, "---", "0.00%", "HOLD")
             row.pack(fill="x", pady=2)
+            row.update_data("---", "0.00%", history=[1.0, 1.05, 1.02, 1.08, 1.07]) # Dummy chart until live data arrives
             self.app.live_data_rows.append((symbol, row))
 
         if hasattr(self.app, 'update_dashboard_data'):

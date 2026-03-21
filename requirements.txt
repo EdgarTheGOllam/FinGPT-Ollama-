@@ -1,45 +1,93 @@
-# FinGPT Configuration GUI Requirements
-# Plattformunabhängige Abhängigkeiten für das Konfigurations-Interface
+# FinGPT Requirements
+# Generiert aus vollständigem Import-Scan aller Projektdateien
+# Stand: März 2026
+# Mindestanforderung: Python 3.9+
 
-# GUI-Framework (standardmäßig in Python enthalten)
-# tkinter - Standard GUI-Bibliothek (keine Installation nötig)
+# ==============================================================================
+# KERN-ABHÄNGIGKEITEN (Pflicht)
+# ==============================================================================
 
-# HTTP-Anfragen für Ollama-Verbindung
+# HTTP-Anfragen (Ollama, OpenAI, APIs)
 requests>=2.31.0
 
-# GUI-Erweiterung
+# Modernes GUI-Framework
 customtkinter>=5.2.2
 
-# Datenverarbeitung (standardmäßig in Python enthalten)
-# json - JSON-Verarbeitung (keine Installation nötig)
-# pathlib - Pfadverarbeitung (keine Installation nötig)
-# dataclasses - Datenklassen (keine Installation nötig, Python 3.7+)
-# typing - Typ-Hinweise (keine Installation nötig)
+# Datenverarbeitung
+numpy>=1.24.0
+pandas>=2.0.0
 
-# Threading und Parallelverarbeitung (standardmäßig enthalten)
-# threading - Threading (keine Installation nötig)
-# queue - Warteschlangen (keine Installation nötig)
+# Visualisierung
+matplotlib>=3.7.0
+mplfinance>=0.12.9
 
-# Datum und Zeit (standardmäßig enthalten)
-# datetime - Datum/Zeit (keine Installation nötig)
+# Systeminformationen (CPU, RAM, Prozesse)
+psutil>=5.9.0
 
-# Optional: Erweiterte GUI-Verbesserungen
-# matplotlib>=3.7.0  # Für Diagramme und Visualisierungen
-# pillow>=10.0.0     # Für Bildverarbeitung und Icons
+# Bildverarbeitung (Icons, Assets)
+Pillow>=10.0.0
 
-# Optional: Erweiterte Validierung
-# pydantic>=2.0.0    # Für erweiterte Datenvalidierung
-# jsonschema>=4.17.0 # Für JSON-Schema-Validierung
+# Graphen und Netzwerkanalyse (Debate-Tab)
+networkx>=3.1
 
-# Optional: Logging und Konfiguration
-# pyyaml>=6.0        # Für YAML-Konfigurationsdateien
-# configparser       # Für INI-Dateien (standardmäßig enthalten)
+# Umgebungsvariablen (.env Datei-Support)
+python-dotenv>=1.0.0
 
-# Optional: Testing
-# pytest>=7.4.0      # Für Unit-Tests
-# pytest-cov>=4.1.0  # Für Test-Coverage
+# HTTP-Client (async, wird in trading_controller verwendet)
+httpx>=0.26.0
 
-# Entwicklungswerkzeuge (optional)
-# black>=23.0.0      # Code-Formatierung
-# flake8>=6.0.0      # Code-Linting
-# mypy>=1.5.0        # Statische Typ-Prüfung
+# Technische Indikatoren (pandas-basiert, Fallback auf NumPy möglich)
+pandas_ta>=0.3.14b0
+
+# ==============================================================================
+# MACHINE LEARNING / REINFORCEMENT LEARNING
+# ==============================================================================
+
+# PyTorch (RL-Training, GPU-Unterstützung)
+# Für CUDA-Support: pip install torch --index-url https://download.pytorch.org/whl/cu121
+torch>=2.1.0
+
+# ==============================================================================
+# OPTIONAL: MetaTrader5 Bridge (nur Windows + MT5 installiert)
+# ==============================================================================
+
+# MetaTrader5 Python API
+# Nur installieren wenn MT5 auf dem System vorhanden ist
+# MetaTrader5>=5.0.45
+
+# ==============================================================================
+# OPTIONAL: Web-Bridge / API-Server
+# ==============================================================================
+
+# Flask Web-Framework (für externe Bridge/API)
+# flask>=3.0.0
+# flask-socketio>=5.3.0
+
+# ==============================================================================
+# STDLIB (keine Installation nötig, zur Dokumentation)
+# ==============================================================================
+# tkinter       - GUI-Basis
+# json          - JSON-Verarbeitung
+# pathlib       - Pfadverwaltung
+# threading     - Multi-Threading
+# queue         - Thread-Queues
+# datetime      - Datum/Zeit
+# logging       - Protokollierung
+# sqlite3       - Lokale Datenbank
+# subprocess    - Prozesse starten
+# os, sys       - Betriebssystem
+# re            - Reguläre Ausdrücke
+# collections   - Datenstrukturen
+# dataclasses   - Datenklassen (Python 3.7+)
+# typing        - Typ-Hints
+# hashlib, hmac - Kryptographie
+# pickle        - Serialisierung
+# random        - Zufallszahlen
+# signal        - Signalverarbeitung
+# urllib        - URL-Verarbeitung
+# calendar      - Kalender
+# glob          - Dateimuster
+# atexit        - Exit-Handler
+# functools     - Funktionswerkzeuge
+# warnings      - Warnungen
+# traceback     - Fehler-Ausgabe

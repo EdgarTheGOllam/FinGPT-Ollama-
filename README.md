@@ -38,13 +38,43 @@ FinGPT ist ein professionelles, modulares Trading-Framework, das die Präzision 
 
 ```text
 FinGPT-Ollama-/
-├── core/           # Herzstück: Broker-Anbindung, AI-Logik & Datenverarbeitung
-├── trading/        # Strategien: RL-Agents, Risiko-Management & Indikatoren
-├── gui/            # Frontend: Modernes Dashboard & CLI-Komponenten
-├── bridge/         # Technische Schnittstellen (MQL5-Python Bridge)
-├── config/         # Konfiguration: Backups, API-Keys & Trade-Parameter
-└── storage/        # Datenbanken: Trade-History, Logs & RL-Modelle
+├── FinGPT.py           # CLI-Einstiegspunkt (Terminal-Modus)
+├── launch_gui.py       # GUI-Einstiegspunkt (grafisches Dashboard)
+├── requirements.txt    # Python-Abhängigkeiten
+│
+├── bridge/             # MQL5-Python Bridge & MT5-Schnittstellen
+├── config/             # Konfigurationsdateien & Backups
+├── core/               # Herzstück: Broker, KI-Analyse, Controller
+├── docs/               # Vollständige Dokumentation (DE & EN)
+├── faq_docs/           # Interaktive FAQ-Website (Retype)
+├── gui/                # Frontend: Dashboard, Tabs & CLI-Menü
+│   ├── components/     # Wiederverwendbare UI-Komponenten
+│   └── views/          # Tab-Ansichten (Config, Charts, RL, etc.)
+├── logs/               # Laufzeit-Logs (automatisch generiert)
+├── rl_models/          # Gespeicherte RL-Modell-Gewichte (.h5)
+├── scripts/            # Windows-Start-Skripte (.bat)
+├── storage/            # Datenbanken, Trade-Journal & RL-Experience
+├── tests/              # Automatisierte Testsuites (pytest)
+└── trading/            # Handelsstrategien: RL-Agent, Risiko, Indikatoren
 ```
+
+---
+
+## 📚 Dokumentation
+
+Alle Handbücher und Referenzdokumente befinden sich im [`docs/`](docs/) Ordner:
+
+| Dokument | Beschreibung |
+|---|---|
+| [README_ENHANCED.md](docs/README_ENHANCED.md) | Erweitertes Feature-Handbuch |
+| [README_GUI.md](docs/README_GUI.md) | GUI-Benutzerhandbuch |
+| [README_MODERN_GUI.md](docs/README_MODERN_GUI.md) | Modernes Dashboard – Übersicht |
+| [AI_FULLDRIVE_MODE.md](docs/AI_FULLDRIVE_MODE.md) | Technische Doku des AI-Fulldrive-Modus |
+| [DOCUMENTATION_DE.md](docs/DOCUMENTATION_DE.md) | Vollständige Dokumentation (Deutsch) |
+| [DOCUMENTATION_EN.md](docs/DOCUMENTATION_EN.md) | Full Documentation (English) |
+| [CONTRIBUTING.md](docs/CONTRIBUTING.md) | Beitrag zum Projekt |
+| [DISCLAIMER](docs/DISCLAIMER) | Rechtliche Hinweise & Risikohinweis |
+| [REVIEWS.md](docs/REVIEWS.md) | Feedback & Reviews |
 
 ---
 
@@ -63,14 +93,25 @@ pip install -r requirements.txt
 ### 2. KI-Schnittstellen konfigurieren
 FinGPT unterstützt zwei Arten der KI-Anbindung:
 
-- **Lokal (Ollama):** 
+- **Lokal (Ollama):**  
   `ollama pull llama3`
-- **Cloud (API):** 
-  Trage deinen **OpenAI API Key** oder andere Provider in der `config/fingpt_config.json` ein, um High-End-Modelle wie GPT-4o für tiefergehende Marktanalysen zu nutzen.
+- **Cloud (API):**  
+  Trage deinen **OpenAI API Key** in `config/fingpt_config.json` ein.
 
 ### 3. System starten
+
+**GUI-Modus (empfohlen):**
 ```bash
 python launch_gui.py
+# Alternativ unter Windows:
+scripts\run_gui.bat
+```
+
+**Terminal / CLI-Modus:**
+```bash
+python FinGPT.py
+# Alternativ unter Windows:
+scripts\run_cli.bat
 ```
 
 ---
@@ -82,6 +123,8 @@ Das System ist "API-Ready" entwickelt. Dank der modularen `AIAnalyzer`-Klasse k�
 
 ## ⚠️ Disclaimer
 *FinGPT ist ein experimentelles System. Automatisierter Handel birgt hohe finanzielle Risiken. Der Autor übernimmt keine Haftung für Verluste. Teste das System IMMER zuerst auf einem Demo-Konto.*
+
+Vollständiger Risikohinweis: [docs/DISCLAIMER](docs/DISCLAIMER)
 
 ---
 Managed by **EdgarTheGOllam** | Optimized for Privacy & Performance.

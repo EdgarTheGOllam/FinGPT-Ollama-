@@ -1,10 +1,21 @@
 import logging
 import numpy as np
+import pandas as pd
+try:
+    import pandas_ta as ta
+    PANDAS_TA_AVAILABLE = True
+except ImportError:
+    PANDAS_TA_AVAILABLE = False
+    print("⚠️ [WARNING] pandas_ta nicht gefunden. Verwende Standard-Numpy Fallback.")
+
+from typing import Optional, Dict, Any
+from core.performance_optimizer import CacheManager
 
 class MarketAnalyzer:
-    def __init__(self, broker=None, logger=None):
+    def __init__(self, broker=None, logger=None, cache_ttl: float = 60.0):
         self.broker = broker  # Needs MT5Broker instance
         self.logger = logger or logging.getLogger(__name__)
+        self.cache = CacheManager(max_size=200, ttl=cache_ttl)
 
         # Settings mapped from FinGPT.py
         self.rsi_period = 14
@@ -27,33 +38,53 @@ class MarketAnalyzer:
              elif level == "DEBUG": self.logger.debug(formatted_message)
 
     def calculate_rsi(self, symbol, timeframe, period=None):
-        """Berechnet RSI für ein Symbol"""
+        """Berechnet RSI für ein Symbol mit Caching und pandas-ta (Fallback auf numpy)"""
         if not self.broker or not self.broker.mt5_connected:
             return None
         
+        period = period or self.rsi_period
+        cache_key = f"rsi_{symbol}_{timeframe}_{period}"
+        cached_result = self.cache.get(cache_key)
+        if cached_result is not None:
+            return cached_result
+        
         try:
             import MetaTrader5 as mt5
-            if period is None:
-                period = self.rsi_period
-            
-            rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, period + 10)
+            rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, period + 50)
             if rates is None or len(rates) < period + 1:
                 return None
             
-            closes = np.array([rate['close'] for rate in rates])
+            if PANDAS_TA_AVAILABLE:
+                df = pd.DataFrame(rates)
+                rsi_series = ta.rsi(df['close'], length=period)
+                if rsi_series is not None and not rsi_series.empty:
+                    rsi_value = round(float(rsi_series.iloc[-1]), 2)
+                    self.cache.set(cache_key, rsi_value)
+                    return rsi_value
+            
+            # Fallback (Numpy) — Wilder's Smoothing (korrekte Methode)
+            closes = np.array([r['close'] for r in rates], dtype=float)
             deltas = np.diff(closes)
-            gains = np.where(deltas > 0, deltas, 0)
-            losses = np.where(deltas < 0, -deltas, 0)
-            
-            avg_gain = np.mean(gains[-period:])
-            avg_loss = np.mean(losses[-period:])
-            
+            gains = np.where(deltas > 0, deltas, 0.0)
+            losses = np.where(deltas < 0, -deltas, 0.0)
+
+            # Initialisierung: einfacher Mittelwert der ersten `period` Werte
+            avg_gain = float(np.mean(gains[:period]))
+            avg_loss = float(np.mean(losses[:period]))
+
+            # Wilder's Smoothing für den Rest der Daten
+            for i in range(period, len(gains)):
+                avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+                avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+
             if avg_loss == 0:
-                return 100
-                
-            rs = avg_gain / avg_loss
-            rsi = 100 - (100 / (1 + rs))
-            return round(rsi, 2)
+                rsi_value = 100.0
+            else:
+                rs = avg_gain / avg_loss
+                rsi_value = round(100.0 - (100.0 / (1.0 + rs)), 2)
+
+            self.cache.set(cache_key, rsi_value)
+            return rsi_value
             
         except Exception as e:
             self.log("ERROR", f"RSI Berechnung Fehler: {e}")
@@ -76,20 +107,49 @@ class MarketAnalyzer:
              return "NEUTRAL", f"Neutral (RSI: {rsi_value})"
 
     def calculate_macd(self, symbol, timeframe, fast_period=12, slow_period=26, signal_period=9):
-        """Berechnet MACD für ein Symbol"""
+        """Berechnet MACD für ein Symbol mit Caching und pandas-ta (Fallback auf numpy)"""
         if not self.broker or not self.broker.mt5_connected:
             return None
 
+        cache_key = f"macd_{symbol}_{timeframe}_{fast_period}_{slow_period}_{signal_period}"
+        cached_result = self.cache.get(cache_key)
+        if cached_result is not None:
+            return cached_result
+
         try:
             import MetaTrader5 as mt5
-            required_bars = max(slow_period, signal_period) + signal_period + 20
+            required_bars = max(slow_period, signal_period) + 50
             rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, required_bars)
         
             if rates is None or len(rates) < required_bars:
                 return None
         
+            if PANDAS_TA_AVAILABLE:
+                df = pd.DataFrame(rates)
+                macd_df = ta.macd(df['close'], fast=fast_period, slow=slow_period, signal=signal_period)
+                
+                if macd_df is not None and not macd_df.empty:
+                    macd_col = f"MACD_{fast_period}_{slow_period}_{signal_period}"
+                    hist_col = f"MACDh_{fast_period}_{slow_period}_{signal_period}"
+                    signal_col = f"MACDs_{fast_period}_{slow_period}_{signal_period}"
+                    
+                    result = {
+                        'macd': round(float(macd_df[macd_col].iloc[-1]), 6),
+                        'signal': round(float(macd_df[signal_col].iloc[-1]), 6),
+                        'histogram': round(float(macd_df[hist_col].iloc[-1]), 6),
+                        'prev_macd': round(float(macd_df[macd_col].iloc[-2]), 6),
+                        'prev_signal': round(float(macd_df[signal_col].iloc[-2]), 6),
+                        'prev_histogram': round(float(macd_df[hist_col].iloc[-2]), 6),
+                        'histogram_trend': "STEIGEND" if macd_df[hist_col].iloc[-1] > macd_df[hist_col].iloc[-2] else "FALLEND",
+                        'macd_line': macd_df[macd_col].tail(10).tolist(),
+                        'signal_line': macd_df[signal_col].tail(10).tolist(),
+                        'histogram_values': macd_df[hist_col].tail(10).tolist()
+                    }
+                    self.cache.set(cache_key, result)
+                    return result
+            
+            # Fallback (Numpy EMA based)
             closes = np.array([rate['close'] for rate in rates])
-        
             def calculate_ema(data, period):
                 alpha = 2 / (period + 1)
                 ema = np.zeros_like(data)
@@ -97,39 +157,27 @@ class MarketAnalyzer:
                 for i in range(1, len(data)):
                     ema[i] = alpha * data[i] + (1 - alpha) * ema[i-1]
                 return ema
-        
+            
             fast_ema = calculate_ema(closes, fast_period)
             slow_ema = calculate_ema(closes, slow_period)
             macd_line = fast_ema - slow_ema
             signal_line = calculate_ema(macd_line, signal_period)
             histogram = macd_line - signal_line
-        
-            current_macd = macd_line[-1]
-            current_signal = signal_line[-1]
-            current_histogram = histogram[-1]
-        
-            prev_macd = macd_line[-2] if len(macd_line) > 1 else current_macd
-            prev_signal = signal_line[-2] if len(signal_line) > 1 else current_signal
-            prev_histogram = histogram[-2] if len(histogram) > 1 else current_histogram
-        
-            if len(histogram) >= 3:
-                histogram_trend = "STEIGEND" if histogram[-1] > histogram[-2] > histogram[-3] else \
-                                "FALLEND" if histogram[-1] < histogram[-2] < histogram[-3] else "SEITWÄRTS"
-            else:
-                histogram_trend = "UNBEKANNT"
-        
-            return {
-                'macd': round(current_macd, 6),
-                'signal': round(current_signal, 6),
-                'histogram': round(current_histogram, 6),
-                'prev_macd': round(prev_macd, 6),
-                'prev_signal': round(prev_signal, 6),
-                'prev_histogram': round(prev_histogram, 6),
-                'histogram_trend': histogram_trend,
-                'macd_line': macd_line[-10:],
-                'signal_line': signal_line[-10:],
-                'histogram_values': histogram[-10:]
+            
+            result = {
+                'macd': round(float(macd_line[-1]), 6),
+                'signal': round(float(signal_line[-1]), 6),
+                'histogram': round(float(histogram[-1]), 6),
+                'prev_macd': round(float(macd_line[-2]), 6),
+                'prev_signal': round(float(signal_line[-2]), 6),
+                'prev_histogram': round(float(histogram[-2]), 6),
+                'histogram_trend': "STEIGEND" if histogram[-1] > histogram[-2] else "FALLEND",
+                'macd_line': macd_line[-10:].tolist(),
+                'signal_line': signal_line[-10:].tolist(),
+                'histogram_values': histogram[-10:].tolist()
             }
+            self.cache.set(cache_key, result)
+            return result
         except Exception as e:
             self.log("ERROR", f"MACD Berechnung Fehler: {e}")
             return None
@@ -229,69 +277,79 @@ class MarketAnalyzer:
          
          try:
              import MetaTrader5 as mt5
-             if lookback is None:
-                 lookback = self.sr_lookback_period
+             lookback = lookback or self.sr_lookback_period
              
              rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, lookback)
              if rates is None or len(rates) < 20:
                  return None
              
+             # Extract OHLC data
              highs = np.array([rate['high'] for rate in rates])
              lows = np.array([rate['low'] for rate in rates])
-             closes = np.array([rate['close'] for rate in rates])
+             current_price = rates[-1]['close']
              
+             # Find local maxima and minima
              resistance_levels = []
              support_levels = []
              
-             for i in range(2, len(highs) - 2):
-                 if (highs[i] > highs[i-1] and highs[i] > highs[i-2] and 
-                     highs[i] > highs[i+1] and highs[i] > highs[i+2]):
-                     resistance_levels.append(highs[i])
+             # Window size for local extrema
+             window = 5
+             
+             for i in range(window, len(highs) - window):
+                 is_resistance = True
+                 is_support = True
                  
-                 if (lows[i] < lows[i-1] and lows[i] < lows[i-2] and 
-                     lows[i] < lows[i+1] and lows[i] < lows[i+2]):
+                 for j in range(1, window + 1):
+                     if highs[i] <= highs[i-j] or highs[i] <= highs[i+j]:
+                         is_resistance = False
+                     if lows[i] >= lows[i-j] or lows[i] >= lows[i+j]:
+                         is_support = False
+                         
+                 if is_resistance:
+                     resistance_levels.append(highs[i])
+                 if is_support:
                      support_levels.append(lows[i])
              
              def group_levels(levels, tolerance):
                  if not levels: return []
+                 levels = sorted(levels)
                  grouped = []
-                 levels_sorted = sorted(levels)
-                 current_group = [levels_sorted[0]]
+                 current_group = [levels[0]]
                  
-                 for level in levels_sorted[1:]:
-                     if abs(level - current_group[-1]) <= tolerance:
-                         current_group.append(level)
+                 for i in range(1, len(levels)):
+                     if levels[i] - current_group[-1] <= tolerance:
+                         current_group.append(levels[i])
                      else:
                          avg_level = sum(current_group) / len(current_group)
-                         strength = len(current_group)
-                         grouped.append((avg_level, strength))
-                         current_group = [level]
+                         grouped.append({'price': avg_level, 'strength': len(current_group)})
+                         current_group = [levels[i]]
                  
                  if current_group:
                      avg_level = sum(current_group) / len(current_group)
-                     strength = len(current_group)
-                     grouped.append((avg_level, strength))
-                 return grouped
+                     grouped.append({'price': avg_level, 'strength': len(current_group)})
+                     
+                 return sorted(grouped, key=lambda x: x['strength'], reverse=True)
              
-             grouped_resistance = group_levels(resistance_levels, self.sr_tolerance)
-             grouped_support = group_levels(support_levels, self.sr_tolerance)
+             # Calculate tolerance based on price (e.g., 0.05%)
+             tolerance = current_price * 0.0005
              
-             strong_resistance = [(level, strength) for level, strength in grouped_resistance if strength >= self.sr_strength_threshold]
-             strong_support = [(level, strength) for level, strength in grouped_support if strength >= self.sr_strength_threshold]
+             grouped_resistance = group_levels(resistance_levels, tolerance)
+             grouped_support = group_levels(support_levels, tolerance)
              
-             strong_resistance.sort(key=lambda x: x[1], reverse=True)
-             strong_support.sort(key=lambda x: x[1], reverse=True)
+             # Filter nearby levels
+             resistances = [r for r in grouped_resistance if r['price'] > current_price]
+             supports = [s for s in grouped_support if s['price'] < current_price]
              
-             current_price = closes[-1]
-             nearest_resistance = next(((lvl, s) for lvl, s in strong_resistance if lvl > current_price), None)
-             nearest_support = next(((lvl, s) for lvl, s in strong_support if lvl < current_price), None)
+             # Sort by proximity to current price
+             resistances.sort(key=lambda x: x['price'])
+             supports.sort(key=lambda x: x['price'], reverse=True)
              
              return {
                  'current_price': current_price,
-                 'nearest_resistance': nearest_resistance,
-                 'nearest_support': nearest_support,
-                 'all_resistance': strong_resistance[:5],
-                 'all_support': strong_support[:5]
+                 'resistance_levels': resistances[:3],
+                 'support_levels': supports[:3],
+                 'all_resistances': resistances,
+                 'all_supports': supports
              }
              
          except Exception as e:
@@ -299,41 +357,35 @@ class MarketAnalyzer:
              return None
 
     def get_sr_signal(self, sr_data, current_price):
-         """Interpretiert Support/Resistance für Trading-Signal"""
-         if not sr_data:
-             return "NEUTRAL", "S/R nicht verfügbar"
-         
-         try:
-             signals = []
-             
-             if sr_data['nearest_support']:
-                 support_level, support_strength = sr_data['nearest_support']
-                 dist = abs(current_price - support_level) / current_price * 100
-                 if dist < 0.1:
-                     signals.append(f"BUY - An starkem Support ({support_level:.5f}, Stärke: {support_strength})")
-                 elif dist < 0.2:
-                     signals.append(f"WATCH - Nahe Support ({support_level:.5f})")
-             
-             if sr_data['nearest_resistance']:
-                 resistance_level, resistance_strength = sr_data['nearest_resistance']
-                 dist = abs(current_price - resistance_level) / current_price * 100
-                 if dist < 0.1:
-                     signals.append(f"SELL - An starker Resistance ({resistance_level:.5f}, Stärke: {resistance_strength})")
-                 elif dist < 0.2:
-                     signals.append(f"WATCH - Nahe Resistance ({resistance_level:.5f})")
-             
-             if not signals:
-                 return "NEUTRAL", "Zwischen S/R Levels"
-             
-             if any("BUY" in signal for signal in signals):
-                 return "BUY", [s for s in signals if "BUY" in s][0]
-             elif any("SELL" in signal for signal in signals):
-                 return "SELL", [s for s in signals if "SELL" in s][0]
-             else:
-                 return "WATCH", signals[0]
-                 
-         except Exception as e:
-             return "NEUTRAL", f"S/R Analyse Fehler: {e}"
+        """Generiert Signal basierend auf S/R Levels"""
+        if not sr_data:
+            return "NEUTRAL", "Keine S/R Daten"
+            
+        try:
+            nearest_resistance = sr_data['resistance_levels'][0]['price'] if sr_data['resistance_levels'] else float('inf')
+            nearest_support = sr_data['support_levels'][0]['price'] if sr_data['support_levels'] else float('-inf')
+            
+            # Distances in percent
+            dist_to_res = (nearest_resistance - current_price) / current_price * 100
+            dist_to_sup = (current_price - nearest_support) / current_price * 100
+            
+            signal = "NEUTRAL"
+            description = f"Preis: {current_price:.5f}"
+            
+            # Near Support -> Potential Buy
+            if dist_to_sup < 0.1: # Within 0.1% of support
+                signal = "BUY"
+                description = f"Nahe Support ({nearest_support:.5f}, {dist_to_sup:.2f}%)"
+            
+            # Near Resistance -> Potential Sell
+            elif dist_to_res < 0.1: # Within 0.1% of resistance
+                signal = "SELL"
+                description = f"Nahe Resistance ({nearest_resistance:.5f}, {dist_to_res:.2f}%)"
+                
+            return signal, description
+            
+        except Exception as e:
+            return "NEUTRAL", f"S/R Signal Fehler: {e}"
 
     def get_higher_timeframe_trend(self, symbol, trend_timeframe):
          """Analysiert den übergeordneten Trend auf höherem Timeframe"""

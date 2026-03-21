@@ -37,7 +37,7 @@ class ChartsView:
         controls = ctk.CTkFrame(multi_tab, fg_color="transparent")
         controls.grid(row=0, column=0, sticky="ew", padx=10, pady=10)
     
-        ctk.CTkButton(controls, text="↻ Charts Aktualisieren", command=self.app.load_forex_charts, fg_color="#2E86AB").pack(side="left", padx=(0, 10))
+        ctk.CTkButton(controls, text="↻ Charts Aktualisieren", command=self.app.load_forex_charts, fg_color="#2979FF").pack(side="left", padx=(0, 10))
     
         # Timeframe Dropdown Menu
         self.app.chart_timeframe_var = ctk.StringVar(value="D1 (Täglich)")
@@ -49,12 +49,12 @@ class ChartsView:
         )
         self.app.tf_combo.pack(side="left", padx=10)
     
-        self.app.charts_container = ctk.CTkScrollableFrame(multi_tab, corner_radius=15, fg_color=("gray90", "gray13"))
+        self.app.charts_container = ctk.CTkScrollableFrame(multi_tab, corner_radius=15, fg_color="#1A1D24")
         self.app.charts_container.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
     
         # Initial message
         self.app.charts_loading_lbl = ctk.CTkLabel(self.app.charts_container, text="Lade interaktive Forex Charts (Major Pairs)... Bitte warten.", 
-                           justify="center", font=ctk.CTkFont(size=14), text_color="gray50")
+                           justify="center", font=ctk.CTkFont(family="Inter", size=14), text_color="#8B949E")
         self.app.charts_loading_lbl.pack(pady=50)
     
         # Grid layout for charts_container (2 Columns)
@@ -72,10 +72,10 @@ class ChartsView:
         self.app.scan_tf_var = ctk.StringVar(value="D1 (T\u00e4glich)")
         ctk.CTkComboBox(scan_controls, values=["M1 (1 Min)", "M5 (5 Min)", "M15 (15 Min)", "M30 (30 Min)", "H1 (1 Std)", "H4 (4 Std)", "D1 (T\u00e4glich)"], variable=self.app.scan_tf_var, width=150).pack(side="left", padx=5)
         ctk.CTkButton(scan_controls, text="\U0001f50d Markt Scannen", command=self.run_pattern_scanner, fg_color="#E67E22", hover_color="#D35400").pack(side="left", padx=5)
-        self.app.scan_status_lbl = ctk.CTkLabel(scan_controls, text="Klicke auf Scannen...", text_color="gray50")
+        self.app.scan_status_lbl = ctk.CTkLabel(scan_controls, text="Klicke auf Scannen...", text_color="#8B949E")
         self.app.scan_status_lbl.pack(side="left", padx=15)
     
-        self.app.pattern_list_frame = ctk.CTkScrollableFrame(pattern_tab, corner_radius=15, fg_color=("gray90", "gray13"))
+        self.app.pattern_list_frame = ctk.CTkScrollableFrame(pattern_tab, corner_radius=15, fg_color="#1A1D24")
         self.app.pattern_list_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
     
         # Header for the scanner list
@@ -83,7 +83,7 @@ class ChartsView:
         ph_row.pack(fill="x", pady=(0, 5))
         ph_row.grid_columnconfigure((0,1,2,3,4), weight=1, uniform="col")
         for i, col_name in enumerate(["Symbol", "Timeframe", "Gefundenes Pattern", "Relevanz", "Aktion"]):
-            ctk.CTkLabel(ph_row, text=col_name, font=ctk.CTkFont(weight="bold", size=12), text_color="gray50").grid(row=0, column=i, sticky="w", padx=10)
+            ctk.CTkLabel(ph_row, text=col_name, font=ctk.CTkFont(family="Inter", weight="bold", size=12), text_color="#8B949E").grid(row=0, column=i, sticky="w", padx=10)
         ctk.CTkFrame(self.app.pattern_list_frame, height=1, fg_color=("gray70", "gray30")).pack(fill="x", pady=(0, 5))
     
         # --- 3. Sub-Tab: Advanced Analysis ---
@@ -105,10 +105,10 @@ class ChartsView:
     
         ctk.CTkButton(adv_controls, text="📊 Chart Analysieren", command=self.load_advanced_chart, fg_color="#8E44AD", hover_color="#732D91").pack(side="left", padx=10)
     
-        self.app.adv_chart_container = ctk.CTkFrame(adv_tab, corner_radius=15, fg_color=("gray90", "gray13"))
+        self.app.adv_chart_container = ctk.CTkFrame(adv_tab, corner_radius=15, fg_color="#1A1D24")
         self.app.adv_chart_container.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
     
-        ctk.CTkLabel(self.app.adv_chart_container, text="Wähle ein Asset und klicke auf 'Chart Analysieren'", text_color="gray50", font=ctk.CTkFont(size=14)).pack(expand=True)
+        ctk.CTkLabel(self.app.adv_chart_container, text="Wähle ein Asset und klicke auf 'Chart Analysieren'", text_color="#8B949E", font=ctk.CTkFont(family="Inter", size=14)).pack(expand=True)
     
         # --- 4. Sub-Tab: SMC Scanner ---
         smc_tab = self.app.charts_sub_tabs.tab("🏦 SMC Scanner")
@@ -122,17 +122,17 @@ class ChartsView:
         ctk.CTkComboBox(smc_controls, values=["M5 (5 Min)", "M15 (15 Min)", "M30 (30 Min)", "H1 (1 Std)", "H4 (4 Std)", "D1 (Täglich)"], variable=self.app.smc_tf_var, width=150).pack(side="left", padx=5)
     
         ctk.CTkButton(smc_controls, text="🏦 SMC Scannen", command=self.run_smc_scanner, fg_color="#3498DB", hover_color="#2980B9").pack(side="left", padx=5)
-        self.app.smc_status_lbl = ctk.CTkLabel(smc_controls, text="Klicke auf SMC Scannen...", text_color="gray50")
+        self.app.smc_status_lbl = ctk.CTkLabel(smc_controls, text="Klicke auf SMC Scannen...", text_color="#8B949E")
         self.app.smc_status_lbl.pack(side="left", padx=15)
     
-        self.app.smc_list_frame = ctk.CTkScrollableFrame(smc_tab, corner_radius=15, fg_color=("gray90", "gray13"))
+        self.app.smc_list_frame = ctk.CTkScrollableFrame(smc_tab, corner_radius=15, fg_color="#1A1D24")
         self.app.smc_list_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
     
         smc_ph_row = ctk.CTkFrame(self.app.smc_list_frame, fg_color="transparent", height=30)
         smc_ph_row.pack(fill="x", pady=(0, 5))
         smc_ph_row.grid_columnconfigure((0,1,2,3), weight=1, uniform="col")
         for i, col_name in enumerate(["Symbol", "Timeframe", "Gefundenes SMC Muster", "Aktion"]):
-            ctk.CTkLabel(smc_ph_row, text=col_name, font=ctk.CTkFont(weight="bold", size=12), text_color="gray50").grid(row=0, column=i, sticky="w", padx=10)
+            ctk.CTkLabel(smc_ph_row, text=col_name, font=ctk.CTkFont(family="Inter", weight="bold", size=12), text_color="#8B949E").grid(row=0, column=i, sticky="w", padx=10)
         ctk.CTkFrame(self.app.smc_list_frame, height=1, fg_color=("gray70", "gray30")).pack(fill="x", pady=(0, 5))
 
         # Delay the initial load slightly so the GUI can render first
@@ -145,7 +145,7 @@ class ChartsView:
         for widget in self.app.adv_chart_container.winfo_children():
             widget.destroy()
         
-        loading_lbl = ctk.CTkLabel(self.app.adv_chart_container, text="Lade Daten und berechne Indikatoren...", font=ctk.CTkFont(size=14))
+        loading_lbl = ctk.CTkLabel(self.app.adv_chart_container, text="Lade Daten und berechne Indikatoren...", font=ctk.CTkFont(family="Inter", size=14))
         loading_lbl.pack(expand=True)
     
         symbol = self.app.adv_symbol_var.get()
@@ -289,13 +289,13 @@ class ChartsView:
                 self.app.after(0, lambda: self._render_scan_results(found_patterns))
             except Exception as e:
                 error_msg = str(e)
-                self.app.after(0, lambda msg=error_msg: self.app.scan_status_lbl.configure(text=f"Fehler: {msg}", text_color="#E74C3C"))
+                self.app.after(0, lambda msg=error_msg: self.app.scan_status_lbl.configure(text=f"Fehler: {msg}", text_color="#FF1744"))
 
         threading.Thread(target=scan_logic, daemon=True).start()
 
     def _render_scan_results(self, patterns):
         if not patterns:
-            ctk.CTkLabel(self.app.pattern_list_frame, text="Keine auff\u00e4lligen Candlestick-Patterns gefunden.", text_color="gray50").pack(pady=20)
+            ctk.CTkLabel(self.app.pattern_list_frame, text="Keine auff\u00e4lligen Candlestick-Patterns gefunden.", text_color="#8B949E").pack(pady=20)
         else:
             for sym, tf, pat, rel, tf_str in patterns:
                 row = ctk.CTkFrame(self.app.pattern_list_frame, fg_color="transparent")
@@ -303,20 +303,20 @@ class ChartsView:
                 row.grid_columnconfigure((0,1,2,3,4), weight=1, uniform="col")
             
                 color = "white"
-                if "Bullish" in pat: color = "#5EBA7D"
-                elif "Bearish" in pat: color = "#E74C3C"
+                if "Bullish" in pat: color = "#00FF66"
+                elif "Bearish" in pat: color = "#FF1744"
                 elif "Doji" in pat: color = "#F1C40F"
             
-                ctk.CTkLabel(row, text=sym, font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, sticky="w", padx=10)
-                ctk.CTkLabel(row, text=tf, text_color="gray70").grid(row=0, column=1, sticky="w", padx=10)
-                ctk.CTkLabel(row, text=pat, text_color=color, font=ctk.CTkFont(weight="bold")).grid(row=0, column=2, sticky="w", padx=10)
+                ctk.CTkLabel(row, text=sym, font=ctk.CTkFont(family="Inter", weight="bold")).grid(row=0, column=0, sticky="w", padx=10)
+                ctk.CTkLabel(row, text=tf, text_color="#8B949E").grid(row=0, column=1, sticky="w", padx=10)
+                ctk.CTkLabel(row, text=pat, text_color=color, font=ctk.CTkFont(family="Inter", weight="bold")).grid(row=0, column=2, sticky="w", padx=10)
                 ctk.CTkLabel(row, text=rel, text_color="#F1C40F").grid(row=0, column=3, sticky="w", padx=10)
                 ctk.CTkButton(row, text="\U0001f4c8 Chart", width=80, height=26,
-                              fg_color="#2E86AB", hover_color="#1a5f7a",
+                              fg_color="#2979FF", hover_color="#1a5f7a",
                               command=lambda s=sym, t=tf_str, p=pat: self._show_pattern_chart(s, t, p)
                              ).grid(row=0, column=4, sticky="w", padx=10)
             
-        self.app.scan_status_lbl.configure(text=f"Scan abgeschlossen. {len(patterns)} Treffer.", text_color="#5EBA7D")
+        self.app.scan_status_lbl.configure(text=f"Scan abgeschlossen. {len(patterns)} Treffer.", text_color="#00FF66")
 
     def _show_pattern_chart(self, symbol, tf_str, pattern):
         """Open a Toplevel popup with the price chart and the pattern highlighted."""
@@ -326,7 +326,7 @@ class ChartsView:
         popup.configure(fg_color="#1E1E1E")
         popup.grab_set()
     
-        status = ctk.CTkLabel(popup, text=f"Lade Chart f\u00fcr {symbol}...", font=ctk.CTkFont(size=14))
+        status = ctk.CTkLabel(popup, text=f"Lade Chart f\u00fcr {symbol}...", font=ctk.CTkFont(family="Inter", size=14))
         status.pack(expand=True)
     
         mc = mpf.make_marketcolors(up='#5EBA7D', down='#E74C3C', edge='i', wick='i')
@@ -469,30 +469,30 @@ class ChartsView:
                 self.app.after(0, lambda: self._render_smc_results(found_patterns[:20])) # Top 20
             except Exception as e:
                 error_msg = str(e)
-                self.app.after(0, lambda msg=error_msg: self.app.smc_status_lbl.configure(text=f"Fehler: {msg}", text_color="#E74C3C"))
+                self.app.after(0, lambda msg=error_msg: self.app.smc_status_lbl.configure(text=f"Fehler: {msg}", text_color="#FF1744"))
 
         threading.Thread(target=scan_logic, daemon=True).start()
 
     def _render_smc_results(self, patterns):
         if not patterns:
-            ctk.CTkLabel(self.app.smc_list_frame, text="Keine SMC-Muster gefunden.", text_color="gray50").pack(pady=20)
+            ctk.CTkLabel(self.app.smc_list_frame, text="Keine SMC-Muster gefunden.", text_color="#8B949E").pack(pady=20)
         else:
             for sym, tf, pat, color_name, tf_str, timestamp in patterns:
                 row = ctk.CTkFrame(self.app.smc_list_frame, fg_color="transparent")
                 row.pack(fill="x", pady=5)
                 row.grid_columnconfigure((0,1,2,3), weight=1, uniform="col")
             
-                color = "#5EBA7D" if color_name == "green" else "#E74C3C"
+                color = "#00FF66" if color_name == "green" else "#FF1744"
             
-                ctk.CTkLabel(row, text=sym, font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, sticky="w", padx=10)
-                ctk.CTkLabel(row, text=tf, text_color="gray70").grid(row=0, column=1, sticky="w", padx=10)
-                ctk.CTkLabel(row, text=pat, text_color=color, font=ctk.CTkFont(weight="bold")).grid(row=0, column=2, sticky="w", padx=10)
+                ctk.CTkLabel(row, text=sym, font=ctk.CTkFont(family="Inter", weight="bold")).grid(row=0, column=0, sticky="w", padx=10)
+                ctk.CTkLabel(row, text=tf, text_color="#8B949E").grid(row=0, column=1, sticky="w", padx=10)
+                ctk.CTkLabel(row, text=pat, text_color=color, font=ctk.CTkFont(family="Inter", weight="bold")).grid(row=0, column=2, sticky="w", padx=10)
                 ctk.CTkButton(row, text="🏦 Chart", width=80, height=26,
                               fg_color="#3498DB", hover_color="#2980B9",
                               command=lambda s=sym, t=tf_str, p=pat, ts=timestamp: self._show_smc_chart(s, t, p, ts)
                              ).grid(row=0, column=3, sticky="w", padx=10)
             
-        self.app.smc_status_lbl.configure(text=f"Scan abgeschlossen. {len(patterns)} Treffer.", text_color="#5EBA7D")
+        self.app.smc_status_lbl.configure(text=f"Scan abgeschlossen. {len(patterns)} Treffer.", text_color="#00FF66")
 
     def _show_smc_chart(self, symbol, tf_str, pattern, timestamp):
         """Open a Toplevel popup with the price chart and the SMC pattern highlighted."""
@@ -502,7 +502,7 @@ class ChartsView:
         popup.configure(fg_color="#1E1E1E")
         popup.grab_set()
     
-        status = ctk.CTkLabel(popup, text=f"Lade Chart für {symbol}...", font=ctk.CTkFont(size=14))
+        status = ctk.CTkLabel(popup, text=f"Lade Chart für {symbol}...", font=ctk.CTkFont(family="Inter", size=14))
         status.pack(expand=True)
     
         mc = mpf.make_marketcolors(up='#5EBA7D', down='#E74C3C', edge='i', wick='i')

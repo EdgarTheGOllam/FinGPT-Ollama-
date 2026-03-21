@@ -69,7 +69,6 @@ class TradingCompanion:
             if not self.test_connection(test_symbol):
                 raise Exception(f"Datenverbindung für {test_symbol} fehlgeschlagen")
             
-            self.interactive_menu()
             return True
             
         except Exception as e:
@@ -790,6 +789,16 @@ def main():
             if companion.last_error:
                 print(f"Letzter Fehler: {companion.last_error['error']}")
             return
+            
+        import sys
+        if "--daemon" in sys.argv:
+            print("Läuft im Daemon-Modus (Hintergrund-Analyse)...")
+            symbols = ["EURUSD", "GBPUSD", "USDJPY", "USDCHF"]
+            while True:
+                companion.scan_multiple_pairs(symbols)
+                time.sleep(300) # Alle 5 Minuten scannen
+        else:
+            companion.interactive_menu()
     except KeyboardInterrupt:
         print("\nBeendet durch Benutzer")
     finally:

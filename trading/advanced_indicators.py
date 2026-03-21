@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 Advanced Technical Indicators für FinGPT Trading System
 Erweiterte Indikatoren: Williams %R, CCI, Awesome Oscillator, Ichimoku, VWAP, etc.
@@ -10,6 +10,8 @@ import pandas as pd
 from datetime import datetime, timedelta
 import warnings
 warnings.filterwarnings("ignore")
+
+from core.performance_optimizer import cached
 
 class AdvancedIndicators:
     def __init__(self, logger=None):
@@ -61,18 +63,42 @@ class AdvancedIndicators:
         if self.logger:
             timestamp = datetime.now().strftime('%H:%M:%S')
             formatted_message = f"[{category}] {message}"
-            print(f"{timestamp} 📊 {formatted_message}")
+            try:
+                print(f"{timestamp} {formatted_message}")
+            except UnicodeEncodeError:
+                pass
     
-    def get_market_data(self, symbol, timeframe, bars):
-        """Holt Marktdaten von MT5"""
+    @cached(ttl=2.0, max_size=50)
+    def _fetch_market_data_cached(self, symbol, timeframe):
+        """Holt einen großen Block an Daten (200 Bars) und cached diesen für 2 Sekunden."""
         try:
-            rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, bars)
+            rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, 200)
             if rates is None or len(rates) == 0:
                 return None
-            
             df = pd.DataFrame(rates)
             df['time'] = pd.to_datetime(df['time'], unit='s')
             return df
+        except Exception as e:
+            self.log("ERROR", f"Cached Marktdaten Fehler: {e}")
+            return None
+
+    def get_market_data(self, symbol, timeframe, bars):
+        """Holt Marktdaten von MT5 (mit intelligentem Caching)"""
+        try:
+            df = self._fetch_market_data_cached(symbol, timeframe)
+            if df is None:
+                return None
+            
+            # Falls mal mehr als 200 Bars gefordert sind, direkt holen
+            if bars > 200:
+                rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, bars)
+                if rates is None or len(rates) == 0:
+                    return None
+                df_custom = pd.DataFrame(rates)
+                df_custom['time'] = pd.to_datetime(df_custom['time'], unit='s')
+                return df_custom
+            
+            return df.iloc[-bars:].copy() if len(df) >= bars else df.copy()
         except Exception as e:
             self.log("ERROR", f"Marktdaten Fehler: {e}")
             return None
@@ -874,12 +900,13 @@ class IndicatorIntegration:
         # Diese Methode würde das Hauptmenü erweitern
         pass
     
-    def enhanced_ai_analysis(self, symbol, include_advanced=True):
+    def enhanced_ai_analysis(self, symbol, timeframe=mt5.TIMEFRAME_M15, include_advanced=True):
         """
         Erweiterte KI-Analyse mit allen Indikatoren
         
         Args:
             symbol: Trading Symbol
+            timeframe: Zeitrahmen für die Analyse
             include_advanced: Ob erweiterte Indikatoren einbezogen werden sollen
             
         Returns:
@@ -893,12 +920,12 @@ class IndicatorIntegration:
             
             if include_advanced:
                 # Erweiterte Indikatoren hinzufügen
-                advanced_analysis = self.advanced_indicators.get_comprehensive_analysis(symbol)
+                advanced_analysis = self.advanced_indicators.get_comprehensive_analysis(symbol, timeframe)
                 
                 if advanced_analysis:
                     # Formatiere erweiterte Daten für KI
                     advanced_summary = self.format_advanced_data_for_ai(advanced_analysis)
-                    analysis_context += f"\n\nERWEITERTE INDIKATOREN:\n{advanced_summary}"
+                    analysis_context += f"\n\nERWEITERTE INDIKATOREN (TF: {timeframe}):\n{advanced_summary}"
                     
                     # Konsens-Signal
                     consensus, consensus_desc = self.advanced_indicators.get_signal_consensus(advanced_analysis)
@@ -983,12 +1010,13 @@ Antworte präzise und konkret auf Deutsch.
         except Exception as e:
             return f"Formatierung Fehler: {e}"
     
-    def create_trading_signal(self, symbol, use_advanced=True):
+    def create_trading_signal(self, symbol, timeframe=mt5.TIMEFRAME_M15, use_advanced=True):
         """
         Erstellt ein Trading-Signal basierend auf allen verfügbaren Indikatoren
         
         Args:
             symbol: Trading Symbol
+            timeframe: Zeitrahmen für die Analyse
             use_advanced: Ob erweiterte Indikatoren verwendet werden sollen
             
         Returns:
@@ -996,9 +1024,9 @@ Antworte präzise und konkret auf Deutsch.
         """
         try:
             # Basis-Indikatoren vom Hauptsystem
-            rsi_value = self.fingpt.calculate_rsi(symbol)
-            macd_data = self.fingpt.calculate_macd(symbol)
-            sr_data = self.fingpt.calculate_support_resistance(symbol)
+            rsi_value = self.fingpt.calculate_rsi(symbol, timeframe)
+            macd_data = self.fingpt.calculate_macd(symbol, timeframe)
+            sr_data = self.fingpt.calculate_support_resistance(symbol, timeframe)
             
             # Basis-Signale
             signals = {}
