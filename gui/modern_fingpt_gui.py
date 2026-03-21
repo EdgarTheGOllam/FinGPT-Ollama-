@@ -58,6 +58,52 @@ class ModernFinGPTGUI(ctk.CTk):
         self.geometry("1200x850")
         self.minsize(900, 700)
         
+        # Custom Apple-like Titlebar Setup
+        self.overrideredirect(True)
+        # Set main background color directly
+        self.configure(fg_color=self._apply_appearance_mode(ctk.ThemeManager.theme["CTk"]["fg_color"]))
+        
+        # Hack to show window in Windows taskbar and apply native rounded corners
+        self.after(200, self._set_appwindow)
+        self.bind("<Map>", self._on_map)
+        
+        # Main container (no fake rounded corners anymore, OS handles it natively)
+        self.main_container = ctk.CTkFrame(self, corner_radius=0, border_width=0, fg_color="transparent")
+        self.main_container.pack(fill="both", expand=True, padx=0, pady=0)
+        
+        # Custom Titlebar inside main_container
+        self.title_bar = ctk.CTkFrame(self.main_container, height=40, corner_radius=0, fg_color="transparent")
+        self.title_bar.pack(fill="x", side="top")
+        self.title_bar.bind("<B1-Motion>", self._move_window)
+        self.title_bar.bind("<Button-1>", self._get_pos)
+        
+        # Apple style buttons wrapper
+        self.apple_buttons_frame = ctk.CTkFrame(self.title_bar, fg_color="transparent")
+        self.apple_buttons_frame.pack(side="left", padx=12, pady=0)
+        
+        # Reduzierte Buttongröße, sanfterer Look
+        self.close_btn = ctk.CTkButton(self.apple_buttons_frame, width=12, height=12, corner_radius=6, text="", 
+                                       fg_color="#FF5F56", hover_color="#E0443E", command=self._close_window)
+        self.close_btn.pack(side="left", padx=4)
+        
+        self.min_btn = ctk.CTkButton(self.apple_buttons_frame, width=12, height=12, corner_radius=6, text="", 
+                                     fg_color="#FFBD2E", hover_color="#DEA121", command=self._minimize_window)
+        self.min_btn.pack(side="left", padx=4)
+        
+        self.max_btn = ctk.CTkButton(self.apple_buttons_frame, width=12, height=12, corner_radius=6, text="", 
+                                     fg_color="#27C93F", hover_color="#1AAB29", command=self._maximize_window)
+        self.max_btn.pack(side="left", padx=4)
+        
+        # Title inside titlebar
+        self.title_lbl = ctk.CTkLabel(self.title_bar, text="FinGPT Professional Dashboard", font=ctk.CTkFont(size=12, weight="bold"), text_color="gray70")
+        self.title_lbl.pack(side="left", padx=(10, 0))
+        self.title_lbl.bind("<B1-Motion>", self._move_window)
+        self.title_lbl.bind("<Button-1>", self._get_pos)
+
+        # Content frame that replaces 'self' for the original grid layout
+        self.content_frame = ctk.CTkFrame(self.main_container, fg_color="transparent")
+        self.content_frame.pack(fill="both", expand=True, padx=0, pady=(0, 10))
+        
         # State variables
         self.is_live_running = False
         self.live_data_rows = []
@@ -67,14 +113,56 @@ class ModernFinGPTGUI(ctk.CTk):
         self.setup_layout()
         self.start_simulated_data()
 
+    # --- Custom Titlebar Methods ---
+    def _set_appwindow(self):
+        try:
+            import ctypes
+            hwnd = ctypes.windll.user32.GetParent(self.winfo_id())
+            # Taskbar integration
+            style = ctypes.windll.user32.GetWindowLongW(hwnd, -20)
+            style = style & ~0x00000080
+            style = style | 0x00040000
+            ctypes.windll.user32.SetWindowLongW(hwnd, -20, style)
+            
+            # Windows 11 Native Rounded Corners
+            # DWMWA_WINDOW_CORNER_PREFERENCE = 33, DWMWCP_ROUND = 2
+            val = ctypes.c_int(2)
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 33, ctypes.byref(val), ctypes.sizeof(val))
+        except Exception:
+            pass
+
+    def _get_pos(self, event):
+        self._xwin = event.x
+        self._ywin = event.y
+
+    def _move_window(self, event):
+        self.geometry(f"+{event.x_root - self._xwin}+{event.y_root - self._ywin}")
+
+    def _close_window(self):
+        self.destroy()
+
+    def _minimize_window(self):
+        self.overrideredirect(False)
+        self.state("iconic")
+
+    def _maximize_window(self):
+        if self.state() == "zoomed":
+            self.state("normal")
+        else:
+            self.state("zoomed")
+            
+    def _on_map(self, event):
+        if self.state() == "normal":
+            self.overrideredirect(True)
+
     def setup_layout(self):
         """Haupt-Grid System der UI"""
-        self.grid_rowconfigure(1, weight=1)
-        self.grid_columnconfigure(0, weight=1)
+        self.content_frame.grid_rowconfigure(1, weight=1)
+        self.content_frame.grid_columnconfigure(0, weight=1)
         
         # 1. Header Frame
-        self.header_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.header_frame.grid(row=0, column=0, sticky="ew", padx=20, pady=(20, 10))
+        self.header_frame = ctk.CTkFrame(self.content_frame, fg_color="transparent")
+        self.header_frame.grid(row=0, column=0, sticky="ew", padx=20, pady=(5, 10))
         
         title_label = ctk.CTkLabel(self.header_frame, text="FinGPT Professional", font=ctk.CTkFont(family="Segoe UI", size=24, weight="bold"))
         title_label.pack(side="left")
@@ -89,7 +177,7 @@ class ModernFinGPTGUI(ctk.CTk):
         
         # 2. Main Tabview (ersetzt ttk.Notebook)
         self.tabview = ctk.CTkTabview(
-            self, 
+            self.content_frame, 
             corner_radius=15,
             segmented_button_fg_color=("gray85", "#181818"),
             segmented_button_selected_color="#2E86AB",
@@ -131,7 +219,7 @@ class ModernFinGPTGUI(ctk.CTk):
 
         
         # 3. Status Bar
-        self.status_bar = ctk.CTkFrame(self, height=30, corner_radius=10)
+        self.status_bar = ctk.CTkFrame(self.content_frame, height=30, corner_radius=10)
         self.status_bar.grid(row=2, column=0, sticky="ew", padx=20, pady=(0, 20))
         
         self.status_label = ctk.CTkLabel(self.status_bar, text="Bereit | Letzte Aktualisierung: Nie", font=ctk.CTkFont(size=12))
@@ -3850,26 +3938,29 @@ class ModernFinGPTGUI(ctk.CTk):
         self.pnl_canvas.create_oval(lx - r, ly - r, lx + r, ly + r, fill=dot_col, outline="")
 
     def start_simulated_data(self):
-        def bg_simulator():
-            while True:
-                time.sleep(8)
-                if hasattr(self, 'terminal_box'):
-                    msg = f"[{datetime.now().strftime('%H:%M:%S')}] Background sync completed.\n"
-                    self.after(0, lambda: self.write_terminal(msg))
-        threading.Thread(target=bg_simulator, daemon=True).start()
+        # Der simulierte Background-Sync wurde entfernt, um das Terminal
+        # von unwichtigen "Background sync completed" Nachrichten zu bereinigen.
+        # So bleiben echte Trades und Fehlermeldungen besser sichtbar.
+        pass
 
     def write_terminal(self, text, tag="INFO"):
         """Write colored text to the terminal. tag must be one of the configured color tags."""
         try:
             tb = self.terminal_box
             tb.configure(state="normal")
+            
+            # Füge einen Zeitstempel hinzu, wenn der Text nicht bereits mit [HH:MM:SS] o.ä. beginnt
+            import re
+            if text.strip() and not re.match(r'^\[\d{2}:\d{2}:\d{2}\]', text.strip()):
+                timestamp = datetime.now().strftime('%H:%M:%S')
+                text = f"[{timestamp}] {text}"
+                
             tb.insert("end", text, tag)
             tb.configure(state="disabled")
             if not getattr(self, '_log_paused', False):
                 tb.see("end")
         except Exception:
             pass  # terminal may not be ready yet
-
     def clear_terminal(self):
         try:
             self.terminal_box.configure(state="normal")

@@ -1,93 +1,87 @@
-# 🤖 FinGPT – KI‑gestütztes Trading‑System für MetaTrader 5
+# 🤖 FinGPT – KI‑gestütztes Trading‑System für MetaTrader 5
+
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Python](https://img.shields.io/badge/Python-3.9+-yellow.svg)](https://www.python.org/)
+[![MetaTrader 5](https://img.shields.io/badge/MetaTrader-5-green.svg)](https://www.metatrader5.com/)
+[![Ollama](https://img.shields.io/badge/Ollama-Local_LLM-orange.svg)](https://ollama.ai/)
 
 > "Der Markt kann länger irrational bleiben, als du liquide bleiben kannst." – John Maynard Keynes
 
-Ein professionelles, vollständig lokales Python‑basiertes Trading‑System, das klassische technische Indikatoren mit großen Sprachmodellen (LLMs) über **Ollama** kombiniert und über die MetaTrader 5‑API (MQL5‑Bridge) ausführt.
+FinGPT ist ein professionelles, modulares Trading-Framework, das die Präzision klassischer technischer Indikatoren mit der kognitiven Analyse moderner **Large Language Models (LLMs)** verbindet. Das System agiert als intelligente Brücke zwischen lokalen KI-Instanzen (Ollama) oder Cloud-APIs und der MetaTrader 5 Handelsplattform.
 
-## 📌 Features
+---
 
-| Feature | Kurzbeschreibung |
-| ------- | ----------------- |
-| **Modernes GUI** | Hochwertiges Dashboard mit Dark Mode, Echtzeit-Metriken und Splash-Screen Animation. |
-| **KI‑Integration** | Nutzt **Ollama** (fingpt, llama3) für Marktanalysen mit Reasoning & Confidence-Score. |
-| **Auto‑Trading Engine** | Vollautomatische Pipeline: Trend-Analyse → Indikatoren → KI-Validierung → Order-Platzierung. |
-| **Risikomanagement** | Dynamische Lot-Berechnung (% Risiko), Trailing-Stops, Partial-Close und Schutzmechanismen. |
-| **Echtzeit-Charts** | Integration von Plotly für interaktive Markt-Visualisierungen direkt in der GUI. |
-| **Modularer Aufbau** | Saubere Trennung von Broker-Logik, Markt-Analyse, KI-Engine und UI-Komponenten. |
-| **Offline‑First** | Höchster Datenschutz: Alles läuft lokal – keine Cloud‑Abhängigkeiten notwendig. |
+## 🌟 Key Features
 
-## � Projektstruktur
+### 🧠 Intelligente KI-Analyse
+- **Hybrid-KI-Support:** Nahtlose Integration von **lokalen Modellen** via Ollama (z. B. Llama 3, FinGPT-Specialized) und **Cloud-APIs** (OpenAI ChatGPT, etc.).
+- **Deep Reasoning:** Die KI validiert Handelssignale basierend auf RSI, MACD und Preis-Action-Mustern.
+- **Confidence Scoring:** Jede Empfehlung enthält einen Vertrauenswert zur Risikominimierung.
 
-Das System ist modular aufgebaut, um Wartbarkeit und Erweiterbarkeit zu gewährleisten:
+### ⚡ Auto-Trading Engine
+- **Multi-Timeframe (MTF):** Trend-Bestimmung auf H1, punktgenauer Einstieg auf M15.
+- **Advanced Indicators:** Dynamische Support/Resistance-Level, RSI-Erschöpfungssignale und MACD-Crossover.
+- **Smarte Ausführung:** Automatisierte Orderplatzierung mit integriertem Fehlermanagement.
 
-- `core/`: Das Herzstück – Enthält den `AIAnalyzer`, `MT5Broker` und Markt-Analyse-Logik.
-- `gui/`: Beinhaltet die moderne CustomTkinter-Oberfläche sowie klassische CLI-Menüs.
-- `trading/`: Logik für Indikatoren, Risikomanagement und Trading-Strategien.
-- `bridge/`: Die technische Schnittstelle (Receiver/Indicator) zu MetaTrader 5.
-- `config/`: Zentrale Verwaltung aller Parameter (KI-Modelle, Risiko, Pfade).
-- `storage/`: Persistente Speicherung von Trade-Logs, KI-Reasoning und Journalen.
+### 🛡️ Professionelles Risikomanagement
+- **Dynamische Lot-Berechnung:** Automatische Positionsgrößenbestimmung basierend auf dem prozentualen Kontorisiko.
+- **Partial Close:** Automatisierte Teilverkäufe (z. B. 50 % bei Target 1, 25 % bei Target 2).
+- **Trailing Stop:** Dynamische Gewinnabsicherung durch nachziehende Stopp-Loss-Level.
 
-## �🚀 Installation
+### 🖥️ Modernes Dashboard
+- **Glassmorphic UI:** Hochmoderne Benutzeroberfläche mit CustomTkinter und Dark Mode.
+- **Live-Monitoring:** Echtzeit-Metriken, P&L-Kurven und interaktive Plotly-Charts.
 
-### 1. System‑Voraussetzungen
-- **Python** ≥ 3.9 (empfohlen 3.11)
-- **MetaTrader 5** (Demo‑ oder Live‑Konto mit aktiviertem Algo-Handel)
-- **Ollama** – Modelle `fingpt`, `llama3` lokal installiert
+---
 
-### 2. Setup
+## 📁 Projektstruktur
+
+```text
+FinGPT-Ollama-/
+├── core/           # Herzstück: Broker-Anbindung, AI-Logik & Datenverarbeitung
+├── trading/        # Strategien: RL-Agents, Risiko-Management & Indikatoren
+├── gui/            # Frontend: Modernes Dashboard & CLI-Komponenten
+├── bridge/         # Technische Schnittstellen (MQL5-Python Bridge)
+├── config/         # Konfiguration: Backups, API-Keys & Trade-Parameter
+└── storage/        # Datenbanken: Trade-History, Logs & RL-Modelle
+```
+
+---
+
+## 🚀 Schnellstart
+
+### 1. Umgebung vorbereiten
 ```bash
 # Repository klonen
-git clone https://github.com/EdgarTomas2001/FinGPT-Ollama-.git
+git clone https://github.com/EdgarTheGOllam/FinGPT-Ollama-.git
 cd FinGPT-Ollama-
-
-# Virtuelle Umgebung erstellen
-python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
 
 # Abhängigkeiten installieren
 pip install -r requirements.txt
 ```
 
-### 3. Ollama Modells laden
-```bash
-ollama pull fingpt
-ollama pull llama3
-```
+### 2. KI-Schnittstellen konfigurieren
+FinGPT unterstützt zwei Arten der KI-Anbindung:
 
-## 📚 Nutzung
+- **Lokal (Ollama):** 
+  `ollama pull llama3`
+- **Cloud (API):** 
+  Trage deinen **OpenAI API Key** oder andere Provider in der `config/fingpt_config.json` ein, um High-End-Modelle wie GPT-4o für tiefergehende Marktanalysen zu nutzen.
 
-Das System wird über den zentralen Launcher gestartet:
-
+### 3. System starten
 ```bash
 python launch_gui.py
 ```
 
-### GUI Funktionen:
-- **Dashboard**: Live-Überblick über offene Positionen und Markt-Trends.
-- **AI Analysis**: Manuelle oder automatische Analyse von Symbolen durch das LLM.
-- **Settings**: Konfiguration von Risiko-Parametern, Trading-Zeiten und KI-Modellen direkt in der App.
-- **Log Viewer**: Echtzeit-Überwachung aller System- und Handelsaktivitäten.
+---
 
-## 🛠️ Weiterentwicklung
-- Modell‑Feintuning mit eigenen Finanz‑Datensätzen
-- Docker‑Support für schnelles Setup
-- Web‑UI (lokal, offline) via Flask + React
-- Back‑Testing‑Modul für historische Simulationen
-- CI/CD mit GitHub‑Actions (nur Lint & Tests, kein automatisches Deploy)
-
-## 🤝 Mitwirken
-1. Fork das Repository
-2. Feature‑Branch erstellen (`git checkout -b feature/mein‑feature`)
-3. Änderungen committen & Pushen
-4. Pull‑Request öffnen – bitte einen kurzen Überblick im PR‑Body geben
-
-*Bitte keine automatischen Pfad‑Ersetzungen im Code einbringen – verwende stattdessen Konfigurations‑Variablen.*
-
-## ⚠️ Disclaimer
-*FinGPT ist ein rein experimentelles, privates Projekt. Das System nutzt automatisierte Handelsentscheidungen und kann zu finanziellen Verlusten führen. Der Autor übernimmt keinerlei Haftung für Verluste, Schäden oder rechtliche Konsequenzen, die aus der Nutzung dieses Codes entstehen. Nutzer sind verpflichtet, das System zunächst in einer sicheren Umgebung (z. B. Demo‑Konto) zu testen und sämtliche regulatorischen Vorgaben sowie Risikomanagement‑Prinzipien eigenständig zu berücksichtigen.*
-
-## 📜 Lizenz
-MIT – du darfst das Projekt frei nutzen, modifizieren und kommerziell einsetzen, solange der Lizenz‑Hinweis erhalten bleibt.
+## 🛠️ Erweiterbarkeit & APIs
+Das System ist "API-Ready" entwickelt. Dank der modularen `AIAnalyzer`-Klasse können verschiedene Endpunkte (Localhost, OpenAI, Anthropic) einfach parallel geschaltet werden, um Analysen zu vergleichen ("AI Debate Mode").
 
 ---
-> **Tipp für nächtliche Arbeit:** Starte das Skript in einer `tmux`‑Session, damit du bei Verbindungsabbrüchen das Log weiter verfolgen kannst.
+
+## ⚠️ Disclaimer
+*FinGPT ist ein experimentelles System. Automatisierter Handel birgt hohe finanzielle Risiken. Der Autor übernimmt keine Haftung für Verluste. Teste das System IMMER zuerst auf einem Demo-Konto.*
+
+---
+Managed by **EdgarTheGOllam** | Optimized for Privacy & Performance.
