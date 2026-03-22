@@ -132,7 +132,11 @@ class ExperienceDB:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
                 
-                if symbol:
+                # DEBUG: Log the query parameters
+                print(f"[DEBUG] ExperienceDB: Query with symbol={repr(symbol)}, limit={limit}")
+                
+                if symbol and symbol != "None":
+                    # Filter by specific symbol (exclude "None" string entries)
                     cursor.execute('''
                         SELECT ticket, symbol, timestamp, state_features, action, profit, is_stop_loss, reward 
                         FROM experiences 
@@ -141,6 +145,8 @@ class ExperienceDB:
                         LIMIT ?
                     ''', (symbol, limit))
                 else:
+                    # FIXED: Show ALL experiences when symbol is None, "None", or "Alle"
+                    # This includes both NULL symbols and "None" string entries
                     cursor.execute('''
                         SELECT ticket, symbol, timestamp, state_features, action, profit, is_stop_loss, reward 
                         FROM experiences 

@@ -1,10 +1,11 @@
 import customtkinter as ctk
 from gui.design_system import DesignSystem
+from gui.components.interactive_frame import HoverFadeFrame
 from typing import Optional, Callable
 import threading
 
 
-class MetricCard(ctk.CTkFrame):
+class MetricCard(HoverFadeFrame):
     """
     Eine wiederverwendbare Metrik-Karte mit modernem Design, Icon, Trend-Anzeige und Hover-Interaction.
     Verwendet das zentrale Design-System für konsistente Farben und Abstände.
@@ -69,14 +70,18 @@ class MetricCard(ctk.CTkFrame):
         # Standard-Parameter
         default_kwargs = {
             'corner_radius': radius,
-            'fg_color': self.default_color,
-            'border_width': 1,
-            'border_color': "#2A2D34"
+            'border_width': 2,
         }
         config = {**default_kwargs, **kwargs}
         
-        # Hauptframe Container init
-        super().__init__(master, **config)
+        # Hauptframe Container init - nutzt nun HoverFadeFrame Logik
+        super().__init__(master, 
+                         active_bg_color=self.hover_color, 
+                         active_border_color=ds.get_color('primary'), 
+                         idle_border_color="#2A2D34",
+                         fade_delay_ms=2500,
+                         draggable=True,
+                         **config)
         
         # Konfiguriere minimale Breite
         self.configure(width=self._min_width)
@@ -180,8 +185,7 @@ class MetricCard(ctk.CTkFrame):
             )
             self.trend_value_label.pack(side="left")
         
-        # Event-Bindings für Hover-Animation auf allen relevanten Widgets
-        self._bind_hover_recursive(self)
+        # Event-Bindings für Hover-Animation auf allen relevanten Widgets werden nun im HoverFadeFrame geregelt
 
     def _get_responsive_icon_size(self, window_width: int) -> int:
         """Berechnet responsive Icon-Größe basierend auf Fensterbreite."""
@@ -193,21 +197,6 @@ class MetricCard(ctk.CTkFrame):
         elif window_width < ds.BREAKPOINTS['md']:
             return int(base_size * 0.85)
         return base_size
-
-    def _bind_hover_recursive(self, widget):
-        """Bindet Hover-Events rekursiv auf alle Child-Widgets."""
-        widget.bind("<Enter>", self._on_enter)
-        widget.bind("<Leave>", self._on_leave)
-        for child in widget.winfo_children():
-            self._bind_hover_recursive(child)
-
-    def _on_enter(self, event):
-        """Sanfter Hover-Effekt mit Hintergrundfarbe und neon blauem Border."""
-        self.configure(fg_color=self.hover_color, border_color=DesignSystem.get_color('primary'), border_width=1)
-        
-    def _on_leave(self, event):
-        """Reset bei Mausverlassen."""
-        self.configure(fg_color=self.default_color, border_color="#2A2D34", border_width=1)
 
     def update_value(self, new_value, trend=None, trend_value=None):
         """

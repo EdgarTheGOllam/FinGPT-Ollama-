@@ -19,3 +19,19 @@ Die Liste auf der linken Seite zeigt Ihnen alle Symbole, die Sie in der Konfigur
 
 ### Was zeigt der Live P&L Chart rechts unten?
 Der animierte Live-Graph zeichnet minutiös Ihren schwebenden Gewinn (Floating Profit) oder Verlust während der laufenden Session auf. Wenn offene Trades in den Gewinn laufen, steigt die Kurve. Dieser Graph ist essenziell, um die Volatilität und den Drawdown Ihres laufenden Portfolios visuell zu erfassen, anstatt nur trockene Zahlen im MT5-Terminal zu beobachten.
+
+### Was bedeuten die Farben im Dashboard?
+Das Dashboard verwendet ein durchdachtes Farbschema:
+- **Grün**: Positive Werte (Gewinn, bullische Signale, ausreichende Margin)
+- **Rot**: Negative Werte (Verlust, bärische Signale, kritische Margin)
+- **Blau/Weiß**: Neutrale Informationen
+- **Gelb**: Warnungen oder neutrale Status-Updates
+
+### Wie oft aktualisieren sich die Dashboard-Daten?
+Die meisten Metriken aktualisieren sich alle 1-5 Sekunden (je nach Einstellung). Der Kontostand und die P&L werden in Echtzeit vom MT5-Server abgerufen. KI-Analysen aktualisieren sich typischerweise alle 30-60 Sekunden, um die Serverlast zu minimieren.
+
+### Kann ich das Dashboard an meine Bedürfnisse anpassen?
+Ja, Sie können verschiedene Widgets ein- oder ausblenden. Klicken Sie auf das Zahnrad-Symbol oben rechts im Dashboard-Bereich. Sie können auswählen, welche Metriken angezeigt werden sollen und wie groß die einzelnen Bereiche sein sollen.
+
+### Was ist das 'Daily Goal' Feature?
+Das Daily Goal ist ein persönliches Gewinnziel, das Sie in den Einstellungen festlegen (z.B. 50€ pro Tag). Das Dashboard zeigt dann einen Fortschrittsbalken: Wenn Sie heute bereits 35€ verdient haben, zeigt es 70% des Ziels an. Dies hilft Ihnen, diszipliniert zu traden und nicht übermäßig aggressiv zu werden, sobald das Ziel erreicht ist.

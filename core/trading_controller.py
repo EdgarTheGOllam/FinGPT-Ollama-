@@ -97,14 +97,14 @@ class TradingController:
                 return default
 
         STYLE_MAP = {
-            "Scalping":           {"tf": mt5.TIMEFRAME_M5,  "sl": 10, "tp": 15,  "pause": 30},
-            "Day Trading":        {"tf": mt5.TIMEFRAME_M15, "sl": 30, "tp": 45,  "pause": 120},
-            "Swing Trading":      {"tf": mt5.TIMEFRAME_H1,  "sl": 60, "tp": 90,  "pause": 300},
-            "Position Trading":   {"tf": mt5.TIMEFRAME_H4,  "sl":100, "tp":150,  "pause": 300},
-            "Price Action":       {"tf": mt5.TIMEFRAME_M15, "sl": 25, "tp": 40,  "pause": 120},
-            "Breakout-Trading":   {"tf": mt5.TIMEFRAME_H1,  "sl": 40, "tp": 80,  "pause": 240},
-            "Mean Reversion":     {"tf": mt5.TIMEFRAME_M15, "sl": 20, "tp": 30,  "pause": 120},
-            "AI-Fulldrive Mode 🤖": {"tf": mt5.TIMEFRAME_M15, "sl": 30, "tp": 50, "pause": 60},
+            "Scalping":           {"tf": mt5.TIMEFRAME_M5,  "sl": 8,  "tp": 16,  "pause": 60},
+            "Day Trading":        {"tf": mt5.TIMEFRAME_M15, "sl": 20, "tp": 40,  "pause": 120},
+            "Swing Trading":      {"tf": mt5.TIMEFRAME_H1,  "sl": 50, "tp": 150, "pause": 300},
+            "Position Trading":   {"tf": mt5.TIMEFRAME_H4,  "sl": 100,"tp": 300, "pause": 300},
+            "Price Action":       {"tf": mt5.TIMEFRAME_M15, "sl": 20, "tp": 50,  "pause": 120},
+            "Breakout-Trading":   {"tf": mt5.TIMEFRAME_H1,  "sl": 30, "tp": 90,  "pause": 240},
+            "Mean Reversion":     {"tf": mt5.TIMEFRAME_M15, "sl": 15, "tp": 30,  "pause": 120},
+            "AI-Fulldrive Mode 🤖": {"tf": mt5.TIMEFRAME_M15, "sl": 25, "tp": 50,  "pause": 60},
         }
 
         DAY_ATTRS = ["day_mon", "day_tue", "day_wed", "day_thu", "day_fri"]
@@ -386,20 +386,22 @@ class TradingController:
                             signal_hint = f"RSI={rsi_val}, MACD={macd_sig}, Übergeordneter Trend={htf_trend}. Spread={spread_pips:.1f}. Preis={price:.5f}."
 
                     style_instruction = {
-                        "Scalping":         "Kurze schnelle Bewegungen, sehr enge SL/TP.",
-                        "Day Trading":      "Intraday-Bewegung, klare Trendrichtung bevorzugen.",
-                        "Swing Trading":    "Mehrstündige Bewegungen, nur starke Setups.",
-                        "Position Trading": "Strategische Trendfolge, viel Geduld.",
-                        "Price Action":     "Fokus auf nackte Charts, Widerstände und Kerzenmuster.",
-                        "Breakout-Trading": "Handel von Ausbrüchen aus Konsolidierungszonen mit Momentum.",
-                        "Mean Reversion":   "Antizyklisches Handeln bei Übertreibungen zurück zum Mittelwert.",
+                        "Scalping":         "Kurze, präzise Bewegungen am EMA. Strikte RRR von 1:2. Akzeptiere nur A+ Setups.",
+                        "Day Trading":      "Intraday-Trendfolge. Nur handeln, wenn klare Struktur (Higher Highs/Lower Lows) besteht. Strikte RRR von 1:2.",
+                        "Swing Trading":    "Mehrstündige Bewegungen an großen S/R Leveln. Nur absolute Top-Setups mit 1:3 RRR.",
+                        "Position Trading": "Strategische Trendfolge am H4/D1. Extrem geduldig. Mindestens 1:3 RRR erforderlich.",
+                        "Price Action":     "Nackte Charts, starke Ablehnungen an Key-Leveln. Nur handeln bei klaren Umkehrmustern.",
+                        "Breakout-Trading": "Pullback nach Breakout oder explosives Momentum nach Konsolidierung. 1:3 RRR.",
+                        "Mean Reversion":   "Extreme Übertreibungen (RSI <25 oder >75) u. MACD-Divergenz. Antizyklisch, enge SL.",
                     }.get(style, "")
 
-                    sys_prompt = "Du bist FinGPT, ein professioneller Forex Bot. Antworte immer auf Deutsch."
+                    sys_prompt = "Du bist ein hochprofitabler, institutioneller Forex-Algo. Du bewertest Trades extrem kritisch und nutzt nur A+ Setups."
                     prompt = (
                         f"Analysiere: {symbol}. "
                         f"Handelsstil: {style}. {style_instruction} "
                         f"Aktuelle Marktdaten: {signal_hint} "
+                        f"WICHTIG: Wenn Indikatoren widersprüchlich sind, der Trend unklar ist oder Volatilität fehlt, "
+                        f"antworte ZWINGEND mit WARTEN. Erlaube keine mittelmäßigen Trades! "
                         f"Gib deine Empfehlung in folgendem Format aus: "
                         f"SIGNAL: [BUY/SELL/WARTEN] | BEGRÜNDUNG: [1-2 Sätze warum]"
                     )

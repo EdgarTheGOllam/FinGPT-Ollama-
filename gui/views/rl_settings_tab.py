@@ -65,6 +65,9 @@ class RLSettingsView:
         self._rl_map_symbol_var = None
         self._rl_map_status: Any = None
         self._rl_map_canvas_frame: Any = None
+        self._rl_map_canvas: Any = None  # Persistent FigureCanvasTkAgg widget
+        self._rl_map_rendering: bool = False  # Prevent concurrent renders
+        self._rl_map_fig: Any = None     # Current matplotlib Figure
         
         # Hardware Status references
         self._hw_update_active = False
@@ -326,8 +329,21 @@ class RLSettingsView:
         map_ctrl.grid(row=0, column=0, sticky="ew", padx=10, pady=10)
         
         ctk.CTkLabel(map_ctrl, text="Währungspaar:").pack(side="left", padx=(0, 10))
-        self._rl_map_symbol_var = ctk.StringVar(value="EURUSD")
-        ctk.CTkComboBox(map_ctrl, values=["Alle", "EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD", "USDCAD"], 
+        self._rl_map_symbol_var = ctk.StringVar(value="Alle")  # Default to 'Alle' to show all experiences
+        # Use dynamic values from database if available, otherwise use default list
+        try:
+            from storage.experience_db import ExperienceDB
+            db = ExperienceDB()
+            all_exp = db.get_resolved_experiences(None, limit=1000)
+            symbols = sorted(set(exp.get('symbol', '') for exp in all_exp if exp.get('symbol')))
+            if symbols:
+                combo_values = ["Alle"] + symbols
+            else:
+                combo_values = ["Alle", "EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD", "USDCAD", "NZDUSD"]
+        except:
+            combo_values = ["Alle", "EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD", "USDCAD", "NZDUSD"]
+        
+        ctk.CTkComboBox(map_ctrl, values=combo_values, 
                         variable=self._rl_map_symbol_var).pack(side="left", padx=(0, 20))
                         
         ctk.CTkButton(map_ctrl, text="🔄 Netzwerk Laden", 
@@ -341,224 +357,324 @@ class RLSettingsView:
         self._rl_map_canvas_frame = ctk.CTkFrame(map_tab, corner_radius=15, fg_color="#1A1D24")
         self._rl_map_canvas_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 10))
         
-        # Delay the first render so the GUI completes drawing
-        self.app.after(500, self._render_experience_map)
+        # Delay the first render so the GUI completes drawing (only once, not repeatedly)
+        # Don't use app.after here - it will keep calling the method repeatedly!
+        # Use a flag to ensure it only renders once on startup
+        def delayed_first_render():
+            if not hasattr(self, '_rl_map_initialized') or not self._rl_map_initialized:
+                self._rl_map_initialized = True
+                self._render_experience_map()
+        self.app.after(500, delayed_first_render)
 
     def _render_experience_map(self):
-        self._rl_map_status.configure(text="Lade Trainingsdaten...", text_color="#F1C40F")
-        if ExperienceDB is None:
-            self._rl_map_status.configure(text="Keine ExperienceDB gefunden.", text_color="#FF1744")
+        """Premium, smooth Experience Map renderer. Always shows a visible canvas."""
+        # Prevent multiple concurrent renders
+        if hasattr(self, '_rl_map_rendering') and self._rl_map_rendering:
+            print("[DEBUG] Experience Map: Render already in progress, skipping")
             return
-            
-        sym = self._rl_map_symbol_var.get()
-        if sym == "Alle":
-            sym = None
-            
+        # Set flag BEFORE starting thread to prevent race condition
+        if self._rl_map_rendering:
+            print("[DEBUG] Experience Map: Render already in progress, skipping")
+            return
+        self._rl_map_rendering = True
+        
+        self._rl_map_status.configure(text="\u23f3 Lade Trainingsdaten...", text_color="#F1C40F")
+
         def fetch_data():
             try:
-                db = ExperienceDB()
-                # Sort by timestamp ascending for plotting
-                experiences = sorted(db.get_resolved_experiences(sym, limit=2000), key=lambda x: x['timestamp'])
-                
-                # Build NetworkX Graph
                 import networkx as nx
-                G = nx.Graph()
-                
-                # Plot setup
-                fig = Figure(figsize=(9, 5), facecolor='#181818') # Obsidian dark background
-                fig.subplots_adjust(left=0, right=1, bottom=0, top=1) # Remove margins
+                import random as rng_mod
+                import matplotlib.patches as mpatches
+
+                BG       = "#0d0f14"
+                ACCENT   = "#7C3AED"
+                WIN_COL  = "#34D399"
+                LOSS_COL = "#F87171"
+                HUB_COL  = "#A78BFA"
+                ROOT_COL = "#E2E8F0"
+
+                fig = Figure(figsize=(10, 5.8), facecolor=BG, dpi=100)
+                fig.subplots_adjust(left=0.01, right=0.99, bottom=0.01, top=0.99)
                 ax = fig.add_subplot(111)
-                ax.set_facecolor('#181818')
-                ax.axis('off') # Hide axes for true map look
-                
+                ax.set_facecolor(BG)
+                ax.axis('off')
+
+                # Bokeh background particles (always rendered)
+                rng_mod.seed(42)
+                for _ in range(80):
+                    bx = rng_mod.uniform(-2, 2)
+                    by = rng_mod.uniform(-2, 2)
+                    bs = rng_mod.uniform(10, 40)
+                    ba = rng_mod.uniform(0.03, 0.09)
+                    ax.scatter(bx, by, s=bs, c=ACCENT, alpha=ba, zorder=0)
+
+                # ── Try to load experiences ──────────────────────────────
+                experiences = []
+                status_msg  = ""
+                status_col  = "#34D399"
+
+                if ExperienceDB is None:
+                    status_msg = "\u2717 ExperienceDB nicht verfuegbar (kein storage-Modul)"
+                    status_col = "#F87171"
+                    self.app.after(0, lambda: self._rl_map_status.configure(
+                        text=status_msg, text_color=status_col))
+                else:
+                    try:
+                        # DEBUG: Log the raw value from the combo box
+                        raw_sym = self._rl_map_symbol_var.get() if hasattr(self, '_rl_map_symbol_var') and self._rl_map_symbol_var else None
+                        print(f"[DEBUG] Experience Map: Raw symbol value = '{raw_sym}' (type: {type(raw_sym).__name__})")
+                        
+                        sym = raw_sym
+                        if sym == "Alle" or sym == "" or sym == "None":
+                            sym = None
+                            print("[DEBUG] Experience Map: Filter set to None (show all)")
+                        
+                        db = ExperienceDB()
+                        all_experiences = db.get_resolved_experiences(sym, limit=2000)
+                        experiences = sorted(
+                            all_experiences,
+                            key=lambda x: x.get('timestamp', 0)
+                        )
+                        
+                        # Debug: Log the number of experiences found
+                        print(f"[DEBUG] Experience Map: Found {len(experiences)} experiences for filter symbol={repr(sym)}")
+                        
+                        # Log unique symbols found in the results
+                        if experiences:
+                            found_symbols = set(exp.get('symbol', 'UNKNOWN') for exp in experiences)
+                            print(f"[DEBUG] Experience Map: Unique symbols in results: {found_symbols}")
+                        
+                        if len(experiences) == 0 and sym is not None:
+                            # Try without symbol filter to diagnose
+                            all_exp = db.get_resolved_experiences(None, limit=2000)
+                            print(f"[DEBUG] Experience Map: Found {len(all_exp)} experiences without filter")
+                            
+                    except Exception as db_err:
+                        import traceback
+                        status_msg = f"\u2717 DB-Fehler: {db_err}"
+                        status_col = "#F87171"
+                        print(f"[DEBUG] Experience Map Error: {db_err}")
+                        traceback.print_exc()
+
+                # ── Empty state: styled message inside canvas ─────────────
                 if not experiences:
-                    ax.text(0.5, 0.5, "Keine abgeschlossenen Trades in der DB gefunden.", 
-                            ha='center', va='center', color='gray', fontsize=12, transform=ax.transAxes)
-                    self.app.after(0, lambda: self._embed_rl_map(fig, []))
+                    if not status_msg:
+                        status_msg = "Keine abgeschlossenen Trades in der DB."
+                        status_col = "#8B949E"
+                    ax.text(0.5, 0.56, "Noch keine Trade-Erfahrungen",
+                            ha='center', va='center', color='#6B7280',
+                            fontsize=15, fontweight='bold', transform=ax.transAxes,
+                            fontfamily='DejaVu Sans')
+                    ax.text(0.5, 0.46, "Fuehre Trades zur Visualisierung durch oder starte ein RL-Training.",
+                            ha='center', va='center', color='#4B5563',
+                            fontsize=10, transform=ax.transAxes,
+                            fontfamily='DejaVu Sans')
+                    # Draw a placeholder root node so the canvas isn't empty
+                    ax.scatter([0], [0.05], s=1200, c=ROOT_COL, alpha=0.9,
+                               zorder=5, linewidths=2.0, edgecolors=ACCENT, marker="*")
+                    ax.text(0, -0.08, "[RL Brain]", ha='center', va='top',
+                            color=ROOT_COL, fontsize=11, fontweight='bold',
+                            fontfamily='DejaVu Sans',
+                            bbox=dict(boxstyle='round,pad=0.3', facecolor='#0d0f14',
+                                      edgecolor='none', alpha=0.85))
+                    ax.set_xlim([-1, 1]); ax.set_ylim([-0.5, 1])
+                    self.app.after(0, lambda msg=status_msg, col=status_col:
+                                   (self._rl_map_status.configure(text=msg, text_color=col),
+                                    self._embed_rl_map(fig, [], None)))
                     return
 
-                # Build nodes and edges
-                root_node = "🧠 RL Brain"
-                G.add_node(root_node, type="root", size=800, color="#FFFFFF")
-                
-                # Keep track of the last trade per symbol to create a chronological chain
+                # ── Build and draw the full graph ────────────────────────
+                G = nx.Graph()
+                root_node = "[RL Brain]"
+                G.add_node(root_node, ntype="root", size=1200, color=ROOT_COL)
                 last_trade_per_symbol = {}
-                
-                sizes = []
-                colors = []
-                tickets_ordered = []
-                
+
                 for exp in experiences:
-                    t_sym = exp.get('symbol', 'Unknown')
+                    t_sym  = exp.get('symbol', 'Unknown')
                     ticket = exp.get('ticket')
                     profit = exp.get('profit', 0)
                     reward = exp.get('reward', profit)
-                    
+
                     if t_sym not in G:
-                        G.add_node(t_sym, type="symbol", size=400, color="#CCCCCC")
-                        G.add_edge(root_node, t_sym, weight=2.0)
-                        
-                    # Calculate node properties
-                    # Scale size based on abs reward to highlight big wins/losses
-                    n_size = min(max(50 + abs(reward) * 10, 50), 400)
-                    n_color = "#00FF66" if profit >= 0 else "#FF1744" # Green/Red
-                    
-                    G.add_node(ticket, type="trade", size=n_size, color=n_color)
-                    
-                    # Connect to symbol hub
-                    G.add_edge(t_sym, ticket, weight=0.5)
-                    
-                    # Connect to previous trade of same symbol (timeline web)
+                        G.add_node(t_sym, ntype="symbol", size=600, color=HUB_COL)
+                        G.add_edge(root_node, t_sym, weight=2.5)
+
+                    n_size  = int(min(max(60 + abs(reward) * 12, 60), 450))
+                    n_color = WIN_COL if profit >= 0 else LOSS_COL
+
+                    G.add_node(ticket, ntype="trade", size=n_size, color=n_color)
+                    G.add_edge(t_sym, ticket, weight=0.6)
+
                     if t_sym in last_trade_per_symbol:
-                        G.add_edge(last_trade_per_symbol[t_sym], ticket, weight=1.5)
-                        
+                        G.add_edge(last_trade_per_symbol[t_sym], ticket, weight=1.8)
                     last_trade_per_symbol[t_sym] = ticket
-                
-                # Layout
-                pos = nx.spring_layout(G, k=0.15, iterations=40, seed=42)
-                
-                # Draw edges (thin gray lines)
-                edges = G.edges()
+
+                n = G.number_of_nodes()
+                k_val  = 0.25 if n < 100 else (0.18 if n < 500 else 0.12)
+                it_val = 60   if n < 100 else (40   if n < 500 else 25)
+                pos = nx.spring_layout(G, k=k_val, iterations=it_val, seed=42)
+
                 from matplotlib.collections import LineCollection
-                edge_lines = [(pos[u], pos[v]) for u, v in edges]
-                lc = LineCollection(edge_lines, colors="#444444", linewidths=1.0, alpha=0.6, zorder=1)
-                ax.add_collection(lc)
-                
-                # Draw nodes manually using scatter for picker capabilities
-                # Group by type to plot differently or all together
-                node_x = []
-                node_y = []
-                node_s = []
-                node_c = []
-                node_tickets = []
-                
+                thin_lines  = [(pos[u], pos[v]) for u, v in G.edges() if G[u][v].get('weight', 1) < 1.5]
+                thick_lines = [(pos[u], pos[v]) for u, v in G.edges() if G[u][v].get('weight', 1) >= 1.5]
+
+                if thin_lines:
+                    ax.add_collection(LineCollection(thin_lines, colors="#1e2233", linewidths=0.8, alpha=0.6, zorder=1))
+                if thick_lines:
+                    ax.add_collection(LineCollection(thick_lines, colors="#3A3F5C", linewidths=1.5, alpha=0.5, zorder=1))
+
+                trade_x, trade_y, trade_s, trade_c, trade_tickets = [], [], [], [], []
+                hub_nodes, root_nodes = [], []
+
                 for node in G.nodes():
-                    n_data = G.nodes[node]
-                    node_x.append(pos[node][0])
-                    node_y.append(pos[node][1])
-                    node_s.append(n_data['size'])
-                    node_c.append(n_data['color'])
-                    node_tickets.append(node if n_data['type'] == 'trade' else None)
-                
-                # Draw the scatter plot on top of edges
-                sc = ax.scatter(node_x, node_y, s=node_s, c=node_c, alpha=0.9, zorder=2, picker=True)
-                sc._tickets = node_tickets # Custom attribute to retrieve ticket on pick
-                
-                # Label only root and symbol hubs
-                for node in G.nodes():
-                    if G.nodes[node]['type'] in ['root', 'symbol']:
-                        nx.draw_networkx_labels(G, pos, {node: node}, ax=ax, 
-                                                font_size=10, font_color="white", 
-                                                font_weight="bold", 
-                                                bbox=dict(facecolor='#181818', edgecolor='none', alpha=0.7, pad=0))
-                
-                fig.tight_layout()
-                self.app.after(0, lambda: self._embed_rl_map(fig, experiences))
-                
+                    ndata = G.nodes[node]
+                    ntype = ndata.get('ntype', 'trade')
+                    x, y  = pos[node][0], pos[node][1]
+                    if ntype == 'trade':
+                        trade_x.append(x); trade_y.append(y)
+                        trade_s.append(ndata['size']); trade_c.append(ndata['color'])
+                        trade_tickets.append(node)
+                    elif ntype == 'symbol':
+                        hub_nodes.append((x, y, node, ndata))
+                    else:
+                        root_nodes.append((x, y, node, ndata))
+
+                sc_ref = None
+                if trade_x:
+                    ax.scatter(trade_x, trade_y, s=[s * 2.5 for s in trade_s],
+                               c=trade_c, alpha=0.08, zorder=2, linewidths=0)
+                    sc_ref = ax.scatter(trade_x, trade_y, s=trade_s, c=trade_c,
+                                        alpha=0.92, zorder=3, linewidths=0.4,
+                                        edgecolors="#ffffff", picker=True)
+                    sc_ref._tickets = trade_tickets
+
+                for hx, hy, hlbl, _ in hub_nodes:
+                    ax.scatter(hx, hy, s=600, c=HUB_COL, alpha=1.0, zorder=4,
+                               linewidths=1.2, edgecolors="white")
+                    ax.text(hx, hy + 0.06, hlbl, ha='center', va='bottom',
+                            color='white', fontsize=8.5, fontweight='bold',
+                            fontfamily='DejaVu Sans',
+                            bbox=dict(boxstyle='round,pad=0.2', facecolor='#1a1d24',
+                                      edgecolor='none', alpha=0.75))
+
+                for rx, ry, rlbl, _ in root_nodes:
+                    ax.scatter(rx, ry, s=1200, c=ROOT_COL, alpha=1.0, zorder=5,
+                               linewidths=2.0, edgecolors=ACCENT, marker="*")
+                    ax.text(rx, ry + 0.1, rlbl, ha='center', va='bottom', color=ROOT_COL,
+                            fontsize=10, fontweight='bold',
+                            fontfamily='DejaVu Sans',
+                            bbox=dict(boxstyle='round,pad=0.3', facecolor='#0d0f14',
+                                      edgecolor='none', alpha=0.85))
+
+                legend_handles = [
+                    mpatches.Patch(color=WIN_COL, label='Gewinn-Trade'),
+                    mpatches.Patch(color=LOSS_COL, label='Verlust-Trade'),
+                    mpatches.Patch(color=HUB_COL, label='Symbol Hub'),
+                ]
+                ax.legend(handles=legend_handles, loc='lower right', framealpha=0.3,
+                          facecolor='#1a1d24', edgecolor='#2d3148',
+                          labelcolor='white', fontsize=8)
+
+                xs = [pos[node][0] for node in G]
+                ys = [pos[node][1] for node in G]
+                ax.set_xlim([min(xs) - 0.25, max(xs) + 0.25])
+                ax.set_ylim([min(ys) - 0.25, max(ys) + 0.25])
+
+                self.app.after(0, lambda: self._embed_rl_map(fig, experiences, sc_ref))
+
             except Exception as e:
+                import traceback
                 err = str(e)
-                self.app.after(0, lambda: self._rl_map_status.configure(text=f"Fehler: {err}", text_color="#FF1744"))
+                self.app.after(0, lambda msg=err: self._rl_map_status.configure(
+                    text=f"\u2717 Fehler: {msg}", text_color="#FF4365"))
+            finally:
+                self._rl_map_rendering = False
 
         threading.Thread(target=fetch_data, daemon=True).start()
 
-    def _embed_rl_map(self, fig, experiences):
-        for w in self._rl_map_canvas_frame.winfo_children():
-            w.destroy()
-            
-        canvas = FigureCanvasTkAgg(fig, master=self._rl_map_canvas_frame)
-        canvas.draw()
-        canvas.get_tk_widget().pack(fill="both", expand=True, padx=10, pady=10)
-        
-        self._rl_map_status.configure(text=f"Graph geladen ({len(experiences)} Trades). Klicke Punkte für Details. | Scrollen: Zoom | Ziehen: Pan", text_color="#00FF66")
+
+    def _embed_rl_map(self, fig, experiences, sc=None):
+        """Embed or refresh the matplotlib figure (persistent canvas — no flicker)."""
+        if not hasattr(self, '_rl_map_canvas') or self._rl_map_canvas is None:
+            for w in self._rl_map_canvas_frame.winfo_children():
+                w.destroy()
+            self._rl_map_fig    = fig
+            self._rl_map_canvas = FigureCanvasTkAgg(fig, master=self._rl_map_canvas_frame)
+            self._rl_map_canvas.get_tk_widget().pack(fill="both", expand=True, padx=4, pady=4)
+        else:
+            self._rl_map_fig = fig
+            self._rl_map_canvas.figure = fig
+            fig.set_canvas(self._rl_map_canvas)
+
+        self._rl_map_canvas.draw_idle()  # Non-blocking
+
+        n = len(experiences)
+        self._rl_map_status.configure(
+            text=f"\u2713 {n} Trades geladen \u2014 Scrollen: Zoom \u2022 Ziehen: Pan \u2022 Klick: Details",
+            text_color="#34D399"
+        )
 
         ax = fig.get_axes()[0]
-        
-        # --- Pan & Zoom Logic ---
-        pan_state = {'press': False, 'xpress': 0, 'ypress': 0, 'xlim': None, 'ylim': None, 'is_panning': False}
+
+        pan_state = {
+            'press': False, 'xpress': 0.0, 'ypress': 0.0,
+            'xlim': (0.0, 1.0), 'ylim': (0.0, 1.0), 'is_panning': False
+        }
 
         def zoom(event):
-            if event.inaxes != ax: return
-            
-            base_scale = 1.2
+            if event.inaxes != ax:
+                return
             cur_xlim = ax.get_xlim()
             cur_ylim = ax.get_ylim()
-            
-            xdata = event.xdata
-            ydata = event.ydata
-            if xdata is None or ydata is None: return
-
-            if event.button == 'up':
-                scale_factor = 1 / base_scale # zoom in
-            elif event.button == 'down':
-                scale_factor = base_scale     # zoom out
-            else:
-                scale_factor = 1
-                
-            from typing import cast
-            cur_xlim = cast(tuple[float, float], ax.get_xlim())
-            cur_ylim = cast(tuple[float, float], ax.get_ylim())
-
-            new_width = float((cur_xlim[1] - cur_xlim[0]) * scale_factor)
-            new_height = float((cur_ylim[1] - cur_ylim[0]) * scale_factor)
-
-            relx = float((cur_xlim[1] - float(xdata)) / (cur_xlim[1] - cur_xlim[0]))
-            rely = float((cur_ylim[1] - float(ydata)) / (cur_ylim[1] - cur_ylim[0]))
-
-            new_x0 = float(xdata) - new_width * (1.0 - relx)
-            new_x1 = float(xdata) + new_width * relx
-            new_y0 = float(ydata) - new_height * (1.0 - rely)
-            new_y1 = float(ydata) + new_height * rely
-
-            ax.set_xlim([new_x0, new_x1])
-            ax.set_ylim([new_y0, new_y1])
-            canvas.draw_idle()
+            xdata, ydata = event.xdata, event.ydata
+            if xdata is None or ydata is None:
+                return
+            factor = 1.0 / 1.18 if event.button == 'up' else 1.18
+            ax.set_xlim([xdata - (xdata - cur_xlim[0]) * factor,
+                         xdata + (cur_xlim[1] - xdata) * factor])
+            ax.set_ylim([ydata - (ydata - cur_ylim[0]) * factor,
+                         ydata + (cur_ylim[1] - ydata) * factor])
+            self._rl_map_canvas.draw_idle()
 
         def on_press(event):
-            if event.inaxes != ax: return
-            if event.button == 1: # left click
-                pan_state['press'] = True
-                pan_state['xpress'] = event.xdata
-                pan_state['ypress'] = event.ydata
-                pan_state['xlim'] = ax.get_xlim()
-                pan_state['ylim'] = ax.get_ylim()
-                pan_state['is_panning'] = False
+            if event.inaxes != ax or event.button != 1:
+                return
+            pan_state.update(press=True, is_panning=False,
+                             xpress=float(event.xdata), ypress=float(event.ydata),
+                             xlim=tuple(ax.get_xlim()), ylim=tuple(ax.get_ylim()))
 
         def on_release(event):
             pan_state['press'] = False
 
         def on_motion(event):
-            if not pan_state['press'] or event.inaxes != ax: return
+            if not pan_state['press'] or event.inaxes != ax or event.xdata is None:
+                return
             dx = event.xdata - pan_state['xpress']
             dy = event.ydata - pan_state['ypress']
-            
-            # If moved enough, classify as panning (so pick event is ignored)
-            if abs(dx) > 0.05 or abs(dy) > 0.05:
+            if abs(dx) > 0.01 or abs(dy) > 0.01:
                 pan_state['is_panning'] = True
-                
-            cur_xlim = pan_state['xlim']
-            cur_ylim = pan_state['ylim']
-            
-            # Subtraction creates panning effect
-            ax.set_xlim([cur_xlim[0] - dx, cur_xlim[1] - dx])
-            ax.set_ylim([cur_ylim[0] - dy, cur_ylim[1] - dy])
-            canvas.draw_idle()
+            xl, yl = pan_state['xlim'], pan_state['ylim']
+            ax.set_xlim([xl[0] - dx, xl[1] - dx])
+            ax.set_ylim([yl[0] - dy, yl[1] - dy])
+            self._rl_map_canvas.draw_idle()
+
+        def on_pick(event):
+            if pan_state['is_panning']:
+                return
+            artist = event.artist
+            ind = event.ind[0]
+            if hasattr(artist, '_tickets'):
+                ticket = artist._tickets[ind]
+                if ticket is not None:
+                    self._open_trade_visualizer_from_map(ticket)
 
         fig.canvas.mpl_connect('scroll_event', zoom)
         fig.canvas.mpl_connect('button_press_event', on_press)
         fig.canvas.mpl_connect('button_release_event', on_release)
         fig.canvas.mpl_connect('motion_notify_event', on_motion)
-
-        # --- Interactivity: Open Trade Visualizer ---
-        def on_pick(event):
-            if pan_state['is_panning']: return # Don't trigger if we were just dragging the map
-            artist = event.artist
-            ind = event.ind[0] # Get first clicked index
-            if hasattr(artist, '_tickets'):
-                ticket = artist._tickets[ind]
-                if ticket is not None:
-                    self._open_trade_visualizer_from_map(ticket)
-                
         fig.canvas.mpl_connect('pick_event', on_pick)
+
+
 
     def _open_trade_visualizer_from_map(self, ticket):
         """Cross-references the ticket from the DB with the JSON files to open Visualizer"""

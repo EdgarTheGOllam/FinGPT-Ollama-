@@ -7,6 +7,7 @@ FinGPT mit Ollama + MetaTrader 5 Integration
 Vollautomatisches Trading mit KI und Partial Close + RSI
 """
 
+# type: ignore[attr-defined, reportPossiblyUnboundVariable, reportOptionalMemberAccess, reportAttributeAccessIssue]
 import logging
 import requests
 import json
@@ -22,17 +23,29 @@ import queue
 import warnings
 warnings.filterwarnings("ignore")
 
-if sys.stdout.encoding != 'utf-8':
-    sys.stdout.reconfigure(encoding='utf-8')
-if sys.stderr.encoding != 'utf-8':
-    sys.stderr.reconfigure(encoding='utf-8')
+# Set UTF-8 encoding for stdout/stderr (Python 3.7+)
+import io
+try:
+    # Use TextIOWrapper directly to avoid Pylance type issues
+    if sys.stdout.encoding != 'utf-8' and hasattr(sys.stdout, 'buffer'):
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+except Exception:
+    pass  # Older Python or unsupported environment
+
+try:
+    if sys.stderr.encoding != 'utf-8' and hasattr(sys.stderr, 'buffer'):
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+except Exception:
+    pass
 
 # MetaTrader 5 Import
 try:
-    import MetaTrader5 as mt5
+    import MetaTrader5 as mt5  # type: ignore[attr-defined, assignment]
     MT5_AVAILABLE = True
     print("MetaTrader5 verfügbar")
 except ImportError:
+    import typing
+    mt5 = typing.cast(typing.Any, None)  # type: ignore[assignment]
     MT5_AVAILABLE = False
     print("MetaTrader5 nicht installiert")
 
@@ -48,6 +61,14 @@ from core.performance_optimizer import PerformanceMetrics, ResourceLimiter
 from gui.cli_menu import CLIMenu
 
 class MT5FinGPT:
+    # Type annotations for Pylance to recognize instance attributes
+    rl_manager: 'RLTradingManager | None' = None
+    risk_manager: 'RiskManager | None' = None
+    broker: 'MT5Broker'
+    ai: 'AIAnalyzer | None' = None
+    market: 'MarketAnalyzer | None' = None
+    ui_lock: 'threading.Lock'
+    
     def __init__(self):
         """Initialisiert das FinGPT System mit korrekter Reihenfolge"""
     
@@ -146,6 +167,113 @@ class MT5FinGPT:
         self.sr_tolerance = self.market.sr_tolerance
         self.sr_strength_threshold = self.market.sr_strength_threshold
     
+    def calculate_support_resistance(self, symbol, timeframe=None):
+        """Berechnet Support und Resistance Level und gibt sie im erwarteten Format zurück.
+        
+        Args:
+            symbol: Das Handelssymbol (z.B. 'EURUSD')
+            timeframe: Optionaler Zeitrahmen. Standard ist H1.
+            
+        Returns:
+            Dictionary mit 'nearest_support' und 'nearest_resistance' als Tupel (level, strength)
+            oder None wenn keine Daten verfügbar sind.
+        """
+        if not hasattr(self, 'market') or not self.market:
+            return None
+            
+        try:
+            import MetaTrader5 as mt5
+            tf = timeframe if timeframe else (mt5.TIMEFRAME_H1 if MT5_AVAILABLE else 16385)
+            
+            sr_data = self.market.calculate_support_resistance(symbol, tf)
+            
+            if not sr_data:
+                return None
+            
+            # Konvertiere zum erwarteten Format
+            result = {}
+            
+            # Nearest Support - nähester Support unter dem aktuellen Preis
+            if sr_data.get('support_levels') and len(sr_data['support_levels']) > 0:
+                nearest = sr_data['support_levels'][0]
+                result['nearest_support'] = (nearest['price'], nearest['strength'])
+            else:
+                result['nearest_support'] = None
+            
+            # Nearest Resistance - nähester Resistance über dem aktuellen Preis  
+            if sr_data.get('resistance_levels') and len(sr_data['resistance_levels']) > 0:
+                nearest = sr_data['resistance_levels'][0]
+                result['nearest_resistance'] = (nearest['price'], nearest['strength'])
+            else:
+                result['nearest_resistance'] = None
+            
+            # Auch die vollständigen Daten hinzufügen für Kompatibilität
+            result['current_price'] = sr_data.get('current_price')
+            result['support_levels'] = sr_data.get('support_levels', [])
+            result['resistance_levels'] = sr_data.get('resistance_levels', [])
+            
+            return result
+            
+        except Exception as e:
+            self.log("ERROR", f"calculate_support_resistance Fehler: {e}") if hasattr(self, 'log') else print(f"Fehler: {e}")
+            return None
+    
+    def get_sr_signal(self, sr_data, current_price):
+        """Generiert ein Signal basierend auf S/R Levels.
+        
+        Args:
+            sr_data: Dictionary mit S/R Daten von calculate_support_resistance
+            current_price: Aktueller Preis
+            
+        Returns:
+            Tuple (signal, description) - signal ist 'BUY', 'SELL' oder 'NEUTRAL'
+        """
+        if not sr_data or not current_price:
+            return "NEUTRAL", "Keine S/R Daten verfügbar"
+            
+        try:
+            # nearest_support und nearest_resistance sind jetzt Tupel (price, strength)
+            nearest_resistance = sr_data.get('nearest_resistance')
+            nearest_support = sr_data.get('nearest_support')
+            
+            # DEBUG: Log to validate diagnosis
+            self.log("DEBUG", f"nearest_resistance: {nearest_resistance}, nearest_support: {nearest_support}") if hasattr(self, 'log') else None
+            
+            if nearest_resistance:
+                res_price = nearest_resistance[0]
+                res_strength = nearest_resistance[1]
+                # Distanz in Prozent
+                dist_to_res = (res_price - current_price) / current_price * 100
+            else:
+                dist_to_res = float('inf')
+                res_strength = 0
+                res_price = current_price  # DEBUG FIX: Initialize to avoid unbound variable
+            
+            if nearest_support:
+                sup_price = nearest_support[0]
+                sup_strength = nearest_support[1]
+                # Distanz in Prozent
+                dist_to_sup = (current_price - sup_price) / current_price * 100
+            else:
+                dist_to_sup = float('inf')
+                sup_strength = 0
+                sup_price = current_price  # DEBUG FIX: Initialize to avoid unbound variable
+            
+            # Signal basierend auf Preisnähe und Stärke
+            if dist_to_res < 1.0 and res_strength >= 2:
+                return "SELL", f"Preis nahe Resistance ({res_price:.5f}, Stärke: {res_strength})"
+            elif dist_to_sup < 1.0 and sup_strength >= 2:
+                return "BUY", f"Preis nahe Support ({sup_price:.5f}, Stärke: {sup_strength})"
+            elif dist_to_res < 2.0:
+                return "NEUTRAL", f"Nahe Resistance ({res_price:.5f})"
+            elif dist_to_sup < 2.0:
+                return "NEUTRAL", f"Nahe Support ({sup_price:.5f})"
+            else:
+                return "NEUTRAL", "Kein S/R Signal"
+                
+        except Exception as e:
+            return "NEUTRAL", f"S/R Signal Fehler: {e}"
+
         # MACD SETTINGS
         self.macd_fast_period = 12
         self.macd_slow_period = 26
@@ -538,7 +666,7 @@ class MT5FinGPT:
                             if self.companion_process.poll() is not None:
                                 break
                                 
-                            output = self.companion_process.stdout.readline()
+                            output = self.companion_process.stdout.readline()  # type: ignore[union-attr]
                             if output:
                                 output = output.strip()
                                 
@@ -1128,7 +1256,7 @@ class MT5FinGPT:
                 print(f"🎯 Empfohlene Aktion: Long-Position eröffnen")
             
                 # Berechne Einstiegs-Levels
-                tick = mt5.symbol_info_tick(symbol)
+                tick = mt5.symbol_info_tick(symbol)  # type: ignore[attr-defined]
                 if tick:
                     current_price = tick.ask
                     print(f"💰 Aktueller Einstiegspreis: {current_price:.5f}")
@@ -1149,7 +1277,7 @@ class MT5FinGPT:
                 print(f"📉 Verkaufsgelegenheit erkannt")
                 print(f"🎯 Empfohlene Aktion: Short-Position oder bestehende Position schließen")
             
-                tick = mt5.symbol_info_tick(symbol)
+                tick = mt5.symbol_info_tick(symbol)  # type: ignore[attr-defined]
                 if tick:
                     current_price = tick.bid
                     print(f"💰 Aktueller Verkaufspreis: {current_price:.5f}")
@@ -2053,7 +2181,12 @@ class MT5FinGPT:
     # ==========================================
     def rl_menu_enhanced(self):
         """Erweiterte RL Menü mit Smart Training"""
-    
+        
+        # Prüfe ob RL Manager verfügbar ist
+        if not self.rl_manager:
+            print("\n❌ RL Manager nicht verfügbar")
+            return
+        
         while True:
             self.print_header("REINFORCEMENT LEARNING")
         
@@ -2150,7 +2283,12 @@ class MT5FinGPT:
 
     def train_rl_agent_enhanced(self):
         """Erweiterte RL Agent Training mit automatischer Symbol-Auswahl"""
-    
+        
+        # Prüfe ob RL Manager verfügbar ist
+        if not self.rl_manager:
+            print("\n❌ RL Manager nicht verfügbar")
+            return
+        
         print("\n🚀 RL AGENT TRAINING")
         print("─" * 25)
     
@@ -2443,7 +2581,7 @@ class MT5FinGPT:
         # 3. Aktuelle offene Positionen
         if self.mt5_connected:
             try:
-                positions = mt5.positions_get()
+                positions = mt5.positions_get()  # type: ignore[attr-defined]
                 if positions:
                     for pos in positions:
                         symbols.add(pos.symbol)
@@ -2458,6 +2596,11 @@ class MT5FinGPT:
 
     def test_rl_recommendation(self):
         """Testet RL-Empfehlung für Symbol"""
+        
+        # Prüfe ob RL Manager verfügbar ist
+        if not self.rl_manager:
+            print("\n❌ RL Manager nicht verfügbar")
+            return
     
         print("\n🧠 RL EMPFEHLUNG TESTEN")
         print("─" * 25)
@@ -2505,12 +2648,14 @@ class MT5FinGPT:
             
                 # RSI
                 rsi = self.market.calculate_rsi(symbol, mt5.TIMEFRAME_H1 if MT5_AVAILABLE else 16385)
+                rsi_signal = None  # Initialize to avoid unbound variable
                 if rsi:
                     rsi_signal, rsi_desc = self.market.get_rsi_signal(rsi)
                     print(f"📈 RSI: {rsi_signal} ({rsi_desc})")
             
                 # MACD
                 macd_data = self.market.calculate_macd(symbol, mt5.TIMEFRAME_H1 if MT5_AVAILABLE else 16385)
+                macd_signal = None  # Initialize to avoid unbound variable
                 if macd_data:
                     macd_signal, macd_desc = self.market.get_macd_signal(macd_data)
                     print(f"📊 MACD: {macd_signal} ({macd_desc[:30]}...)")
@@ -2550,6 +2695,11 @@ class MT5FinGPT:
 
     def show_rl_statistics(self):
         """Zeigt RL Training-Statistiken"""
+        
+        # Prüfe ob RL Manager verfügbar ist
+        if not self.rl_manager:
+            print("\n❌ RL Manager nicht verfügbar")
+            return
     
         print("\n📊 RL TRAINING-STATISTIKEN")
         print("─" * 30)
@@ -2575,6 +2725,11 @@ class MT5FinGPT:
 
     def manage_rl_models(self):
         """Verwaltet RL Modelle (Speichern/Laden)"""
+        
+        # Prüfe ob RL Manager verfügbar ist
+        if not self.rl_manager:
+            print("\n❌ RL Manager nicht verfügbar")
+            return
     
         print("\n💾 RL MODELL-VERWALTUNG")
         print("─" * 25)
@@ -2904,6 +3059,11 @@ class MT5FinGPT:
 
     def toggle_rl_auto_trading(self):
         """Aktiviert/Deaktiviert RL Auto-Trading"""
+        
+        # Prüfe ob RL Manager verfügbar ist
+        if not self.rl_manager:
+            print("\n❌ RL Manager nicht verfügbar")
+            return
     
         print("\n🔄 RL AUTO-TRADING")
         print("─" * 20)
@@ -2931,6 +3091,11 @@ class MT5FinGPT:
 
     def compare_rl_performance(self):
         """Vergleicht RL Performance mit traditionellen Methoden"""
+        
+        # Prüfe ob RL Manager verfügbar ist
+        if not self.rl_manager:
+            print("\n❌ RL Manager nicht verfügbar")
+            return
     
         print("\n📈 PERFORMANCE VERGLEICH")
         print("─" * 30)
@@ -2954,6 +3119,9 @@ class MT5FinGPT:
             rsi = self.market.calculate_rsi(symbol, mt5.TIMEFRAME_H1 if MT5_AVAILABLE else 16385)
             macd_data = self.market.calculate_macd(symbol, mt5.TIMEFRAME_H1 if MT5_AVAILABLE else 16385)
             sr_data = self.market.calculate_support_resistance(symbol, mt5.TIMEFRAME_H1 if MT5_AVAILABLE else 16385)
+            
+            # Initialize current_price to avoid unbound variable
+            current_price = None
         
             print(f"\n📊 SIGNALE VERGLEICH:")
             print("─" * 25)
@@ -3324,7 +3492,7 @@ class MT5FinGPT:
         print("─" * 35)
     
         try:
-            symbols = mt5.symbols_get()
+            symbols = mt5.symbols_get()  # type: ignore[attr-defined]
             if not symbols:
                 print("❌ Keine Symbole gefunden")
                 return
@@ -3360,7 +3528,7 @@ class MT5FinGPT:
             if self.mt5_connected:
                 symbol_info = mt5.symbol_info(pair)
                 if symbol_info and symbol_info.visible:
-                    tick = mt5.symbol_info_tick(pair)
+                    tick = mt5.symbol_info_tick(pair)  # type: ignore[attr-defined]
                     if tick:
                         price = (tick.bid + tick.ask) / 2
                         print(f"✅ {pair:<10} Preis: {price:.5f}")
@@ -3387,7 +3555,7 @@ class MT5FinGPT:
                     tick = mt5.symbol_info_tick(symbol)
                     if tick:
                         # RSI berechnen
-                        rsi = self.calculate_rsi(symbol) if hasattr(self, 'calculate_rsi') else None
+                        rsi = self.market.calculate_rsi(symbol, mt5.TIMEFRAME_H1) if self.market and hasattr(self.market, 'calculate_rsi') else None
                         rsi_status = "📈" if rsi and rsi < 30 else "📉" if rsi and rsi > 70 else "📊"
                     
                         # Spread als Volatilitäts-Indikator
@@ -3935,9 +4103,9 @@ class MT5FinGPT:
                 symbol = input("Symbol für MACD Test: ").upper()
                 if symbol:
                     self.log("INFO", f"MACD Test gestartet für {symbol}", "ANALYSIS")
-                    macd_data = self.calculate_macd(symbol)
+                    macd_data = self.market.calculate_macd(symbol, mt5.TIMEFRAME_H1) if self.market and hasattr(self.market, 'calculate_macd') else None
                     if macd_data:
-                        signal, desc = self.get_macd_signal(macd_data)
+                        signal, desc = self.market.get_macd_signal(macd_data) if self.market and hasattr(self.market, 'get_macd_signal') else (None, None)
                         print(f"\n{symbol} MACD Test:")
                         print(f"MACD: {macd_data['macd']}")
                         print(f"Signal: {macd_data['signal']}")
@@ -4112,12 +4280,12 @@ class MT5FinGPT:
                 return
             print(f"🔄 Starte erweiterte Analyse für {symbol}...")
             # Hier könnte die Kommunikation mit dem Companion implementiert werden
-            rsi_value = self.calculate_rsi(symbol)
+            rsi_value = self.market.calculate_rsi(symbol, mt5.TIMEFRAME_H1) if self.market and hasattr(self.market, 'calculate_rsi') else None
             sr_data = self.calculate_support_resistance(symbol)
             print("\n📊 ERWEITERTE ANALYSE:")
             print("─" * 40)
             if rsi_value:
-                signal, desc = self.get_rsi_signal(rsi_value)
+                signal, desc = self.market.get_rsi_signal(rsi_value) if self.market and hasattr(self.market, 'get_rsi_signal') else (None, None)
                 print(f"📈 RSI: {rsi_value} - {desc}")
             if sr_data:
                 if sr_data['nearest_support']:
@@ -4444,7 +4612,7 @@ class MT5FinGPT:
                     symbol = input("Symbol für Trend-Test: ").upper()
                     if symbol:
                         self.log("INFO", f"Trend-Test gestartet für {symbol}", "ANALYSIS")
-                        trend_data = self.get_higher_timeframe_trend(symbol)
+                        trend_data = self.market.get_higher_timeframe_trend(symbol, mt5.TIMEFRAME_H4) if self.market and hasattr(self.market, 'get_higher_timeframe_trend') else None
                         if trend_data:
                             print(f"\n{symbol} Trend-Analyse:")
                             print(f"Richtung: {trend_data['direction']}")
@@ -4869,6 +5037,7 @@ class MT5FinGPT:
             reasoning = recommendation.get("reasoning", "KI-Analyse")
     
             # 5. MULTI-TIMEFRAME BESTÄTIGUNG
+            trend_direction = None  # Initialize to avoid unbound variable
             if self.mtf_enabled and self.require_trend_confirmation:
                 if action == "BUY" and "BEARISH" in trend_direction:
                     print(f"{symbol}: Trend bearish - BUY abgelehnt")
@@ -5385,7 +5554,7 @@ def signal_handler(sig, frame):
         # Hier können Sie Cleanup-Code hinzufügen
         try:
             # Global bot instance falls verfügbar
-            if 'bot' in globals():
+            if 'bot' in globals() and bot is not None:
                 if hasattr(bot, 'companion_enabled') and bot.companion_enabled:
                     print("🔧 Stoppe Trading Companion...")
                     bot.stop_trading_companion()

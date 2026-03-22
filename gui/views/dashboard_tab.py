@@ -1,6 +1,7 @@
 import customtkinter as ctk
 import tkinter as tk
 from gui.components.metric_card import MetricCard
+from gui.components.interactive_frame import HoverFadeFrame
 from gui.components.live_data_row import LiveDataRow
 from gui.design_system import DesignSystem
 from gui.config.dashboard_config import get_dashboard_config, get_metric_config, get_symbols, get_update_interval
@@ -57,6 +58,10 @@ class DashboardView:
                         self.app.pnl_card, self.app.winrate_card, self.app.risk_card]:
                 if card and card.winfo_exists():
                     card.grid_configure(padx=metric_spacing//2, pady=metric_spacing//2)
+                    
+        # Update AI Visualizer padding to match metric cards alignment
+        if hasattr(self.app, 'ai_visualizer_frame') and self.app.ai_visualizer_frame.winfo_exists():
+            self.app.ai_visualizer_frame.grid_configure(padx=metric_spacing//2)
         
         # Passe AI Visualizer Canvas-Größe an
         if hasattr(self.app, 'sonar_canvas') and self.app.sonar_canvas.winfo_exists():
@@ -142,24 +147,24 @@ class DashboardView:
         )
 
         # AI Agent Visualizer & Lückenfüller-Widgets (Middle Banner)
-        # Responsive Höhe: Auf kleinen Bildschirmen reduzieren
-        ai_height = 120 if self._window_width < ds.BREAKPOINTS['md'] else 150
-        self.app.ai_visualizer_frame = ctk.CTkFrame(self.tab, 
+        # Responsive Höhe: Auf kleinen Bildschirmen reduzieren, um Platz für Listen/Charts zu machen
+        ai_height = 120 if self._window_width < ds.BREAKPOINTS['md'] else 160
+        self.app.ai_visualizer_frame = HoverFadeFrame(self.tab, 
                                                     height=ai_height, 
                                                     corner_radius=ds.get_radius('lg'), 
-                                                    fg_color="transparent",
-                                                    border_width=1, border_color="#2A2D34")
+                                                    active_bg_color="transparent",
+                                                    border_width=2, idle_border_color="#2A2D34")
         self.app.ai_visualizer_frame.grid(row=2, column=0, columnspan=3, 
                                           sticky="ew", 
-                                          padx=ds.get_spacing('lg'), 
-                                          pady=(ds.get_spacing('lg'), ds.get_spacing('sm')))
+                                          padx=ds.get_spacing('md'), 
+                                          pady=(ds.get_spacing('sm'), ds.get_spacing('md')))
         self.app.ai_visualizer_frame.grid_propagate(False)
         self.app.ai_visualizer_frame.grid_columnconfigure(0, weight=1)
         self.app.ai_visualizer_frame.grid_columnconfigure(1, weight=2)
         self.app.ai_visualizer_frame.grid_columnconfigure(2, weight=1)
         
-        # Responsive padding für AI Visualizer
-        ai_padding = ds.get_responsive_spacing('lg', self._window_width)
+        # Responsive padding für AI Visualizer reduzieren für mehr Space
+        ai_padding = ds.get_responsive_spacing('sm', self._window_width)
         
         # 1. Daily Goal Widget (Left)
         goal_container = ctk.CTkFrame(self.app.ai_visualizer_frame, fg_color="transparent")
@@ -168,8 +173,8 @@ class DashboardView:
         ctk.CTkLabel(goal_container, text="🎯 Tages-Ziel (100€)", 
                      font=ds.get_font('sm', 'medium'), 
                      text_color=ds.get_semantic_color('neutral')).pack(anchor="w")
-        self.app.goal_progress = ctk.CTkProgressBar(goal_container, height=12, progress_color=ds.get_color('warning'))
-        self.app.goal_progress.pack(fill="x", pady=(ds.get_spacing('md'), ds.get_spacing('sm')))
+        self.app.goal_progress = ctk.CTkProgressBar(goal_container, height=10, progress_color=ds.get_color('warning'))
+        self.app.goal_progress.pack(fill="x", pady=(ds.get_spacing('sm'), 4))
         self.app.goal_progress.set(0.0)
         self.app.goal_lbl = ctk.CTkLabel(goal_container, text="0.00€ / 100€", 
                                          font=ds.get_font('sm', 'normal', mono=True), 
@@ -182,9 +187,9 @@ class DashboardView:
         sonar_container.grid_columnconfigure(0, weight=1)
         sonar_container.grid_rowconfigure(0, weight=1)
         
-        # Responsive Canvas-Größe
+        # Responsive Canvas-Größe reduzieren
         sonar_width = max(180, min(300, self._window_width // 4))
-        sonar_height = 100 if self._window_width < ds.BREAKPOINTS['md'] else 120
+        sonar_height = 95 if self._window_width < ds.BREAKPOINTS['md'] else 135
         self.app.sonar_width = sonar_width
         self.app.sonar_height = sonar_height
         self.app.sonar_canvas = tk.Canvas(sonar_container, bg=ds.get_color('neutral', 'darker'),
@@ -243,7 +248,7 @@ class DashboardView:
         content_spacing = ds.get_responsive_spacing('sm', self._window_width)
         
         # Live Data List (Left Side)
-        data_frame = ctk.CTkFrame(self.tab, corner_radius=ds.get_radius('lg'), fg_color="transparent", border_width=1, border_color="#2A2D34")
+        data_frame = HoverFadeFrame(self.tab, corner_radius=ds.get_radius('lg'), active_bg_color="transparent", border_width=2, idle_border_color="#2A2D34")
         data_frame.grid(row=chart_row, column=0, columnspan=live_data_colspan, 
                        sticky="nsew", padx=content_spacing, pady=content_spacing)
         data_frame.grid_rowconfigure(1, weight=1)
@@ -276,7 +281,7 @@ class DashboardView:
 
         # Live P&L Chart (Right Side) - nur wenn genug Platz
         if chart_colspan > 0:
-            self.app.chart_frame = ctk.CTkFrame(self.tab, corner_radius=ds.get_radius('lg'), fg_color="transparent", border_width=1, border_color="#2A2D34")
+            self.app.chart_frame = HoverFadeFrame(self.tab, corner_radius=ds.get_radius('lg'), active_bg_color="transparent", border_width=2, idle_border_color="#2A2D34")
             self.app.chart_frame.grid(row=chart_row, column=chart_column, columnspan=chart_colspan, 
                                       sticky="nsew", padx=(ds.get_spacing('md'), content_spacing), 
                                       pady=content_spacing)

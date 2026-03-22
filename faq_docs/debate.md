@@ -20,3 +20,20 @@ Menschen und oft auch einfache KIs leiden unter dem 'Confirmation Bias' (Bestät
 ### Kann das System automatisch basierend auf einer Debatte traden?
 
 Im Standard-Auto-Trading nutzt die Engine nur einen Haupt-Analysten zur Geschwindigkeit. Der Debate-Modus ist primär ein manuelles Analysetool für Sie, bevor Sie eine wichtige diskretionäre (manuelle) Handelsentscheidung treffen. Sie können die Empfehlung des Richters manuell im MT5 umsetzen.
+
+### Wie lange dauert eine Debatte?
+Eine vollständige Debatte mit drei KI-Instanzen dauert typischerweise 15-30 Sekunden, abhängig von der Ollama-Serverleistung und Ihrer Internetverbindung. Der Bull-Analyst und Bear-Analyst arbeiten parallel, was Zeit spart.
+
+### Kann ich die Debatten-Ergebnisse speichern?
+Ja, Sie können jeden Debatten-Report als Textdatei exportieren. Dies ist nützlich für spätere Analyse oder um zu lernen, wie die KI verschiedene Marktsituationen bewertet. Die Berichte enthalten alle Argumente beider Seiten sowie das finale Urteil des Richters.
+
+### Welche Daten werden für die Analyse verwendet?
+Die KI-Analysten haben Zugriff auf:
+- Aktuelle Kursdaten (Bid/Ask)
+- Technische Indikatoren (RSI, MACD, Bollinger Bands)
+- Support/Resistance-Levels
+- 24-Stunden-Nachrichtenübersicht
+- Makroökonomische Kalenderereignisse
+
+### Kann ich die Debatten-Prompts anpassen?
+Fortgeschrittene Benutzer können die System-Prompts für Bull, Bear und Judge in den Einstellungen modifizieren. Sie können z.B. festlegen, dass der Bear-Analyst besonders auf Zinsentscheidungen achten soll oder dass der Judge nur bei Übereinstimmung beider Seiten ein starkes Signal geben darf.

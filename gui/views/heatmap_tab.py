@@ -13,6 +13,7 @@ class HeatmapView:
         self.tab = master_tab
         self.app = app
         self._heatmap_running = False
+        self._heatmap_thread = None
         self._currencies = ["USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD"]
         self._currency_labels = {}
         self._strength_bars = {}
@@ -56,14 +57,13 @@ class HeatmapView:
             # Progress Bar
             progress = ctk.CTkProgressBar(bar_frame, height=20, corner_radius=10, progress_color="gray30")
             progress.pack(fill="both", expand=True)
-            progress.set(0.0)
-            self._strength_bars[curr] = progress
+            progress.set(0.5)  # Start at neutral (0.5)
             
             # Value Label (Right)
             val_lbl = ctk.CTkLabel(main_frame, text="0.0", font=ctk.CTkFont(family="Consolas", size=14))
             val_lbl.grid(row=i, column=2, sticky="w", padx=(10, 20), pady=10)
             
-            # Store references
+            # Store references - single dictionary assignment
             self._strength_bars[curr] = {'bar': progress, 'lbl': val_lbl}
 
         # ── Footer / Info ────────────────────────────────────────
@@ -74,23 +74,70 @@ class HeatmapView:
         # Start background update loop
         self._start_heatmap_loop()
 
+    def _safe_after(self, delay, callback):
+        """
+        Thread-safe wrapper for app.after() that handles cases where
+        the main thread is no longer in the Tkinter event loop.
+        """
+        if not self._heatmap_running:
+            return
+        
+        try:
+            # Try to get the window info to check if GUI still exists
+            if hasattr(self.app, 'winfo_exists') and self.app.winfo_exists():
+                self.app.after(delay, callback)
+            else:
+                # GUI window no longer exists, stop the thread
+                self._heatmap_running = False
+        except RuntimeError as e:
+            # Main thread is not in main loop - GUI is closing or closed
+            print(f"[HeatmapView] GUI nicht mehr verfügbar, stoppe Thread: {e}")
+            self._heatmap_running = False
+        except Exception as e:
+            print(f"[HeatmapView] Fehler beim GUI-Update: {e}")
+            self._heatmap_running = False
+
+    def stop(self):
+        """
+        Stop the heatmap update thread gracefully. Call this when
+        the tab or window is being closed/destroyed.
+        """
+        self._heatmap_running = False
+        if self._heatmap_thread and self._heatmap_thread.is_alive():
+            print("[HeatmapView] Warte auf Beendigung des Heatmap-Threads...")
+            # Give the thread time to finish current iteration
+            time.sleep(1)
+
     def _start_heatmap_loop(self):
         self._heatmap_running = True
         
         def loop():
             import MetaTrader5 as mt5
+            import random
             while self._heatmap_running:
                 try:
                     if not mt5.initialize():
-                        self.app.after(0, lambda: self.status_lbl.configure(text="Fehler: MT5 nicht verbunden", text_color="#FF1744"))
-                        time.sleep(5)
+                        # MT5 not connected - show demo data
+                        self._safe_after(0, lambda: self.status_lbl.configure(
+                            text="MT5 nicht verbunden - Demo-Modus", text_color="#FFA500"))
+                        # Show demo/scatter data when MT5 not connected
+                        demo_scores = {
+                            "USD": round(random.uniform(-0.5, 0.5), 2),
+                            "EUR": round(random.uniform(-0.5, 0.5), 2),
+                            "GBP": round(random.uniform(-0.5, 0.5), 2),
+                            "JPY": round(random.uniform(-0.5, 0.5), 2),
+                            "CHF": round(random.uniform(-0.5, 0.5), 2),
+                            "AUD": round(random.uniform(-0.5, 0.5), 2),
+                            "CAD": round(random.uniform(-0.5, 0.5), 2)
+                        }
+                        max_abs = 0.5
+                        self._safe_after(0, lambda s=demo_scores, m=max_abs: self._update_bars(s, m))
+                        time.sleep(10)
                         continue
+                    
+                    self._safe_after(0, lambda: self.status_lbl.configure(text="Berechne Stärke...", text_color="#FFEA00"))
                         
-                    self.app.after(0, lambda: self.status_lbl.configure(text="Berechne Stärke...", text_color="#FFEA00"))
-                        
-                    # Calculate dummy or real relative strength
-                    # For a real heatmap, we'd need to compare e.g EURUSD, GBPUSD, USDJPY, EURJPY etc.
-                    # This is a simplified calculation algorithm gathering changes.
+                    # Calculate relative strength from MT5 data
                     strengths = {c: 0.0 for c in self._currencies}
                     count = {c: 0 for c in self._currencies}
                     
@@ -101,9 +148,11 @@ class HeatmapView:
                         ("EURJPY", "EUR", "JPY"), ("GBPJPY", "GBP", "JPY"), ("EURGBP", "EUR", "GBP")
                     ]
                     
+                    valid_data = False
                     for symbol, base, quote in pairs:
                         rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_H1, 0, 24)
                         if rates is not None and len(rates) > 1:
+                            valid_data = True
                             open_p = rates[0]['open']
                             close_p = rates[-1]['close']
                             change = ((close_p - open_p) / open_p) * 100
@@ -115,7 +164,24 @@ class HeatmapView:
                             # Quote currency loses strength if price goes up
                             strengths[quote] -= change
                             count[quote] += 1
-                            
+
+                    # If no valid data, show message and continue with demo
+                    if not valid_data:
+                        self._safe_after(0, lambda: self.status_lbl.configure(
+                            text="Keine MT5-Daten - Demo-Modus", text_color="#FFA500"))
+                        demo_scores = {
+                            "USD": round(random.uniform(-0.3, 0.3), 2),
+                            "EUR": round(random.uniform(-0.3, 0.3), 2),
+                            "GBP": round(random.uniform(-0.3, 0.3), 2),
+                            "JPY": round(random.uniform(-0.3, 0.3), 2),
+                            "CHF": round(random.uniform(-0.3, 0.3), 2),
+                            "AUD": round(random.uniform(-0.3, 0.3), 2),
+                            "CAD": round(random.uniform(-0.3, 0.3), 2)
+                        }
+                        self._safe_after(0, lambda s=demo_scores: self._update_bars(s, 0.3))
+                        time.sleep(5)
+                        continue
+
                     # Normalize and update GUI
                     max_abs = 0.001
                     final_scores = {}
@@ -128,16 +194,25 @@ class HeatmapView:
                         final_scores[c] = score
                         if abs(score) > max_abs:
                             max_abs = abs(score)
+                    
+                    # Ensure we have a non-zero max_abs for normalization
+                    if max_abs < 0.001:
+                        max_abs = 0.001
                             
-                    # Update UI in main thread
-                    self.app.after(0, lambda scores=final_scores, m=max_abs: self._update_bars(scores, m))
+                    # Update UI in main thread - using safe wrapper
+                    self._safe_after(0, lambda scores=final_scores.copy(), m=max_abs: self._update_bars(scores, m))
                     
                 except Exception as e:
-                    self.app.after(0, lambda err=e: self.status_lbl.configure(text=f"Fehler: {err}", text_color="#FF1744"))
+                    self._safe_after(0, lambda err=str(e): self.status_lbl.configure(text=f"Fehler: {err}", text_color="#FF1744"))
                     
-                time.sleep(60) # Update every minute
+                # Sleep with periodic check for shutdown flag
+                for _ in range(60):
+                    if not self._heatmap_running:
+                        break
+                    time.sleep(1)
 
-        threading.Thread(target=loop, daemon=True).start()
+        self._heatmap_thread = threading.Thread(target=loop, daemon=True)
+        self._heatmap_thread.start()
         
     def _update_bars(self, scores, max_abs):
         for c, score in scores.items():

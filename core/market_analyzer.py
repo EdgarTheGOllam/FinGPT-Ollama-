@@ -19,8 +19,8 @@ class MarketAnalyzer:
 
         # Settings mapped from FinGPT.py
         self.rsi_period = 14
-        self.rsi_overbought = 70
-        self.rsi_oversold = 30
+        self.rsi_overbought = 75
+        self.rsi_oversold = 25
         
         self.sr_lookback_period = 50
         self.sr_tolerance = 0.0002

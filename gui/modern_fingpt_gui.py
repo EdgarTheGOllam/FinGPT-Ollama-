@@ -16,6 +16,7 @@ import random
 from datetime import datetime
 import sys
 import os
+import logging
 from PIL import Image
 
 # Ensure project root is on sys.path so gui.* imports resolve
@@ -70,6 +71,9 @@ from gui.views.terminal_tab import TerminalView
 from gui.views.config_tab import ConfigView
 from gui.views.faq_tab import FAQView
 from gui.views.heatmap_tab import HeatmapView
+from gui.widgets.order_book import OrderBookWidget
+from gui.widgets.risk_calculator import RiskCalculatorWidget
+from gui.widgets.multi_account import MultiAccountManager
 
 # Advanced Indicators Import
 try:
@@ -98,10 +102,10 @@ except ImportError as e:
 class _ModernTabBar(ctk.CTkFrame):
     """
     Animierte, Apple-ähnliche "Segmented Control" Tab Bar.
-    Verwendet eine schwebendes "Pill" Element (`active_bg`), das sanft über die Tabs gleitet.
-    Korrigierte Z-Index Logik: Buttons liegen in einem transparenten Frame über der Pille.
+    KOMPakte Version: Originalgröße (45px), aber kompaktere Fonts.
     """
     def __init__(self, master, tabs: list[str], on_select, **kw):
+        # Original height 45px für volle Funktionalität
         super().__init__(master, fg_color="transparent", corner_radius=0, height=45, **kw)
         self.pack_propagate(False)
         self._tabs = tabs
@@ -112,9 +116,9 @@ class _ModernTabBar(ctk.CTkFrame):
         self.bg_layer = ctk.CTkFrame(self, fg_color="transparent", corner_radius=15)
         self.bg_layer.place(relx=0, rely=0, relwidth=1.0, relheight=1.0)
         
-        # Die animierte, gleitende "Pille" im bg_layer (weiches helles Grau)
+        # Die animierte, gleitende "Pille" im bg_layer - Originalgröße
         self.active_bg = ctk.CTkFrame(self.bg_layer, fg_color="#4B5563", corner_radius=12, height=35, width=0)
-        self.active_bg.place(x=0, y=5) # Initial width 0 hidden
+        self.active_bg.place(x=0, y=5)
         
         # 2. Foreground layer for the clickable buttons (transparent overlay)
         self.fg_layer = ctk.CTkFrame(self, fg_color="transparent")
@@ -128,16 +132,19 @@ class _ModernTabBar(ctk.CTkFrame):
             btn = ctk.CTkButton(
                 self.fg_layer,
                 text=name,
-                fg_color="transparent", # Immer transparent, Background macht das Pill
-                hover_color=("#D1D5DB", "#2A2D34"), # Leichter Hover-Effekt
+                fg_color="transparent",
+                hover_color=("#D1D5DB", "#2A2D34"),
                 text_color="#FFFFFF" if i == 0 else ("gray30", "#8B949E"),
-                font=ctk.CTkFont(family="Inter", size=13, weight="bold"),
+                # KOMPakt: Font 13px → 11px, Height bleibt 35px
+                font=ctk.CTkFont(family="Inter", size=11, weight="bold"),
                 corner_radius=12,
                 height=35,
-                width=10, # Auto-width by text
+                width=10,
                 command=lambda n=name, idx=i: self._select(n, idx, notify=True)
             )
             btn.grid(row=0, column=i, sticky="ew", padx=3, pady=5)
+            
+            # KRITISCH: Button im Dictionary speichern für select() und _select() Methoden
             self._buttons[name] = {"btn": btn, "index": i}
             
         # Startup variables
@@ -155,6 +162,12 @@ class _ModernTabBar(ctk.CTkFrame):
             self._select(name, self._buttons[name]["index"], notify=False)
             
     def _select(self, name: str, idx: int, notify: bool = True, snap: bool = False):
+        # KRITISCH: Prüfen ob Buttons Dictionary befüllt ist
+        if not self._buttons:
+            logging.error(f"[_ModernTabBar] FEHLER: _buttons Dictionary ist leer! Buttons wurden nicht erstellt.")
+            return
+        
+        logging.info(f"[_ModernTabBar] Tab ausgewählt: {name} (Index: {idx}), verfügbare Tabs: {list(self._buttons.keys())}")
         if self._animation_job:
             self.after_cancel(self._animation_job)
             
@@ -186,6 +199,7 @@ class _ModernTabBar(ctk.CTkFrame):
                 self._current_x = target_x
                 self._current_width = target_width
                 self.active_bg.configure(width=self._current_width)
+                # Original: y=5, height=35
                 self.active_bg.place(x=self._current_x, y=5, width=self._current_width, height=35)
             else:
                 # Start Animation
@@ -210,6 +224,7 @@ class _ModernTabBar(ctk.CTkFrame):
                 self._current_x = target_x
                 self._current_width = target_w
                 self.active_bg.configure(width=self._current_width)
+                # Original: y=5, height=35
                 self.active_bg.place(x=self._current_x, y=5, width=self._current_width, height=35)
                 return
                 
@@ -217,8 +232,8 @@ class _ModernTabBar(ctk.CTkFrame):
             self._current_width += dw * easing
             
             self.active_bg.configure(width=self._current_width)
-            self.active_bg.place(x=self._current_x, y=5, width=self._current_width, height=35)
-            self._animation_job = self.after(16, lambda: self._animate_pill(target_x, target_w)) # ~60fps
+            self.active_bg.place(x=self._current_x, y=5, width=self._current_width, height=35)  # Original
+            self._animation_job = self.after(16, lambda: self._animate_pill(target_x, target_w))
         except Exception:
             pass
 
@@ -229,6 +244,9 @@ class ModernFinGPTGUI(ctk.CTk):
     """
     def __init__(self):
         super().__init__()
+        
+        # Handle window close event (Alt+F4, etc.)
+        self.protocol("WM_DELETE_WINDOW", self._close_window)
         
         self.app_config = app_config_manager.load()
         
@@ -372,6 +390,9 @@ class ModernFinGPTGUI(ctk.CTk):
         self.geometry(f"+{event.x_root - self._xwin}+{event.y_root - self._ywin}")
 
     def _close_window(self):
+        # Stop all background threads gracefully before closing
+        if hasattr(self, 'heatmap_view'):
+            self.heatmap_view.stop()
         self.destroy()
 
     def _minimize_window(self):
@@ -508,56 +529,67 @@ class ModernFinGPTGUI(ctk.CTk):
         self.content_frame.grid_rowconfigure(2, weight=1)
         self.content_frame.grid_columnconfigure(0, weight=1)
         
-        # 1. Header Frame
+        # 1. Header Frame - KOMPakt: pady=(15,15) → (5,5)
         self.header_frame = ctk.CTkFrame(self.content_frame, fg_color="transparent")
-        self.header_frame.grid(row=0, column=0, sticky="ew", padx=30, pady=(15, 15))
+        self.header_frame.grid(row=0, column=0, sticky="ew", padx=30, pady=(5, 5))  # KOMPakt: pady=(15,15)
         
-        # Add Logo
         try:
             logo_path = r"C:\Users\edgar\Desktop\FinGPT Webseite\Bilder logo.png"
             if os.path.exists(logo_path):
                 pil_img = Image.open(logo_path)
-                # Maintain aspect ratio, set height to 32px
+                # KOMPakt: Logo height 32px → 24px
                 w, h = pil_img.size
                 aspect = w / h
-                ctk_logo = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(int(32 * aspect), 32))
+                ctk_logo = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(int(24 * aspect), 24))  # KOMPakt: 32→24
                 
                 self.logo_label = ctk.CTkLabel(self.header_frame, image=ctk_logo, text="")
-                self.logo_label.pack(side="left", padx=(0, 15))
+                self.logo_label.pack(side="left", padx=(0, 10))  # KOMPakt: padx=(0,15)
         except Exception as e:
             print(f"Fehler beim Laden des Logos: {e}")
 
-        title_label = ctk.CTkLabel(self.header_frame, text="FinGPT Professional", font=ctk.CTkFont(family="Inter", size=24, weight="bold"), text_color="#FFFFFF")
+        # KOMPakt: Title font 24px → 16px
+        title_label = ctk.CTkLabel(self.header_frame, text="FinGPT Professional", 
+                                   font=ctk.CTkFont(family="Inter", size=16, weight="bold"),  # KOMPakt: 24→16
+                                   text_color="#FFFFFF")
         title_label.place(relx=0.45, rely=0.5, anchor="center")
         
-        version_label = ctk.CTkLabel(self.header_frame, text="v0.7.5 Alpha", font=ctk.CTkFont(family="Inter", size=12), text_color="#8B949E")
-        version_label.pack(side="left", padx=(10, 0), pady=(8, 0))
+        # Version-Label - KOMPakt: Kleiner und weniger padding
+        version_label = ctk.CTkLabel(self.header_frame, text="v0.8.3 Beta", 
+                                     font=ctk.CTkFont(family="Inter", size=9),  # KOMPakt: 12→9
+                                     text_color="#8B949E")
+        version_label.pack(side="left", padx=(8, 0), pady=(5, 0))  # KOMPakt: padx=(10,0), pady=(8,0)
         
-        # Header Controls
-        self.live_btn = ctk.CTkButton(self.header_frame, text="▶ Live Starten", command=self.toggle_live_data, 
-                                      fg_color="#00FF66", hover_color="#00C853", text_color="#0B0E14", corner_radius=20, font=ctk.CTkFont(family="Inter", weight="bold"))
-        self.live_btn.pack(side="right", padx=(10, 0))
+        # Version-Label entfernt für mehr Platz (KOMPakt)
+        # KOMPakt: Live-Button height 40→28, corner_radius 20→15
+        self.live_btn = ctk.CTkButton(self.header_frame, text="▶ Live", command=self.toggle_live_data,  # KOMPakt: "▶ Live Starten" → "▶ Live"
+                                      fg_color="#00FF66", hover_color="#00C853", text_color="#0B0E14", 
+                                      corner_radius=15, height=28,  # KOMPakt: height=28
+                                      font=ctk.CTkFont(family="Inter", size=11, weight="bold"))  # KOMPakt: size=12
+        self.live_btn.pack(side="right", padx=(8, 0))
         
-        self.status_dot = ctk.CTkLabel(self.header_frame, text="●", text_color="#FF1744", font=ctk.CTkFont(family="Inter", size=20))
+        # KOMPakt: Status dot size 20→14
+        self.status_dot = ctk.CTkLabel(self.header_frame, text="●", text_color="#FF1744", font=ctk.CTkFont(family="Inter", size=14))  # KOMPakt: 20→14
         self.status_dot.pack(side="right")
         
-        # ── Tab names ──────────────────────────────────────────────
+        # ── Tab names - Originalnamen für Views behalten
         _TAB_NAMES = [
             "📊 Dashboard", "📈 Charts", "🎭 Debate",
-            "📉 Backtest", "🔥 Heatmap",
+            "📉 Backtest", "🔥 Heatmap", "💹 Trading",
             "📝 Journal", "📰 News",
             "🤖 RL Studio", "💻 Terminal", "⚙️ Konfiguration",
             "❓ FAQ",
         ]
 
-        # 2a. Modern CTk Tab Bar (row=1)
+        # 2a. Modern CTk Tab Bar (row=1) - KOMPakt: pady (0,10) → (0,4)
+        logging.info(f"[ModernFinGPTGUI] Erstelle _ModernTabBar mit {len(_TAB_NAMES)} Tabs: {_TAB_NAMES}")
         self.nav_bar = _ModernTabBar(
             self.content_frame,
             tabs=_TAB_NAMES,
             on_select=self._navbar_on_select,
         )
-        # padding pushes it cleanly slightly down
-        self.nav_bar.grid(row=1, column=0, sticky="ew", padx=30, pady=(0, 10))
+        # padding pushes it cleanly slightly down - KOMPakt: pady=(0,10) → (0,4)
+        self.nav_bar.grid(row=1, column=0, sticky="ew", padx=30, pady=(0, 4))
+        logging.info("[ModernFinGPTGUI] NavBar erfolgreich erstellt und positioniert")
 
         # 2b. Main Tabview – content area only (row=2)
         self.content_frame.grid_rowconfigure(2, weight=1)
@@ -573,7 +605,7 @@ class ModernFinGPTGUI(ctk.CTk):
             text_color=("gray85", "#1A1D24"),      # invisible
             fg_color="#0B0E14" # Transparent tab backgrounds
         )
-        self.tabview.grid(row=2, column=0, sticky="nsew", padx=30, pady=(0, 20))
+        self.tabview.grid(row=2, column=0, sticky="nsew", padx=30, pady=(0, 8))  # KOMPakt: pady (0,20) → (0,8)
         
         self.tabview.configure(border_width=0)
 
@@ -590,6 +622,7 @@ class ModernFinGPTGUI(ctk.CTk):
         self.debate_view       = DebateView(self.tabview.tab("🎭 Debate"), self)
         self.backtest_view     = BacktestView(self.tabview.tab("📉 Backtest"), self)
         self.heatmap_view      = HeatmapView(self.tabview.tab("🔥 Heatmap"), self)
+        self.trading_view       = self._create_trading_view(self.tabview.tab("💹 Trading"), self)
         self.journal_view      = JournalView(self.tabview.tab("📝 Journal"), self)
         self.news_view         = NewsView(self.tabview.tab("📰 News"), self)
         self.rl_settings_view  = RLSettingsView(self.tabview.tab("🤖 RL Studio"), self)
@@ -598,12 +631,12 @@ class ModernFinGPTGUI(ctk.CTk):
         self.faq_view          = FAQView(self.tabview.tab("❓ FAQ"), self)
 
         
-        # 3. Status Bar
-        self.status_bar = ctk.CTkFrame(self.content_frame, height=30, corner_radius=15)
-        self.status_bar.grid(row=3, column=0, sticky="ew", padx=30, pady=(0, 30))
+        # 3. Status Bar - KOMPakt: height 30→24, pady (0,30) → (0,10)
+        self.status_bar = ctk.CTkFrame(self.content_frame, height=24, corner_radius=12)  # KOMPakt: height=24
+        self.status_bar.grid(row=3, column=0, sticky="ew", padx=30, pady=(0, 10))  # KOMPakt: pady=(0,30) → (0,10)
         
-        self.status_label = ctk.CTkLabel(self.status_bar, text="Bereit | Letzte Aktualisierung: Nie", font=ctk.CTkFont(family="Inter", size=12))
-        self.status_label.pack(side="left", padx=15, pady=5)
+        self.status_label = ctk.CTkLabel(self.status_bar, text="Bereit | Letzte Aktualisierung: Nie", font=ctk.CTkFont(family="Inter", size=10))  # KOMPakt: size=12 → 10
+        self.status_label.pack(side="left", padx=10, pady=3)
         
         # System Indicators
         self.indicator_frame = ctk.CTkFrame(self.status_bar, fg_color="transparent")
@@ -615,10 +648,10 @@ class ModernFinGPTGUI(ctk.CTk):
         
         for sys_name in ["Python", "MT5", "Ollama", "RL Engine"]:
             frame = ctk.CTkFrame(self.indicator_frame, fg_color="transparent")
-            frame.pack(side="left", padx=10)
-            dot = ctk.CTkLabel(frame, text="●", text_color="gray", font=ctk.CTkFont(family="Inter", size=16))
-            dot.pack(side="left", padx=(0, 6))
-            lbl = ctk.CTkLabel(frame, text=sys_name, font=ctk.CTkFont(family="Inter", size=13, weight="bold"), text_color="gray70")
+            frame.pack(side="left", padx=6)  # KOMPakt: padx=10 → 6
+            dot = ctk.CTkLabel(frame, text="●", text_color="gray", font=ctk.CTkFont(family="Inter", size=12))  # KOMPakt: size=16 → 12
+            dot.pack(side="left", padx=(0, 4))  # KOMPakt: padx=(0,6) → (0,4)
+            lbl = ctk.CTkLabel(frame, text=sys_name, font=ctk.CTkFont(family="Inter", size=10, weight="bold"), text_color="gray70")  # KOMPakt: size=13 → 10
             lbl.pack(side="left")
             self.indicators[sys_name] = dot
             self.indicator_labels[sys_name] = lbl
@@ -640,6 +673,7 @@ class ModernFinGPTGUI(ctk.CTk):
             
     def _navbar_on_select(self, tab_name: str):
         """Called by the nav bar when user clicks a tab."""
+        logging.info(f"[_navbar_on_select] Tab-Wechsel zu: {tab_name}")
         self.tabview.set(tab_name)
         self._on_tab_change()
 
@@ -685,6 +719,63 @@ class ModernFinGPTGUI(ctk.CTk):
         if raw_pairs:
             self.dashboard_view._rebuild_symbol_rows(raw_pairs)
 
+    def _create_trading_view(self, parent, app):
+        """Erstellt die Trading-Ansicht mit Order Book, Risk Calculator und Multi-Account"""
+        # Main container
+        container = ctk.CTkFrame(parent, fg_color="transparent")
+        container.pack(fill="both", expand=True)
+        
+        # Two-column layout
+        left_column = ctk.CTkFrame(container)
+        left_column.pack(side="left", fill="both", expand=True, padx=(10, 5), pady=10)
+        
+        right_column = ctk.CTkFrame(container)
+        right_column.pack(side="right", fill="both", expand=True, padx=(5, 10), pady=10)
+        
+        # Order Book (links oben)
+        order_book_frame = ctk.CTkFrame(left_column)
+        order_book_frame.pack(fill="both", expand=True)
+        
+        try:
+            self.order_book_widget = OrderBookWidget(order_book_frame)
+            self.order_book_widget.pack(fill="both", expand=True)
+        except Exception as e:
+            ctk.CTkLabel(
+                order_book_frame,
+                text=f"Order Book konnte nicht geladen werden: {e}",
+                text_color="red"
+            ).pack(pady=20)
+        
+        # Risk Calculator (links unten)
+        risk_calc_frame = ctk.CTkFrame(left_column)
+        risk_calc_frame.pack(fill="both", expand=True, pady=(10, 0))
+        
+        try:
+            self.risk_calculator_widget = RiskCalculatorWidget(risk_calc_frame)
+            self.risk_calculator_widget.pack(fill="both", expand=True)
+        except Exception as e:
+            ctk.CTkLabel(
+                risk_calc_frame,
+                text=f"Risk Calculator konnte nicht geladen werden: {e}",
+                text_color="red"
+            ).pack(pady=20)
+        
+        # Multi-Account Manager (rechts)
+        multi_account_frame = ctk.CTkFrame(right_column)
+        multi_account_frame.pack(fill="both", expand=True)
+        
+        try:
+            self.multi_account_widget = MultiAccountManager(multi_account_frame)
+            self.multi_account_widget.pack(fill="both", expand=True)
+        except Exception as e:
+            ctk.CTkLabel(
+                multi_account_frame,
+                text=f"Multi-Account Manager konnte nicht geladen werden: {e}",
+                text_color="red"
+            ).pack(pady=20)
+        
+        return container
+    
     def setup_config_tab(self):
         tab = self.tabview.tab("⚙️ Konfiguration")
         tab.grid_columnconfigure(0, weight=1)
@@ -740,12 +831,41 @@ class ModernFinGPTGUI(ctk.CTk):
         Nimmt Parameter aus dem GUI state. Blockiert, sollte also aus Threads aufgerufen werden!
         """
         import requests
+        import subprocess
+        import threading
+        import time
         provider = self.config_view.ki_provider_var.get()
         model = self.config_view.model_combo.get()
         temperature = self.config_view.ai_temp_slider.get()
         url = self.config_view.url_entry.get().strip()
         api_key = self.config_view.api_key_entry.get().strip()
         
+        # Hilfsfunktion: Versuche Ollama automatisch zu starten
+        def try_start_ollama():
+            """Versucht Ollama im Hintergrund zu starten."""
+            try:
+                # Versuche zuerst den normalen Ollama-Befehl
+                subprocess.Popen(
+                    ["ollama", "serve"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+                )
+                # Warte bis zu 10 Sekunden auf Ollama
+                for _ in range(20):
+                    time.sleep(0.5)
+                    try:
+                        resp = requests.get(f"{base_url}/api/tags", timeout=1)
+                        if resp.status_code == 200:
+                            return True
+                    except:
+                        pass
+                return False
+            except FileNotFoundError:
+                return False
+            except Exception:
+                return False
+
         # 1. Ollama (Lokal)
         if "Ollama" in provider:
             base_url = url if url else "http://localhost:11434"
@@ -759,11 +879,43 @@ class ModernFinGPTGUI(ctk.CTk):
                         "num_predict": max_tokens,
                         "temperature": temperature
                     }
-                }, timeout=45)
+                }, timeout=120)
                 if resp.status_code == 200:
                     return resp.json().get("response", "")
                 else:
-                    return f"[API Fehler Ollama] {resp.status_code}: {resp.text}"
+                    return f"[API Fehler Ollama] Status {resp.status_code}: {resp.text}"
+            except requests.exceptions.ConnectionError as e:
+                # Ollama läuft nicht - versuche es automatisch zu starten
+                err_msg = str(e)
+                if "Connection refused" in err_msg or "10061" in err_msg:
+                    # Versuche Ollama automatisch zu starten
+                    self.write_terminal(">> Ollama nicht erreichbar. Versuche automatisch zu starten...\n")
+                    if try_start_ollama():
+                        self.write_terminal(">> Ollama wurde gestartet. Wiederhole Anfrage...\n")
+                        try:
+                            resp = requests.post(f"{base_url}/api/generate", json={
+                                "model": model,
+                                "prompt": full_prompt,
+                                "stream": False,
+                                "options": {
+                                    "num_predict": max_tokens,
+                                    "temperature": temperature
+                                }
+                            }, timeout=120)
+                            if resp.status_code == 200:
+                                return resp.json().get("response", "")
+                            else:
+                                return f"[API Fehler Ollama] Status {resp.status_code}: {resp.text}"
+                        except Exception as e2:
+                            return f"[API Fehler Ollama] Auch nach Neustart: {str(e2)}"
+                    else:
+                        return (
+                            f"[API Fehler Ollama] Ollama läuft nicht!\n"
+                            f"Bitte starten Sie Ollama manuell mit: 'ollama serve'\n"
+                            f"Oder installieren Sie Ollama von: https://ollama.ai\n"
+                            f"Details: {err_msg}"
+                        )
+                return f"[API Fehler Ollama] {err_msg}"
             except Exception as e:
                 return f"[API Fehler Ollama] {str(e)}"
                 
@@ -781,7 +933,7 @@ class ModernFinGPTGUI(ctk.CTk):
                 "temperature": temperature
             }
             try:
-                resp = requests.post(f"{base_url}/chat/completions", headers=headers, json=payload, timeout=45)
+                resp = requests.post(f"{base_url}/chat/completions", headers=headers, json=payload, timeout=120)
                 if resp.status_code == 200:
                     return resp.json()["choices"][0]["message"]["content"]
                 else:
@@ -804,7 +956,7 @@ class ModernFinGPTGUI(ctk.CTk):
                 "temperature": temperature
             }
             try:
-                resp = requests.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload, timeout=45)
+                resp = requests.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload, timeout=120)
                 if resp.status_code == 200:
                     return resp.json()["content"][0]["text"]
                 else:
@@ -826,7 +978,7 @@ class ModernFinGPTGUI(ctk.CTk):
                 "temperature": temperature
             }
             try:
-                resp = requests.post(f"{base_url}/chat/completions", headers=headers, json=payload, timeout=45)
+                resp = requests.post(f"{base_url}/chat/completions", headers=headers, json=payload, timeout=120)
                 if resp.status_code == 200:
                     return resp.json()["choices"][0]["message"]["content"]
                 else:
@@ -1341,35 +1493,9 @@ class ModernFinGPTGUI(ctk.CTk):
         drift_x = 10 * math.sin(phase * 0.45)
         drift_y = 6 * math.cos(phase * 0.35)
         self.sonar_canvas.coords(self._sonar_base_dot, cx+drift_x-6, cy+drift_y-6, cx+drift_x+6, cy+drift_y+6)
-            
-        # Draw floating orbs
-        for c in self.sonar_circles:
-            self.sonar_canvas.delete(c)
-        self.sonar_circles.clear()
         
-        # Orb settings: (radius_base, radius_var, drift_x_amp, drift_x_freq, drift_y_amp, drift_y_freq, color, width)
-        orbs = [
-            (35, 12, 45, 0.6, 25, 0.4, "#1ABC9C", 2),
-            (65, 18, 70, 0.3, 30, 0.5, "#117A65", 1.5),
-            (95, 25, 100, 0.2, 40, 0.3, "#0E6251", 1),
-            (20, 6, -60, 0.7, -20, 0.6, "#48C9B0", 1.5) # Fast small satellite
-        ]
-        
-        for base_r, var_r, dx_amp, dx_f, dy_amp, dy_f, color, w in orbs:
-            r = base_r + var_r * math.sin(phase * dx_f + dy_f) # Dynamic radius
-            dx = dx_amp * math.sin(phase * dx_f)
-            dy = dy_amp * math.cos(phase * dy_f + 1.0)
-            
-            # Subtle opacity hack: darker hex codes for outer rings
-            c = self.sonar_canvas.create_oval(
-                cx + dx - r, cy + dy - r, 
-                cx + dx + r, cy + dy + r, 
-                outline=color, width=w
-            )
-            self.sonar_circles.append(c)
-            
         # ---------------------------------------------
-        # Animate AI Speech Bubbles
+        # Animate AI Speech Bubbles (DRAW FIRST FOR BACKGROUND PRIO)
         if not hasattr(self, 'ai_bubbles'):
             self.ai_bubbles = []
         if not hasattr(self, '_bubble_canvas_items'):
@@ -1393,15 +1519,15 @@ class ModernFinGPTGUI(ctk.CTk):
             
             # Fade out from bright green (#5EBA7D) to background (#2b2b2b)
             life_pct = b["age"] / b["max_age"]
-            r = int(0x5E + (0x2b - 0x5E) * life_pct)
-            g = int(0xBA + (0x2b - 0xBA) * life_pct)
-            bl= int(0x7D + (0x2b - 0x7D) * life_pct)
-            color = f"#{r:02x}{g:02x}{bl:02x}"
+            rc = int(0x5E + (0x2b - 0x5E) * life_pct)
+            gc = int(0xBA + (0x2b - 0xBA) * life_pct)
+            bc = int(0x7D + (0x2b - 0x7D) * life_pct)
+            b_color = f"#{rc:02x}{gc:02x}{bc:02x}"
             
             item = self.sonar_canvas.create_text(
                 parallax_x, b["y"],
                 text=b["text"],
-                fill=color,
+                fill=b_color,
                 font=("Arial", 11, "bold"),
                 width=240,  # <-- Deutlich breiter, um Abschneiden zu verhindern
                 justify="center"
@@ -1411,6 +1537,58 @@ class ModernFinGPTGUI(ctk.CTk):
             
         self.ai_bubbles = surviving_bubbles
         # ---------------------------------------------
+        
+        # Draw floating orbs (RINGS - HÖCHSTE PRIO OVER BUBBLES)
+        for c in self.sonar_circles:
+            self.sonar_canvas.delete(c)
+        self.sonar_circles.clear()
+        
+        # Orb settings: (radius_base, radius_var, drift_x_amp, drift_x_freq, drift_y_amp, drift_y_freq, color, width)
+        # Scaled down to prevent clipping at top/bottom of canvas
+        orbs = [
+            (20, 8, 30, 0.6, 15, 0.4, "#1ABC9C", 2),
+            (35, 12, 45, 0.3, 20, 0.5, "#117A65", 1.5),
+            (55, 16, 60, 0.2, 25, 0.3, "#0E6251", 1),
+            (12, 4, -30, 0.7, -15, 0.6, "#48C9B0", 1.5) # Fast small satellite
+        ]
+        
+        def hex_darken(h_str, intensity):
+            h_str = h_str.lstrip('#')
+            hr, hg, hb = tuple(int(h_str[i:i+2], 16) for i in (0, 2, 4))
+            return f"#{int(hr*intensity):02x}{int(hg*intensity):02x}{int(hb*intensity):02x}"
+            
+        for base_r, var_r, dx_amp, dx_f, dy_amp, dy_f, color, w in orbs:
+            r = base_r + var_r * math.sin(phase * dx_f + dy_f) # Dynamic radius
+            dx = dx_amp * math.sin(phase * dx_f)
+            dy = dy_amp * math.cos(phase * dy_f + 1.0)
+            
+            # FLAT HALL-EFFEKT (Echo Trails only, keine 3D Ränder)
+            echoes = []
+            for i in range(1, 4):
+                p_offset = phase - (i * 0.12)
+                r_e = base_r + var_r * math.sin(p_offset * dx_f + dy_f)
+                dx_e = dx_amp * math.sin(p_offset * dx_f)
+                dy_e = dy_amp * math.cos(p_offset * dy_f + 1.0)
+                
+                intensity = max(0.05, 0.6 - (i * 0.18))
+                e_oval = self.sonar_canvas.create_oval(
+                    cx + dx_e - r_e, cy + dy_e - r_e, 
+                    cx + dx_e + r_e, cy + dy_e + r_e, 
+                    outline=hex_darken(color, intensity), width=w
+                )
+                echoes.append(e_oval)
+            
+            # MAIN RING
+            c = self.sonar_canvas.create_oval(
+                cx + dx - r, cy + dy - r, 
+                cx + dx + r, cy + dy + r, 
+                outline=color, width=w
+            )
+            self.sonar_circles.extend(echoes)
+            self.sonar_circles.append(c)
+            
+        # Ensure base dot is on the absolute top
+        self.sonar_canvas.tag_raise(self._sonar_base_dot)
         
         self.ai_animation_idx += 1
         self.after(33, self._animate_sonar) # ~30fps smooth update

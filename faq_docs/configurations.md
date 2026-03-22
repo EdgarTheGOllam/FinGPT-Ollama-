@@ -23,3 +23,30 @@ Wir haben 7 unterschiedliche Stile implementiert, die drastische Auswirkungen au
 - Wenn Sie **Technische Indikatoren** wählen, feuert die Engine Trades stur nach Mathe-Regeln ab (z.B. RSI < 30 = BUY). Dies ist sehr schnell, aber fehleranfällig in Seitwärtsphasen. 
 - **KI-gesteuert** nutzt primär Ollama LLaMa-Modelle, um das Gesamtbild prosahaft auszuwerten. 
 - **Hybrid (KI + Indikatoren)** filtert zuerst mathematisch strikt vor und lässt nur Setups zu, die auch von der KI als logisch bewertet und per Prompt abgesegnet werden.
+
+### Welche Risikoprofile stehen zur Auswahl?
+
+FinGPT bietet drei definierte Risikoprofile:
+
+- **Konservativ**: Setzt maximal 1% des Kapitals pro Trade aufs Spiel. Enge Stop-Losses, geringe Hebelwirkung. Ideal für Anfänger oder bei hoher Marktvolatilität.
+- **Moderat**: Risiko von 2-3% pro Trade. Ausgewogenes Verhältnis zwischen Chance und Risiko. Das am häufigsten verwendete Profil.
+- **Aggressiv**: Bis zu 5% Risiko pro Trade. Größere Positionsgrößen, weitere Stop-Losses. Nur für erfahrene Trader mit hohem Kapitalpuffer.
+
+### Wie konfiguriere ich die Lot-Größe automatisch?
+
+Das System kann die Lot-Größe basierend auf Ihrem Kontostand und Risikoprozent automatisch berechnen. Geben Sie einfach Ihr Risikoprozent ein (z.B. 2%), und FinGPT errechnet die exakte Lot-Größe für jeden Trade basierend auf Ihrem Stop-Loss-Abstand.
+
+### Was sind die 'Trading Hours' Einstellungen?
+
+Sie können festlegen, zu welchen Zeiten FinGPT aktiv handeln darf. Beliebte Einstellungen:
+- Nur während der London-Session (08:00-17:00 UTC)
+- Nur während der US-Session (13:00-22:00 UTC)
+- Oder 24/5 (außer am Wochenende)
+
+### Kann ich verschiedene Strategien für unterschiedliche Währungspaare definieren?
+
+Ja, in den erweiterten Einstellungen können Sie pro Symbol individuelle Parameter festlegen. So können Sie z.B. für EURUSD Scalping nutzen, aber für GBPJPY Swing-Trading.
+
+### Was bedeutet 'Max. offene Trades'?
+
+Diese Einstellung begrenzt die Anzahl gleichzeitiger Positionen. Bei 'Max. 3 Trades' werden maximal drei offene Positionen gleichzeitig gehalten. Dies dient der Risikokontrolle und verhindert, dass bei einer Serie von Verlusten zu viel Kapital exponiert wird.

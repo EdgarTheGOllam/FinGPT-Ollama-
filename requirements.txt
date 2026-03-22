@@ -27,6 +27,11 @@ psutil>=5.9.0
 # Bildverarbeitung (Icons, Assets)
 Pillow>=10.0.0
 
+# Streamlit Dashboard (News-Tab)
+streamlit>=1.28.0
+plotly>=5.18.0
+feedparser>=6.0.0
+
 # Graphen und Netzwerkanalyse (Debate-Tab)
 networkx>=3.1
 
