@@ -1,1 +1,16 @@
-{"mcpServers":{}}
+{
+  "mcpServers": {
+    "tradingview": {
+      "command": "npx",
+      "args": ["-y", "tradingview-mcp-server"]
+    },
+    "hive-intelligence": {
+      "command": "npx",
+      "args": ["-y", "hive-intelligence"]
+    },
+    "openclaw": {
+      "command": "npx",
+      "args": ["-y", "openclaw"]
+    }
+  }
+}

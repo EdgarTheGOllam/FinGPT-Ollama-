@@ -56,9 +56,31 @@ class JournalView:
         ctk.CTkButton(stats_frame, text="📥 CSV Export", width=110, command=self._export_journal_csv,
                       fg_color="transparent", border_width=1).pack(side="left", padx=(16, 0))
 
-        # ── Left: Calendar grid ──────────────────────────────────
-        self._cal_frame = ctk.CTkFrame(self.tab, fg_color="#1A1D24", corner_radius=12)
-        self._cal_frame.grid(row=1, column=0, sticky="n", padx=10, pady=8)
+        # ── Left container (Calendar + Report) ───────────────────
+        self._left_panel = ctk.CTkFrame(self.tab, fg_color="transparent")
+        self._left_panel.grid(row=1, column=0, sticky="nsew", padx=10, pady=8)
+        self._left_panel.grid_rowconfigure(1, weight=1)
+        self._left_panel.grid_columnconfigure(0, weight=1)
+
+        # ── Left Top: Calendar grid ──────────────────────────────────
+        self._cal_frame = ctk.CTkFrame(self._left_panel, fg_color="#1A1D24", corner_radius=12)
+        self._cal_frame.grid(row=0, column=0, sticky="n", pady=(0, 10))
+
+        # ── Left Bottom: Monthly Report ──────────────────────────────
+        self._report_frame = ctk.CTkFrame(self._left_panel, fg_color="#1A1D24", corner_radius=12)
+        self._report_frame.grid(row=1, column=0, sticky="nsew")
+        self._report_frame.grid_rowconfigure(2, weight=1)
+        self._report_frame.grid_columnconfigure(0, weight=1)
+        
+        rep_hdr = ctk.CTkLabel(self._report_frame, text="📊 Monatsbericht", font=ctk.CTkFont(family="Inter", size=13, weight="bold"), text_color="#C586C0")
+        rep_hdr.grid(row=0, column=0, sticky="w", padx=15, pady=(10, 5))
+        
+        self._report_stats_lbl = ctk.CTkLabel(self._report_frame, text="Lade Daten...", font=ctk.CTkFont(family="Inter", size=11), text_color="#8B949E", justify="left")
+        self._report_stats_lbl.grid(row=1, column=0, sticky="w", padx=15, pady=(0, 10))
+        
+        self._report_chart_container = ctk.CTkFrame(self._report_frame, fg_color="transparent")
+        self._report_chart_container.grid(row=2, column=0, sticky="nsew", padx=10, pady=(0, 10))
+
 
         # ── Right: Trade list and AI reasoning ────────────────────
         right_panel = ctk.CTkFrame(self.tab, fg_color="transparent")
@@ -335,6 +357,80 @@ class JournalView:
                 if n_trades > 0:
                     sub_lbl.bind("<Button-1>", lambda e, ds=date_str: self._show_day_trades(ds))
 
+        # Render Monthly Report
+        self._render_monthly_report(entries)
+
+    def _render_monthly_report(self, entries):
+        # Clear old chart
+        for w in self._report_chart_container.winfo_children():
+            w.destroy()
+
+        all_trades = [t for day_trades in entries.values() for t in day_trades]
+        if not all_trades:
+            self._report_stats_lbl.configure(text="Keine Trades in diesem Monat.")
+            return
+
+        gross_profit = sum(t.get("profit", 0) for t in all_trades if t.get("profit", 0) > 0)
+        gross_loss = abs(sum(t.get("profit", 0) for t in all_trades if t.get("profit", 0) < 0))
+        net_profit = gross_profit - gross_loss
+        profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else float('inf')
+        wins = sum(1 for t in all_trades if t.get("profit", 0) > 0)
+        win_rate = (wins / len(all_trades) * 100)
+        best_trade = max((t.get("profit", 0) for t in all_trades), default=0)
+        worst_trade = min((t.get("profit", 0) for t in all_trades), default=0)
+
+        stats_text = (
+            f"Netto P&L: {net_profit:+.2f}€    Profit Faktor: {profit_factor:.2f}\n"
+            f"Win Rate: {win_rate:.1f}% ({wins}/{len(all_trades)})    Bester Trade: {best_trade:.2f}€\n"
+            f"Brutto Gewinn: +{gross_profit:.2f}€    Brutto Verlust: -{gross_loss:.2f}€"
+        )
+        self._report_stats_lbl.configure(text=stats_text)
+
+        # Build Daily Cumulative PnL
+        daily_pnl = {}
+        for date_str, trades in entries.items():
+            daily_pnl[date_str] = sum(t.get("profit", 0) for t in trades)
+            
+        # Ensure all days of the month are in the chart (up to today or end of month)
+        import calendar
+        year, month = self._journal_year, self._journal_month
+        last_day = calendar.monthrange(year, month)[1]
+        
+        x_days = []
+        y_pnl = []
+        cum_pnl = 0
+        
+        for d in range(1, last_day + 1):
+            date_str = f"{year}-{month:02d}-{d:02d}"
+            cum_pnl += daily_pnl.get(date_str, 0)
+            x_days.append(d)
+            y_pnl.append(cum_pnl)
+
+        import matplotlib
+        matplotlib.use("TkAgg")
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+        from matplotlib.figure import Figure
+
+        fig = Figure(figsize=(4, 2.5), facecolor='#1A1D24')
+        ax = fig.add_subplot(111)
+        ax.set_facecolor('#1A1D24')
+        ax.tick_params(colors='#8B949E', labelsize=8)
+        for spine in ax.spines.values():
+            spine.set_color('#333333')
+            
+        # Plot area
+        line_color = '#00FF66' if cum_pnl >= 0 else '#FF1744'
+        ax.plot(x_days, y_pnl, color=line_color, linewidth=2)
+        ax.fill_between(x_days, y_pnl, 0, color=line_color, alpha=0.1)
+        ax.axhline(0, color='gray', linestyle='--', linewidth=1, alpha=0.5)
+        
+        ax.set_title("Kumulierter P&L (Monat)", color='#8B949E', fontsize=10, pad=10)
+        fig.tight_layout()
+
+        canvas = FigureCanvasTkAgg(fig, master=self._report_chart_container)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill="both", expand=True)
+
     def _show_day_trades(self, date_str):
         """Populate the trade list for a clicked day."""
         self._selected_journal_day = date_str
@@ -471,15 +567,28 @@ class JournalView:
         popup = ctk.CTkToplevel(self.app)
         popup.title(f"Trade Visualizer  —  {symbol} {action} Ticket {trade.get('ticket', '')}")
         popup.geometry("900x550")
-        popup.configure(fg_color="#1E1E1E")
+        popup.configure(fg_color="#0F111A")
         popup.grab_set()
 
         status = ctk.CTkLabel(popup, text=f"Lade historische MT5-Daten für {symbol}...", font=ctk.CTkFont(family="Inter", size=14))
         status.pack(expand=True)
 
-        mc = mpf.make_marketcolors(up='#5EBA7D', down='#E74C3C', edge='i', wick='i')
-        s = mpf.make_mpf_style(marketcolors=mc, facecolor='#1E1E1E', edgecolor='gray',
-                               figcolor='#1E1E1E', gridcolor='#333333', gridstyle=':')
+        # Modern vibrant colors (TradingView dark mode inspired)
+        mc = mpf.make_marketcolors(
+            up='#26A69A', down='#EF5350',
+            edge={'up': '#26A69A', 'down': '#EF5350'},
+            wick={'up': '#26A69A', 'down': '#EF5350'},
+            ohlc='i'
+        )
+        s = mpf.make_mpf_style(
+            marketcolors=mc,
+            facecolor='#0F111A',
+            edgecolor='#2A2E39',
+            figcolor='#0F111A',
+            gridcolor='#1E222D',
+            gridstyle='--',
+            rc={'font.family': 'sans-serif', 'font.size': 9, 'axes.labelsize': 10, 'text.color': '#D1D4DC'}
+        )
 
         def fetch_chart():
             try:
@@ -518,53 +627,60 @@ class JournalView:
                     df['dist_c'] = abs(df.index - t_close)
                     close_idx = df.index.get_loc(df['dist_c'].idxmin())
 
-                fig = Figure(figsize=(9, 4), facecolor='#1E1E1E') 
+                fig = Figure(figsize=(9, 4), facecolor='#0F111A') 
                 ax = fig.add_subplot(111)
-                ax.set_facecolor('#1E1E1E')
-                ax.tick_params(colors='white')
+                ax.set_facecolor('#0F111A')
+                ax.tick_params(colors='#787B86')
                 
                 pnl_str = f"Profit: {trade.get('profit', 0):.2f}€"
-                ax.set_title(f"Visualizer: {action} {symbol}  |  {pnl_str}", color='white', fontsize=12)
-                ax.spines['bottom'].set_color('gray')
-                ax.spines['left'].set_color('gray')
+                ax.set_title(f"{action} {symbol}  |  {pnl_str}", color='#D1D4DC', fontsize=13, pad=15, fontweight='bold')
+                
+                # Clean up borders
+                ax.spines['top'].set_visible(False)
+                ax.spines['right'].set_visible(False)
+                ax.spines['bottom'].set_color('#2A2E39')
+                ax.spines['left'].set_color('#2A2E39')
 
                 mpf.plot(df, type='candle', ax=ax, style=s, show_nontrading=False, warn_too_much_data=2000)
 
-                open_color = 'cyan' if action == 'BUY' else 'magenta'
+                bbox_props = dict(boxstyle="round,pad=0.4", fc="#1E222D", ec="#3B404E", lw=1)
+                open_color = '#2962FF'
                 arrow = '▲' if action == 'BUY' else '▼'
                 
                 y_pos_open = df.iloc[open_idx]['low'] * 0.999 if action == 'BUY' else df.iloc[open_idx]['high'] * 1.001
                 
                 ax.annotate(f"{arrow} OPEN", xy=(open_idx, y_pos_open),
                             xycoords=('data', 'data'), ha='center', va='top' if action == 'BUY' else 'bottom',
-                            color=open_color, fontsize=11, fontweight='bold')
+                            color=open_color, fontsize=9, fontweight='bold', bbox=bbox_props)
                             
                 if close_idx is not None:
                     close_arrow = '▼' if action == 'BUY' else '▲'
                     y_pos_close = df.iloc[close_idx]['high'] * 1.001 if action == 'BUY' else df.iloc[close_idx]['low'] * 0.999
                     
                     is_profit = trade.get('profit', 0) > 0
-                    c_color = '#5EBA7D' if is_profit else '#E74C3C'
+                    c_color = '#26A69A' if is_profit else '#EF5350'
 
                     ax.annotate(f"{close_arrow} CLOSE", xy=(close_idx, y_pos_close),
                                 xycoords=('data', 'data'), ha='center', va='bottom' if action == 'BUY' else 'top',
-                                color=c_color, fontsize=11, fontweight='bold')
+                                color=c_color, fontsize=9, fontweight='bold', bbox=bbox_props)
                                 
                     ax.plot([open_idx, close_idx], [df.iloc[open_idx]['close'], df.iloc[close_idx]['close']], 
-                           color='white', linestyle='-.', alpha=0.3)
+                           color='#787B86', linestyle=':', linewidth=1.5, alpha=0.8)
                            
                 x_max = len(df) - 1
+                line_text_bg = dict(boxstyle="round,pad=0.2", fc="#0F111A", ec="none")
+
                 if entry_price and entry_price > 0:
-                    ax.axhline(entry_price, color='#3498DB', linestyle='--', alpha=0.5)
-                    ax.text(x_max, entry_price, " ENTRY", color='#3498DB', va='center', ha='left', fontsize=9, fontweight='bold')
+                    ax.axhline(entry_price, color='#2962FF', linestyle='-', linewidth=1, alpha=0.6)
+                    ax.text(x_max, entry_price, " ENTRY", color='#2962FF', va='center', ha='left', fontsize=8, fontweight='bold', bbox=line_text_bg)
                 
                 if sl_price and sl_price > 0:
-                    ax.axhline(sl_price, color='#E74C3C', linestyle='--', alpha=0.5)
-                    ax.text(x_max, sl_price, " SL", color='#E74C3C', va='center', ha='left', fontsize=9, fontweight='bold')
+                    ax.axhline(sl_price, color='#EF5350', linestyle='--', linewidth=1, alpha=0.6)
+                    ax.text(x_max, sl_price, " SL", color='#EF5350', va='center', ha='left', fontsize=8, fontweight='bold', bbox=line_text_bg)
                     
                 if tp_price and tp_price > 0:
-                    ax.axhline(tp_price, color='#5EBA7D', linestyle='--', alpha=0.5)
-                    ax.text(x_max, tp_price, " TP", color='#5EBA7D', va='center', ha='left', fontsize=9, fontweight='bold')
+                    ax.axhline(tp_price, color='#26A69A', linestyle='--', linewidth=1, alpha=0.6)
+                    ax.text(x_max, tp_price, " TP", color='#26A69A', va='center', ha='left', fontsize=8, fontweight='bold', bbox=line_text_bg)
 
                 fig.tight_layout()
                 self.app.after(0, lambda: _embed_chart(fig))
@@ -578,17 +694,17 @@ class JournalView:
             canvas.draw()
             canvas.get_tk_widget().pack(fill="both", expand=True, padx=10, pady=(10, 0))
             
-            info_frame = ctk.CTkFrame(popup, fg_color="#2b2b2b", corner_radius=10)
+            info_frame = ctk.CTkFrame(popup, fg_color="#14151B", corner_radius=10, border_width=1, border_color="#2A2E39")
             info_frame.pack(fill="x", side="bottom", padx=10, pady=10)
             
             header = ctk.CTkLabel(info_frame, text="🤖 KI Begründung & Trade-Setup", font=ctk.CTkFont(family="Inter", size=13, weight="bold"), text_color="#A9B1D6")
             header.pack(anchor="w", padx=15, pady=(10, 5))
             
             details = f"Einstieg: {entry_price if entry_price else '-'}      SL: {sl_price if sl_price else '-'}      TP: {tp_price if tp_price else '-'}"
-            details_lbl = ctk.CTkLabel(info_frame, text=details, font=ctk.CTkFont(family="Inter", size=12), text_color="#E0E0E0")
+            details_lbl = ctk.CTkLabel(info_frame, text=details, font=ctk.CTkFont(family="Inter", size=12), text_color="#8B949E")
             details_lbl.pack(anchor="w", padx=15, pady=(0, 5))
             
-            reason_box = ctk.CTkTextbox(info_frame, height=80, fg_color="transparent", text_color="#E0E0E0", wrap="word")
+            reason_box = ctk.CTkTextbox(info_frame, height=80, fg_color="transparent", text_color="#D1D4DC", wrap="word")
             reason_box.pack(fill="x", padx=10, pady=(0, 10))
             reason_box.insert("1.0", str(ai_reasoning).strip())
             reason_box.configure(state="disabled")

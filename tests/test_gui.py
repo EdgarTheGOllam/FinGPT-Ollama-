@@ -82,7 +82,7 @@ class TestConfigManager(unittest.TestCase):
         self.assertTrue(self.config_manager.create_backup())
         
         # Prüfen ob Backup-Datei existiert
-        backup_files = list(Path(self.temp_dir) / "backups" / "*.json")
+        backup_files = list(Path(self.temp_dir) / "backups".glob("*.json"))
         self.assertGreater(len(backup_files), 0)
     
     def test_reset_to_defaults(self):

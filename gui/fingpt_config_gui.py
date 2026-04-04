@@ -48,7 +48,14 @@ class FinGPTConfigGUI:
         
         # Icon setzen (falls vorhanden)
         try:
-            self.root.iconbitmap("icon.ico")
+            import os
+            icon_path = r"C:\Users\edgar\Downloads\generated-image-removebg-preview.png"
+            if os.path.exists(icon_path):
+                img = tk.PhotoImage(file=icon_path)
+                self.root.iconphoto(True, img)
+                self._app_icon = img
+            else:
+                self.root.iconbitmap("icon.ico")
         except:
             pass
         

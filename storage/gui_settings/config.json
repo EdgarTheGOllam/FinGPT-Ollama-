@@ -2,7 +2,11 @@
   "ki_provider": "Ollama (Lokal)",
   "ollama_url": "http://localhost:11434",
   "api_key": "",
-  "llm_model": "glm-4.7-flash:latest",
+  "api_key_openai": "",
+  "api_key_anthropic": "",
+  "api_key_deepseek": "",
+  "api_key_openrouter": "",
+  "llm_model": "gemma4:e4b",
   "interval": 5,
   "ai_temperature": 0.3,
   "prompt_lang": "Deutsch",
@@ -31,6 +35,8 @@
   "day_wed": true,
   "day_thu": true,
   "day_fri": true,
+  "day_sat": false,
+  "day_sun": false,
   "news_filter": true,
   "news_before_min": 30,
   "news_after_min": 15,
@@ -75,5 +81,6 @@
   "notif_sl_hit": true,
   "notif_tp_hit": true,
   "notif_new_trade": true,
-  "notif_error": true
+  "notif_error": true,
+  "mcp_enabled": true
 }

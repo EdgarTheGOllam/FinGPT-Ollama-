@@ -28,11 +28,13 @@ class DashboardConfig:
     # Metrik-Karten
     metrics: List[MetricConfig] = field(default_factory=lambda: [
         MetricConfig('balance', 'Kontostand', 'balance', '€--', True, '€{value:,.2f}', True),
+        MetricConfig('equity', 'Kapital', 'balance', '€--', True, '€{value:,.2f}', True),
+        MetricConfig('margin', 'Marge', 'risk', '€--', True, '€{value:,.2f}', False),
+        MetricConfig('risk', 'Freie Margin', 'risk', '€--', True, '€{value:,.2f}', True),
+        MetricConfig('pnl', 'Gewinn/Verlust', 'pnl', '€--', True, '€{value:,.2f}', True),
+        MetricConfig('margin_level', 'Margin Stand', 'winrate', '-%', True, '{value:.2f}%', True),
         MetricConfig('positions', 'Offene Positionen', 'positions', '-', False),
         MetricConfig('trades', 'Heutige Trades', 'trades', '-', True, '+{value}', False),
-        MetricConfig('pnl', 'Gewinn/Verlust', 'pnl', '€--', True, '€{value:,.2f}', True),
-        MetricConfig('winrate', 'Win Rate', 'winrate', '-%', True, '{value:.1f}%', True),
-        MetricConfig('risk', 'Freie Margin', 'risk', '€--', True, '€{value:,.2f}', True),
     ])
     
     # Symbole für Live-Daten

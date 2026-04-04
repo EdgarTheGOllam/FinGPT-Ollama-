@@ -28,15 +28,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import numpy as np
 
-# Import NeuronSphere component
-from gui.components.neuron_sphere import (
-    NeuronSphereConfig,
-    NeuronColors,
-    generate_neuron_points,
-    create_neuron_sphere_figure,
-    render_trade_history_panel,
-    render_loading_sphere
-)
+# NeuronSphere import removed due to component deletion
 
 # ============================================================
 # LOADING STATE MACHINE
@@ -61,14 +53,15 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# CSS für dunkles Theme + Loading States
+# CSS für dunkles Theme + Kompaktierte News Feed
 st.markdown("""
 <style>
+    /* Kompakte News Feed Optimierung */
     .news-card {
         background-color: #1E2A38;
-        border-radius: 12px;
-        padding: 20px;
-        margin-bottom: 15px;
+        border-radius: 8px;
+        padding: 12px;
+        margin-bottom: 8px;
         border-left: 4px solid #4CAF50;
     }
     .news-card-bearish {
@@ -79,9 +72,9 @@ st.markdown("""
     }
     .impact-badge {
         display: inline-block;
-        padding: 4px 12px;
-        border-radius: 20px;
-        font-size: 12px;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 10px;
         font-weight: bold;
     }
     .impact-high {
@@ -98,40 +91,71 @@ st.markdown("""
     }
     .sentiment-bullish { color: #4CAF50; font-weight: bold; }
     .sentiment-bearish { color: #F44336; font-weight: bold; }
-    .sentiment-neutral { color: #FFC107; font-weight: bold; }
-    .metric-box {
-        background: linear-gradient(135deg, #1E2A38 0%, #2C3E50 100%);
-        border-radius: 12px;
-        padding: 20px;
-        text-align: center;
+    
+    /* Kompakte Status-Leiste */
+    .status-bar {
+        background-color: #1A1D24;
+        padding: 8px 12px;
+        border-radius: 8px;
+        margin-bottom: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
     }
-    .stMetric {
-        background-color: #1E2A38;
-        padding: 15px;
-        border-radius: 10px;
+    .status-ready {
+        color: #00FF66;
+        font-weight: bold;
+        font-size: 11px;
+    }
+    .status-loading {
+        color: #E67E22;
+        font-weight: bold;
+        font-size: 11px;
     }
     
-    /* Loading State Styles */
-    .loading-container {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        padding: 60px 20px;
-        min-height: 500px;
+    /* News Container - mehr Platz für Inhalt */
+    .news-container {
+        max-height: 70vh;
+        overflow-y: auto;
+        padding-right: 8px;
     }
-    .loading-message {
-        color: #FAFAFA;
-        font-size: 24px;
+    
+    /* Kompakte Metriken */
+    .metric-row {
+        padding: 8px;
+        margin-bottom: 4px;
+    }
+    
+    /* Kleinere Typography */
+    .news-title {
+        font-size: 13px;
         font-weight: bold;
-        margin-bottom: 10px;
-        text-align: center;
+        margin-bottom: 4px;
     }
-    .loading-submessage {
+    .news-desc {
+        font-size: 11px;
         color: #8B949E;
-        font-size: 14px;
-        text-align: center;
     }
+    
+    /* Kompakte Status-Leiste */
+    .status-bar {
+        background-color: #1A1D24;
+        padding: 6px 10px;
+        border-radius: 6px;
+        margin-bottom: 6px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+    .status-ready { color: #00FF66; font-weight: bold; font-size: 11px; }
+    .status-loading { color: #E67E22; font-weight: bold; font-size: 11px; }
+    
+    /* News Container - mehr Platz */
+    .news-container { max-height: 65vh; overflow-y: auto; padding-right: 6px; }
+    .news-title { font-size: 12px; font-weight: bold; margin-bottom: 3px; }
+    .news-desc { font-size: 10px; color: #8B949E; }
+</style>
+""")
     
     /* Error Card Styles */
     .error-card {
@@ -205,11 +229,7 @@ def render_initial_state():
     </div>
     """, unsafe_allow_html=True)
     
-    # Render 3D Loading Sphere
-    render_loading_sphere(
-        message="Analysiere News... 🧠",
-        key="news_loading_sphere"
-    )
+    st.spinner("Analysiere News... 🧠")
 
 
 def render_fetching_state(progress: float = 0.0, source: str = ""):

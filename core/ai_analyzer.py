@@ -34,6 +34,17 @@ class AIAnalyzer:
         except Exception:
             return False
 
+    def check_ollama_status_sync(self):
+        """Überprüft die Verfügbarkeit des Ollama-Servers (Synchron)"""
+        try:
+            import httpx
+            client = httpx.Client(base_url=self.ollama_url, timeout=5.0)
+            response = client.get("/api/version")
+            client.close()
+            return response.status_code == 200
+        except Exception:
+            return False
+
     async def get_available_models(self):
         """Holt die Liste der installierten Ollama-Modelle (Async)"""
         try:

@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./test_config_gui.py:*)",
+      "Bash(pytest:*)"
+    ]
+  }
+}

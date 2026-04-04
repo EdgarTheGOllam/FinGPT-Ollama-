@@ -19,18 +19,25 @@ class DesignSystem:
     # FARBSYSTEM (WCAG 2.1 AA konform)
     # ─────────────────────────────────────────────────────────────
     COLORS = {
+        # Shader-Inspired Palette (from React Snippet)
+        'shader': {
+            'color1': '#73bfc4',
+            'color2': '#ff8    ',
+            'color3': '#8da0ce',
+            'dark_bg': '#0B0E14'
+        },
         # Primärfarben (Neon Blue)
         'primary': {
-            'base': '#2979FF',
-            'dark': '#0039CB',
-            'light': '#75A7FF',
-            'hover': '#2962FF'
+            'base': '#73bfc4',
+            'dark': '#4a8a8e',
+            'light': '#aedce0',
+            'hover': '#5fb0b5'
         },
         'secondary': {
-            'base': '#9C27B0',
-            'dark': '#6A0080',
-            'light': '#D05CE3',
-            'hover': '#8E24AA'
+            'base': '#ff810a',
+            'dark': '#c76608',
+            'light': '#ffb35c',
+            'hover': '#e67309'
         },
         # Success (Neon Green)
         'success': {
@@ -71,11 +78,11 @@ class DesignSystem:
         'warning': COLORS['warning']['base'],
         'error': COLORS['danger']['base'],
         'neutral': COLORS['neutral']['medium'],
-        'background': ('#0B0E14', '#0B0E14'),  # TTG Deep Black
-        'surface': ('#1A1D24', '#1A1D24'),    # TTG Panel Slate
+        'background': ('#0B0E14', '#0B0E14'),  # Deep Black
+        'surface': ('#1A1D24', '#1A1D24'),    # Dark Slate
         'border': ('#2A2D34', '#2A2D34'),     # Dark Border
         # Trading-spezifische Farben
-        'premium': '#D05CE3',  # AI-Features, Insights
+        'premium': COLORS['secondary']['base'],
         'buy_signal': COLORS['success']['base'],
         'sell_signal': COLORS['danger']['base'],
         'hold_signal': COLORS['neutral']['medium'],

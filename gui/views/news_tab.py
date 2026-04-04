@@ -9,12 +9,22 @@ import hashlib
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 
+# Import Design System für konsistente UI-Gestaltung
+from gui.design_system import DesignSystem
+
 try:
     import requests
     import feedparser
     NEWSAPI_AVAILABLE = True
 except ImportError:
     NEWSAPI_AVAILABLE = False
+
+# Design System Shortcuts für bessere Lesbarkeit
+ds = DesignSystem
+COLORS = ds.COLORS
+SEMANTIC = ds.SEMANTIC
+SPACING = ds.SPACING
+RADIUS = ds.RADIUS
 
 # ============================================================
 # KONFIGURATION
@@ -95,76 +105,122 @@ class NewsView:
         # ═══════════════════ NEWS FEED SUB-TAB ═══════════════════
         nf_tab = news_sub.tab("📡 News Feed")
         nf_tab.grid_columnconfigure(0, weight=1)
-        nf_tab.grid_rowconfigure(1, weight=1)
-        nf_tab.grid_rowconfigure(2, weight=0)  # Metrics row
+        nf_tab.grid_rowconfigure(0, weight=0)  # Metrics row - no expand
+        nf_tab.grid_rowconfigure(1, weight=0)  # Controls row - compact
+        nf_tab.grid_rowconfigure(2, weight=1)  # News scroll - expand!
 
-        # ═══ METRICS ROW ═══
-        metrics_frame = ctk.CTkFrame(nf_tab, fg_color="#1A1D24", corner_radius=12)
-        metrics_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 5))
-        metrics_frame.grid_columnconfigure((0,1,2,3,4), weight=1, uniform="metric")
+        # ═══ METRICS ROW (GANZ OBEN - KOMPAKT) ═══
+        metrics_frame = ctk.CTkFrame(
+            nf_tab, 
+            fg_color=SEMANTIC['surface'], 
+            corner_radius=RADIUS['lg'], 
+            height=36
+        )
+        metrics_frame.grid(row=0, column=0, sticky="ew", padx=SPACING['sm'], pady=(SPACING['xs'], 0))
+        metrics_frame.grid_columnconfigure((0,1,2,3), weight=1, uniform="metric")
+        metrics_frame.grid_propagate(False)
         
-        # Sentiment Summary
-        ctk.CTkLabel(metrics_frame, text="📊 Gesamt", text_color="#8B949E").grid(row=0, column=0, padx=10, pady=10)
-        self._metric_bullish = ctk.CTkLabel(metrics_frame, text="🟢 0", text_color="#4CAF50", font=ctk.CTkFont(size=16, weight="bold"))
-        self._metric_bullish.grid(row=0, column=1, padx=10)
-        self._metric_bearish = ctk.CTkLabel(metrics_frame, text="🔴 0", text_color="#F44336", font=ctk.CTkFont(size=16, weight="bold"))
-        self._metric_bearish.grid(row=0, column=2, padx=10)
-        self._metric_neutral = ctk.CTkLabel(metrics_frame, text="🟡 0", text_color="#FFC107", font=ctk.CTkFont(size=16, weight="bold"))
-        self._metric_neutral.grid(row=0, column=3, padx=10)
+        # Sentiment Summary - Kompakt
+        ctk.CTkLabel(
+            metrics_frame, text="📊", 
+            text_color=COLORS['neutral']['light'], 
+            font=ds.get_font('xs')
+        ).grid(row=0, column=0, padx=SPACING['xs'], pady=SPACING['xs'])
         
-        # EUR/USD Signal
-        self._signal_label = ctk.CTkLabel(metrics_frame, text="📈 EUR/USD: --", text_color="#2979FF", font=ctk.CTkFont(size=16, weight="bold"))
-        self._signal_label.grid(row=0, column=4, padx=10)
+        self._metric_bullish = ctk.CTkLabel(
+            metrics_frame, text="🟢0", 
+            text_color=COLORS['success']['base'], 
+            font=ds.get_font('sm', 'bold')
+        )
+        self._metric_bullish.grid(row=0, column=1, padx=SPACING['xs'])
+        self._metric_bearish = ctk.CTkLabel(
+            metrics_frame, text="🔴0", 
+            text_color=COLORS['danger']['base'], 
+            font=ds.get_font('sm', 'bold')
+        )
+        self._metric_bearish.grid(row=0, column=2, padx=SPACING['xs'])
+        self._metric_neutral = ctk.CTkLabel(
+            metrics_frame, text="🟡0", 
+            text_color=COLORS['warning']['base'], 
+            font=ds.get_font('sm', 'bold')
+        )
+        self._metric_neutral.grid(row=0, column=3, padx=SPACING['xs'])
+        
 
-        # ═══ CONTROLS ROW ═══
+
+        # ═══ CONTROLS ROW (GANZ OBEN - KOMPAKT) ═══
         ctrl = ctk.CTkFrame(nf_tab, fg_color="transparent")
-        ctrl.grid(row=1, column=0, sticky="ew", padx=10, pady=(5, 0))
+        ctrl.grid(row=1, column=0, sticky="ew", padx=SPACING['sm'], pady=(SPACING['xs'], SPACING['xs']))
 
+        # Kompakte Buttons - standardisierte Größen
+        button_height = 28
+        
         self._news_refresh_btn = ctk.CTkButton(
-            ctrl, text="🔄 News Laden", width=130,
-            fg_color="#2979FF", hover_color="#21618C",
+            ctrl, text="🔄 Laden", width=100, height=button_height,
+            fg_color=COLORS['primary']['base'], hover_color=COLORS['primary']['hover'], 
+            font=ds.get_font('sm'), corner_radius=RADIUS['md'],
             command=self._fetch_news_threaded)
-        self._news_refresh_btn.pack(side="left", padx=(0, 8))
+        self._news_refresh_btn.pack(side="left", padx=(0, SPACING['xs']))
 
         self._news_analyze_btn = ctk.CTkButton(
-            ctrl, text="🤖 Alle Analysieren", width=150,
-            fg_color="#8E44AD", hover_color="#6C3483",
+            ctrl, text="🤖 KI", width=60, height=button_height,
+            fg_color=COLORS['secondary']['base'], hover_color=COLORS['secondary']['hover'], 
+            font=ds.get_font('sm'), corner_radius=RADIUS['md'],
             command=self._analyze_all_news_threaded)
-        self._news_analyze_btn.pack(side="left", padx=(0, 14))
+        self._news_analyze_btn.pack(side="left", padx=(0, SPACING['xs']))
 
-        # Auto-refresh toggle
+        # Auto-refresh toggle - kompakt
         self._auto_refresh_btn = ctk.CTkButton(
-            ctrl, text="🔁 Auto (60s)", width=100,
-            fg_color="#2A2D34", hover_color="#21618C",
+            ctrl, text="🔁 Auto", width=70, height=button_height,
+            fg_color=SEMANTIC['surface'], hover_color=COLORS['primary']['hover'], 
+            font=ds.get_font('sm'), corner_radius=RADIUS['md'],
             command=self._toggle_auto_refresh)
-        self._auto_refresh_btn.pack(side="left", padx=(0, 8))
+        self._auto_refresh_btn.pack(side="left", padx=(0, SPACING['xs']))
 
-        # Export button
-        ctk.CTkButton(
-            ctrl, text="📥 Export CSV", width=100,
-            fg_color="#4CAF50", hover_color="#388E3C",
-            command=self._export_csv).pack(side="left", padx=(0, 14))
-
-        ctk.CTkLabel(ctrl, text="Filter:", text_color="#8B949E").pack(side="left", padx=(0, 4))
-        for pair in ["Alle", "EUR", "GBP", "USD", "JPY", "CHF", "AUD", "CAD", "NZD"]:
-            btn = ctk.CTkButton(ctrl, text=pair, width=52, height=26,
-                                fg_color="#2979FF" if pair == "Alle" else "#2A2D34",
-                                hover_color="#21618C",
-                                command=lambda p=pair: self._news_filter(p))
-            btn.pack(side="left", padx=2)
+        # Filter-Buttons kompakt - standardisierte Größe
+        ctk.CTkLabel(
+            ctrl, text="Filter:", 
+            text_color=COLORS['neutral']['light'], 
+            font=ds.get_font('xs')
+        ).pack(side="left", padx=(SPACING['xs'], SPACING['xs']))
+        
+        filter_btn_width = 50
+        for pair in ["Alle", "EUR", "GBP", "USD", "JPY"]:
+            btn = ctk.CTkButton(
+                ctrl, text=pair, width=filter_btn_width, height=button_height - 4,
+                fg_color=COLORS['primary']['base'] if pair == "Alle" else SEMANTIC['surface'],
+                hover_color=COLORS['primary']['hover'], 
+                font=ds.get_font('xs'),
+                corner_radius=RADIUS['sm'],
+                command=lambda p=pair: self._news_filter(p)
+            )
+            btn.pack(side="left", padx=1)
             self._news_filter_btns[pair] = btn
 
-        self._news_status_lbl = ctk.CTkLabel(ctrl, text="● Bereit", text_color="#8B949E",
-                                              font=ctk.CTkFont(family="Inter", size=11))
-        self._news_status_lbl.pack(side="right", padx=15)
+        # Status-Indicator kompakt - nach rechts verschoben
+        self._news_status_lbl = ctk.CTkLabel(
+            ctrl, text="● Bereit", 
+            text_color=COLORS['success']['base'],
+            font=ds.get_font('xs', 'bold')
+        )
+        self._news_status_lbl.pack(side="right", padx=SPACING['sm'])
 
-        # ═══ NEWS SCROLL ═══
-        self._news_scroll = ctk.CTkScrollableFrame(nf_tab, fg_color="#1A1D24", corner_radius=12)
-        self._news_scroll.grid(row=2, column=0, sticky="nsew", padx=10, pady=10)
+        # ═══ NEWS SCROLL (MEHR PLATZ - ganz oben beginnend) ═══
+        self._news_scroll = ctk.CTkScrollableFrame(
+            nf_tab, 
+            fg_color=SEMANTIC['surface'], 
+            corner_radius=RADIUS['lg']
+        )
+        self._news_scroll.grid(row=2, column=0, sticky="nsew", padx=SPACING['sm'], pady=(SPACING['xs'], SPACING['sm']))
         self._news_scroll.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(self._news_scroll,
-                     text="🔄  Klicke 'News Laden' um aktuelle Forex-Nachrichten zu laden.\n\nOder aktiviere 'Auto' für Live-Updates alle 60 Sekunden.",
-                     font=ctk.CTkFont(family="Inter", size=13), text_color="#8B949E").pack(pady=40)
+        
+        # Kompakte Empty State Nachricht
+        ctk.CTkLabel(
+            self._news_scroll,
+            text="🔄 Klicke 'Laden' für Forex-News oder aktiviere 'Auto'",
+            font=ds.get_font('sm'), 
+            text_color=COLORS['neutral']['light']
+        ).pack(pady=20)
 
         # ═══════════════ WIRTSCHAFTSKALENDER SUB-TAB ═════════════
         cal_tab = news_sub.tab("📅 Wirtschaftskalender")
@@ -172,36 +228,80 @@ class NewsView:
         cal_tab.grid_rowconfigure(2, weight=1)
 
         cal_ctrl = ctk.CTkFrame(cal_tab, fg_color="transparent")
-        cal_ctrl.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 8))
+        cal_ctrl.grid(row=0, column=0, sticky="ew", padx=SPACING['lg'], pady=(SPACING['lg'], SPACING['md']))
 
-        ctk.CTkButton(cal_ctrl, text="🔄 Kalender Laden", width=150, height=28,
-                      fg_color="#2979FF", hover_color="#21618C",
-                      command=self._fetch_calendar_threaded).pack(side="left", padx=(0, 8))
+        ctk.CTkButton(
+            cal_ctrl, 
+            text="🔄 Kalender Laden", 
+            width=150, 
+            height=32,
+            fg_color=COLORS['primary']['base'], 
+            hover_color=COLORS['primary']['hover'],
+            corner_radius=RADIUS['md'],
+            font=ds.get_font('sm'),
+            command=self._fetch_calendar_threaded
+        ).pack(side="left", padx=(0, SPACING['sm']))
 
-        ctk.CTkLabel(cal_ctrl, text="Impact:", text_color="#8B949E").pack(side="left", padx=(0, 4))
+        ctk.CTkLabel(
+            cal_ctrl, 
+            text="Impact:", 
+            text_color=COLORS['neutral']['light']
+        ).pack(side="left", padx=(0, SPACING['xs']))
+        
         self._cal_impact_var = ctk.StringVar(value="Alle")
+        
         for impact in ["Alle", "Hoch", "Mittel", "Niedrig"]:
-            ctk.CTkButton(cal_ctrl, text=impact, width=60, height=26,
-                          fg_color="#2A2D34", hover_color="#21618C",
-                          command=lambda iv=impact: self._cal_filter(iv)).pack(side="left", padx=2)
+            ctk.CTkButton(
+                cal_ctrl, 
+                text=impact, 
+                width=70, 
+                height=30,
+                fg_color=SEMANTIC['surface'], 
+                hover_color=COLORS['primary']['hover'],
+                corner_radius=RADIUS['md'],
+                font=ds.get_font('sm'),
+                command=lambda iv=impact: self._cal_filter(iv)
+            ).pack(side="left", padx=2)
 
-        self._cal_status_lbl = ctk.CTkLabel(cal_ctrl, text="● Bereit", text_color="#8B949E",
-                                             font=ctk.CTkFont(family="Inter", size=11))
-        self._cal_status_lbl.pack(side="right", padx=15)
+        self._cal_status_lbl = ctk.CTkLabel(
+            cal_ctrl, 
+            text="● Bereit", 
+            text_color=COLORS['neutral']['light'],
+            font=ds.get_font('sm')
+        )
+        self._cal_status_lbl.pack(side="right", padx=SPACING['lg'])
 
         # Table header
-        cal_hdr = ctk.CTkFrame(cal_tab, fg_color="#1A1D24", corner_radius=8, height=32)
-        cal_hdr.grid(row=1, column=0, sticky="ew", padx=10, pady=(4, 0))
+        cal_hdr = ctk.CTkFrame(
+            cal_tab, 
+            fg_color=SEMANTIC['surface'], 
+            corner_radius=RADIUS['lg'], 
+            height=36
+        )
+        cal_hdr.grid(row=1, column=0, sticky="ew", padx=SPACING['lg'], pady=(SPACING['xs'], 0))
         cal_hdr.grid_columnconfigure((0,1,2,3,4,5), weight=1, uniform="ch")
         cal_hdr.grid_propagate(False)
+        
         for ci, ch in enumerate(["Zeit", "Währung", "Impact", "Event", "Prognose", "Sentiment"]):
-            ctk.CTkLabel(cal_hdr, text=ch, font=ctk.CTkFont(family="Inter", size=11, weight="bold"),
-                         text_color="#8B949E").grid(row=0, column=ci, sticky="w", padx=8, pady=6)
+            ctk.CTkLabel(
+                cal_hdr, 
+                text=ch, 
+                font=ds.get_font('sm', 'bold'),
+                text_color=COLORS['neutral']['light']
+            ).grid(row=0, column=ci, sticky="w", padx=SPACING['sm'], pady=SPACING['sm'])
 
-        self._cal_scroll = ctk.CTkScrollableFrame(cal_tab, fg_color="transparent", corner_radius=0)
-        self._cal_scroll.grid(row=2, column=0, sticky="nsew", padx=10, pady=(0, 10))
+        self._cal_scroll = ctk.CTkScrollableFrame(
+            cal_tab, 
+            fg_color="transparent", 
+            corner_radius=RADIUS['lg']
+        )
+        self._cal_scroll.grid(row=2, column=0, sticky="nsew", padx=SPACING['lg'], pady=(0, SPACING['lg']))
         self._cal_scroll.grid_columnconfigure((0,1,2,3,4,5), weight=1, uniform="ch")
-        ctk.CTkLabel(self._cal_scroll, text="Keine Termine geladen.", text_color="#8B949E").grid(row=0, column=0, columnspan=6, pady=20)
+        ctk.CTkLabel(
+            self._cal_scroll, 
+            text="Keine Termine geladen.", 
+            text_color=COLORS['neutral']['light']
+        ).grid(row=0, column=0, columnspan=6, pady=20)
 
         # ═══════════════ ANALYTICS SUB-TAB ═════════════
         analytics_tab = news_sub.tab("📊 Analytics")
@@ -240,7 +340,7 @@ class NewsView:
         if self._news_analyzing:
             return
         self._news_refresh_btn.configure(state="disabled", text="⏳ Lade...")
-        self._news_status_lbl.configure(text="● Lade Nachrichten...", text_color="#E67E22")
+        self._news_status_lbl.configure(text="⬤ Lade...", text_color="#E67E22")
         threading.Thread(target=self._fetch_news_bg, daemon=True).start()
 
     def _fetch_news_bg(self):
@@ -312,7 +412,7 @@ class NewsView:
                             news_items.append({
                                 "id": hashlib.md5(entry.link.encode()).hexdigest(),
                                 "title": entry.get("title", ""),
-                                "description": entry.get("summary", "")[:200],
+                                "description": entry.get("summary", "")[:500],  # Mehr Kontext anzeigen
                                 "source": feed.feed.get("title", "RSS"),
                                 "url": entry.get("link", ""),
                                 "published_at": entry.get("published", ""),
@@ -353,33 +453,33 @@ class NewsView:
         """Get mock news for demo/offline"""
         return [
             {"id": "1", "title": "ECB Rate Decision: Interest Rates Hold at 4.50%", 
-             "description": "European Central Bank maintains current rates", "source": "FX Street",
-             "url": "#", "published_at": (datetime.now() - timedelta(hours=2)).isoformat(),
+             "description": "European Central Bank maintains current rates. Die EZB hat die Zinsen unverändert belassen und signalisiert eine vorsichtige Haltung angesichts der Inflation.", "source": "FX Street",
+             "url": "https://www.forexstreet.net/news/ecb-rate-decision", "published_at": (datetime.now() - timedelta(hours=2)).isoformat(),
              "currency": "EUR", "sentiment": "Neutral", "impact": "HIGH"},
             {"id": "2", "title": "EUR/USD Rises to 1.0950 on Strong German GDP", 
-             "description": "Euro gains on better-than-expected growth", "source": "Bloomberg",
-             "url": "#", "published_at": (datetime.now() - timedelta(hours=4)).isoformat(),
+             "description": "Euro gains on better-than-expected growth. Das deutsche BIP-Wachstum übertraf die Erwartungen, was den Euro stärker machte.", "source": "Bloomberg",
+             "url": "https://www.bloomberg.com/markets/eurrencies", "published_at": (datetime.now() - timedelta(hours=4)).isoformat(),
              "currency": "EUR", "sentiment": "Bullish", "impact": "MEDIUM"},
             {"id": "3", "title": "Fed Powell: Inflation Still a Concern", 
-             "description": "Federal Reserve emphasizes tightening", "source": "Reuters",
-             "url": "#", "published_at": (datetime.now() - timedelta(hours=6)).isoformat(),
+             "description": "Federal Reserve emphasizes tightening. Fed-Chairman Powell betonte, dass die Inflation weiterhin ein Hauptanliegen bleibt.", "source": "Reuters",
+             "url": "https://www.reuters.com/markets/us", "published_at": (datetime.now() - timedelta(hours=6)).isoformat(),
              "currency": "USD", "sentiment": "Bearish", "impact": "HIGH"},
             {"id": "4", "title": "US Non-Farm Payrolls Beat at 275K", 
-             "description": "Labor market remains strong", "source": "MarketWatch",
-             "url": "#", "published_at": (datetime.now() - timedelta(hours=8)).isoformat(),
+             "description": "Labor market remains strong. Die US-Arbeitsmarktdaten übertrafen die Erwartungen deutlich mit 275.000 neuen Stellen.", "source": "MarketWatch",
+             "url": "https://www.marketwatch.com/investing/economy", "published_at": (datetime.now() - timedelta(hours=8)).isoformat(),
              "currency": "USD", "sentiment": "Bearish", "impact": "HIGH"},
             {"id": "5", "title": "USD/JPY Tests 150 Level", 
-             "description": "Dollar strengthens on BOJ uncertainty", "source": "Investing",
-             "url": "#", "published_at": (datetime.now() - timedelta(hours=10)).isoformat(),
+             "description": "Dollar strengthens on BOJ uncertainty. Die Unsicherheit über die Geldpolitik der Bank of Japan lässt den Yen schwächeln.", "source": "Investing",
+             "url": "https://www.investing.com/currencies/usd-jpy", "published_at": (datetime.now() - timedelta(hours=10)).isoformat(),
              "currency": "JPY", "sentiment": "Neutral", "impact": "MEDIUM"}
         ]
 
     def _on_news_fetched(self):
-        self._news_refresh_btn.configure(state="normal", text="🔄 News Laden")
+        self._news_refresh_btn.configure(state="normal", text="🔄 Laden")
         if self._auto_refresh:
-            self._news_status_lbl.configure(text=f"● Auto: {datetime.now().strftime('%H:%M:%S')}", text_color="#4CAF50")
+            self._news_status_lbl.configure(text=f"✓ Auto {datetime.now().strftime('%H:%M')}", text_color="#4CAF50")
         else:
-            self._news_status_lbl.configure(text="● Aktuell", text_color="#00FF66")
+            self._news_status_lbl.configure(text="✓ Bereit", text_color="#00FF66")
         self._render_news_feed()
         self._update_sentiment_metrics()
 
@@ -394,8 +494,8 @@ class NewsView:
         if self._news_analyzing:
             return
         self._news_analyzing = True
-        self._news_analyze_btn.configure(state="disabled", text="⏳ Analysiere...")
-        self._news_status_lbl.configure(text="● KI analysiert...", text_color="#8E44AD")
+        self._news_analyze_btn.configure(state="disabled", text="⏳...")
+        self._news_status_lbl.configure(text="⬤ KI...", text_color="#8E44AD")
         threading.Thread(target=self._analyze_all_news_bg, daemon=True).start()
 
     def _analyze_all_news_bg(self):
@@ -471,8 +571,8 @@ Nachricht: {text[:300]}"""
 
     def _on_news_analyzed(self):
         self._news_analyzing = False
-        self._news_status_lbl.configure(text="● KI Analyse abgeschlossen", text_color="#00FF66")
-        self._news_analyze_btn.configure(state="normal", text="🤖 Alle Analysieren")
+        self._news_status_lbl.configure(text="✓ Fertig", text_color="#00FF66")
+        self._news_analyze_btn.configure(state="normal", text="🤖 KI")
         self._render_news_feed()
         self._update_sentiment_metrics()
 
@@ -488,17 +588,6 @@ Nachricht: {text[:300]}"""
         self._metric_bullish.configure(text=f"🟢 {bullish}")
         self._metric_bearish.configure(text=f"🔴 {bearish}")
         self._metric_neutral.configure(text=f"🟡 {neutral}")
-        
-        # EUR/USD Signal
-        if bullish > bearish:
-            signal = "🟢 KAUFEN"
-        elif bearish > bullish:
-            signal = "🔴 VERKAUFEN"
-        else:
-            signal = "🟡 NEUTRAL"
-        
-        bullish_pct = bullish / total * 100
-        self._signal_label.configure(text=f"📈 EUR/USD: {signal} ({bullish_pct:.0f}%)")
 
     # ═══════════════════════════════════════════════════════
     # UI RENDERING
@@ -517,54 +606,147 @@ Nachricht: {text[:300]}"""
         filtered = [n for n in self._news_items if self._news_filter_pair == "Alle" or n.get("currency") == self._news_filter_pair]
         
         if not filtered:
-            ctk.CTkLabel(self._news_scroll, text="Keine Nachrichten für diesen Filter.", 
-                        text_color="#8B949E").pack(pady=40)
+            ctk.CTkLabel(
+                self._news_scroll, 
+                text="Keine Nachrichten für diesen Filter.", 
+                text_color=COLORS['neutral']['light'], 
+                font=ds.get_font('sm')
+            ).pack(pady=20)
             return
 
         for npap in filtered:
-            f = ctk.CTkFrame(self._news_scroll, fg_color="#1A1D24", corner_radius=8)
-            f.pack(fill="x", pady=6, padx=4)
+            # Kompakteres News Card Design
+            f = ctk.CTkFrame(
+                self._news_scroll, 
+                fg_color=SEMANTIC['surface'], 
+                corner_radius=RADIUS['md']
+            )
+            f.pack(fill="x", pady=SPACING['xs'], padx=2)
             
-            # Header
+            # Kompakter Header
             hdr = ctk.CTkFrame(f, fg_color="transparent")
-            hdr.pack(fill="x", padx=15, pady=(15, 5))
+            hdr.pack(fill="x", padx=SPACING['sm'], pady=(SPACING['sm'], SPACING['xs']))
             
-            # Currency & Time
+            # Currency & Time - kompakt
             curr = npap.get("currency", "N/A")
-            ctk.CTkLabel(hdr, text=curr, font=ctk.CTkFont(weight="bold"), 
-                        fg_color="#3498DB", text_color="#FFFFFF", corner_radius=4, width=40).pack(side="left")
+            ctk.CTkLabel(
+                hdr, text=curr, 
+                font=ds.get_font('xs', 'bold'), 
+                fg_color=COLORS['primary']['base'], 
+                text_color="#FFFFFF", 
+                corner_radius=RADIUS['sm'], 
+                width=36, height=20
+            ).pack(side="left")
             
-            # Impact Badge
+            # Impact Badge - kompakt
             impact = npap.get("impact", "LOW")
-            icol = "#F44336" if impact == "HIGH" else "#FFC107" if impact == "MEDIUM" else "#4CAF50"
-            ctk.CTkLabel(hdr, text=f"⚡{impact}", text_color=icol, font=ctk.CTkFont(weight="bold", size=11)).pack(side="left", padx=8)
+            icol = COLORS['danger']['base'] if impact == "HIGH" else COLORS['warning']['base'] if impact == "MEDIUM" else COLORS['success']['base']
+            ctk.CTkLabel(
+                hdr, 
+                text=f"⚡{impact}", 
+                text_color=icol, 
+                font=ds.get_font('xs', 'bold')
+            ).pack(side="left", padx=SPACING['xs'])
             
-            # Time
+            # Time - kompakt
             try:
                 if npap.get("published_at"):
                     dt = datetime.fromisoformat(npap["published_at"].replace("Z", "+00:00"))
                     time_ago = (datetime.now() - dt.replace(tzinfo=None)).total_seconds() / 3600
                     time_str = f"{time_ago:.1f}h"
                 else:
-                    time_str = "Recent"
+                    time_str = "Neu"
             except:
-                time_str = "Recent"
+                time_str = "Neu"
             
-            ctk.CTkLabel(hdr, text=time_str, text_color="#8B949E", font=ctk.CTkFont(size=11)).pack(side="left", padx=10)
+            ctk.CTkLabel(
+                hdr, text=time_str, 
+                text_color=COLORS['neutral']['light'], 
+                font=ds.get_font('xs')
+            ).pack(side="left", padx=SPACING['sm'])
             
-            # Sentiment
+            # Sentiment - kompakt
             sent = npap.get("sentiment", "Neutral")
-            scol = "#4CAF50" if sent == "Bullish" else "#F44336" if sent == "Bearish" else "#FFC107"
+            scol = COLORS['success']['base'] if sent == "Bullish" else COLORS['danger']['base'] if sent == "Bearish" else COLORS['warning']['base']
             sent_icon = "🟢" if sent == "Bullish" else "🔴" if sent == "Bearish" else "🟡"
-            ctk.CTkLabel(hdr, text=f"{sent_icon} {sent}", text_color=scol, font=ctk.CTkFont(weight="bold")).pack(side="right")
+            ctk.CTkLabel(
+                hdr, 
+                text=f"{sent_icon} {sent}", 
+                text_color=scol, 
+                font=ds.get_font('xs', 'bold')
+            ).pack(side="right")
             
-            # Title
-            ctk.CTkLabel(f, text=npap.get("title", ""), font=ctk.CTkFont(family="Inter", size=14, weight="bold"),
-                         anchor="w", justify="left").pack(fill="x", padx=15, pady=(5, 5))
+            # Title - kompakter
+            ctk.CTkLabel(
+                f, 
+                text=npap.get("title", ""), 
+                font=ds.get_font('sm', 'bold'),
+                anchor="w", 
+                justify="left"
+            ).pack(fill="x", padx=SPACING['sm'], pady=(SPACING['xs'], SPACING['xs']))
             
-            # Description
-            ctk.CTkLabel(f, text=npap.get("description", "")[:150] + "...", text_color="#8B949E", 
-                         anchor="w", justify="left").pack(fill="x", padx=15, pady=(0, 15))
+            # Description - MEHR KONTEXT (größerer Text, mehr Platz)
+            desc_text = npap.get("description", "")
+            # Zeige mehr vom Description-Text
+            ctk.CTkLabel(
+                f, 
+                text=desc_text, 
+                text_color=COLORS['neutral']['light'], 
+                anchor="w", 
+                justify="left", 
+                font=ds.get_font('sm'),  # Größere Schrift
+                wraplength=700  # Mehr Platz für Textumbruch
+            ).pack(fill="x", padx=SPACING['sm'], pady=(0, SPACING['xs']))
+            
+            # Quelle und Link zum Artikel
+            source = npap.get("source", "Unbekannt")
+            url = npap.get("url", "")
+            
+            footer = ctk.CTkFrame(f, fg_color="transparent")
+            footer.pack(fill="x", padx=SPACING['sm'], pady=(0, SPACING['sm']))
+            
+            ctk.CTkLabel(
+                footer, 
+                text=f"📰 {source}", 
+                text_color=COLORS['neutral']['light'], 
+                font=ds.get_font('xs')
+            ).pack(side="left")
+            
+            # Link-Button zum Artikel
+            article_url = url  # Capture URL for lambda
+            if article_url and article_url != "#":
+                link_btn = ctk.CTkButton(
+                    footer,
+                    text="🔗 Artikel öffnen",
+                    width=120,
+                    height=24,
+                    fg_color=COLORS['primary']['base'],
+                    hover_color=COLORS['primary']['hover'],
+                    font=ds.get_font('xs'),
+                    corner_radius=RADIUS['sm'],
+                    command=lambda u=article_url: self._open_article_url(u)
+                )
+                link_btn.pack(side="right")
+
+    # ═══════════════════════════════════════════════════════════════
+    # ARTICLE URL
+    # ═══════════════════════════════════════════════════════════════
+    
+    def _open_article_url(self, url: str):
+        """Öffnet den Artikel-Link im Standard-Browser"""
+        import webbrowser
+        try:
+            logging.info(f"Öffne URL: {url}")
+            if url and url.startswith("http"):
+                webbrowser.open(url)
+            elif url and url != "#":
+                webbrowser.open("https://" + url)
+            else:
+                logging.warning(f"Ungültige URL: {url}")
+                self._news_status_lbl.configure(text="● Keine URL verfügbar", text_color=COLORS['warning']['base'])
+        except Exception as e:
+            logging.error(f"Fehler beim Öffnen der URL: {e}")
+            self._news_status_lbl.configure(text="● Fehler beim Öffnen", text_color=COLORS['danger']['base'])
 
     # ═══════════════════════════════════════════════════════
     # CALENDAR
@@ -609,31 +791,64 @@ Nachricht: {text[:300]}"""
             w.destroy()
         
         if not items:
-            ctk.CTkLabel(self._cal_scroll, text="Keine Termine für diesen Filter.", 
-                        text_color="#8B949E").grid(row=0, column=0, columnspan=6, pady=20)
+            ctk.CTkLabel(
+                self._cal_scroll, 
+                text="Keine Termine für diesen Filter.", 
+                text_color=COLORS['neutral']['light']
+            ).grid(row=0, column=0, columnspan=6, pady=20)
             return
             
         for i, ev in enumerate(items):
             bg = ("gray95", "gray14") if i % 2 == 0 else "transparent"
-            row_f = ctk.CTkFrame(self._cal_scroll, fg_color=bg, corner_radius=4, height=36)
+            row_f = ctk.CTkFrame(
+                self._cal_scroll, 
+                fg_color=bg, 
+                corner_radius=RADIUS['sm'], 
+                height=40
+            )
             row_f.grid(row=i, column=0, columnspan=6, sticky="ew", pady=2)
             row_f.grid_columnconfigure((0,1,2,3,4,5), weight=1, uniform="ch")
             row_f.grid_propagate(False)
             
-            ctk.CTkLabel(row_f, text=ev.get("time",""), text_color=("gray20","gray80")).grid(row=0, column=0, padx=8)
-            ctk.CTkLabel(row_f, text=ev.get("currency",""), font=ctk.CTkFont(weight="bold")).grid(row=0, column=1, padx=8)
+            ctk.CTkLabel(
+                row_f, 
+                text=ev.get("time",""), 
+                text_color=("gray20","gray80")
+            ).grid(row=0, column=0, padx=SPACING['sm'])
+            ctk.CTkLabel(
+                row_f, 
+                text=ev.get("currency",""), 
+                font=ds.get_font('sm', 'bold')
+            ).grid(row=0, column=1, padx=SPACING['sm'])
             
             imp = ev.get("impact", "LOW")
-            icol = "#F44336" if imp == "HIGH" else "#FFC107" if imp == "MEDIUM" else "#4CAF50"
-            ctk.CTkLabel(row_f, text=imp, text_color=icol, font=ctk.CTkFont(weight="bold")).grid(row=0, column=2, padx=8)
+            icol = COLORS['danger']['base'] if imp == "HIGH" else COLORS['warning']['base'] if imp == "MEDIUM" else COLORS['success']['base']
+            ctk.CTkLabel(
+                row_f, 
+                text=imp, 
+                text_color=icol, 
+                font=ds.get_font('sm', 'bold')
+            ).grid(row=0, column=2, padx=SPACING['sm'])
             
-            ctk.CTkLabel(row_f, text=ev.get("event",""), anchor="w").grid(row=0, column=3, sticky="w", padx=8)
-            ctk.CTkLabel(row_f, text=ev.get("forecast","")).grid(row=0, column=4, padx=8)
+            ctk.CTkLabel(
+                row_f, 
+                text=ev.get("event",""), 
+                anchor="w"
+            ).grid(row=0, column=3, sticky="w", padx=SPACING['sm'])
+            ctk.CTkLabel(
+                row_f, 
+                text=ev.get("forecast","")
+            ).grid(row=0, column=4, padx=SPACING['sm'])
             
             # Sentiment
             sent = ev.get("sentiment", "Neutral")
-            scol = "#4CAF50" if sent == "Bullish" else "#F44336" if sent == "Bearish" else "#FFC107"
-            ctk.CTkLabel(row_f, text=sent, text_color=scol, font=ctk.CTkFont(weight="bold")).grid(row=0, column=5, padx=8)
+            scol = COLORS['success']['base'] if sent == "Bullish" else COLORS['danger']['base'] if sent == "Bearish" else COLORS['warning']['base']
+            ctk.CTkLabel(
+                row_f, 
+                text=sent, 
+                text_color=scol, 
+                font=ds.get_font('sm', 'bold')
+            ).grid(row=0, column=5, padx=SPACING['sm'])
 
     # ═══════════════════════════════════════════════════════
     # EXPORT
@@ -664,6 +879,6 @@ Nachricht: {text[:300]}"""
                         'published_at': item.get('published_at', '')
                     })
             
-            self._news_status_lbl.configure(text=f"● Export: {filename}", text_color="#4CAF50")
+            self._news_status_lbl.configure(text=f"● Export: {filename}", text_color=COLORS['success']['base'])
         except Exception as e:
             logging.error(f"Export error: {e}")

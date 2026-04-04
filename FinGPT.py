@@ -344,7 +344,7 @@ class MT5FinGPT:
         self.rl_use_gpu = True                  # GPU-Beschleunigung
 
         # AI & OLLAMA SETTINGS (GUI-Parität: config_tab.py → KI & Ollama Tab)
-        self.ai_provider = "Ollama (Lokal)"     # Ollama | OpenAI | Anthropic | DeepSeek
+        self.ai_provider = "Ollama (Lokal)"     # Ollama | OpenAI | Anthropic | DeepSeek | OpenRouter
         self.ollama_url = "http://localhost:11434"
         self.ai_api_key = ""
         self.ai_temperature = 0.3
@@ -742,7 +742,7 @@ class MT5FinGPT:
 
             print("\n🛠️  EDITIEROPTIONEN:")
             print("─" * 48)
-            print("  1. 🤖 KI Provider (Ollama / OpenAI / Anthropic / DeepSeek)")
+            print("  1. 🤖 KI Provider (Ollama / OpenAI / Anthropic / DeepSeek / OpenRouter)")
             print("  2. 🌐 Ollama URL")
             print("  3. 🔑 API Key")
             print("  4. 🤖 LLM Modell (free text)")
@@ -761,7 +761,7 @@ class MT5FinGPT:
                 break
 
             elif choice == "1":
-                providers = ["Ollama (Lokal)", "OpenAI (ChatGPT)", "Anthropic (Claude)", "DeepSeek"]
+                providers = ["Ollama (Lokal)", "OpenAI (ChatGPT)", "Anthropic (Claude)", "DeepSeek", "OpenRouter"]
                 for i, p in enumerate(providers, 1):
                     print(f"  {i}. {p}")
                 try:
@@ -4356,7 +4356,7 @@ class MT5FinGPT:
             elif choice == "5":
                 break
 
-    def print_loading_animation(text, duration=2):
+    def print_loading_animation(self, text, duration=2):
         """Zeigt eine schöne Lade-Animation"""
         import time
         frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
@@ -4465,7 +4465,7 @@ class MT5FinGPT:
     
     def check_ollama_status(self):
         """Überprüft die Verfügbarkeit des Ollama-Servers via ai module"""
-        return self.ai.check_ollama_status()
+        return self.ai.check_ollama_status_sync()
     
     def get_available_models(self):
         """Holt die Liste der installierten Ollama-Modelle via ai module"""
@@ -5159,7 +5159,7 @@ class MT5FinGPT:
                  if stop_loss <= current_price + min_distance: stop_loss = current_price + min_distance + symbol_info.point
                  if take_profit >= current_price - min_distance: take_profit = current_price - min_distance - symbol_info.point
 
-            result = self.execute_trade(symbol, action, self.default_lot_size, sl=stop_loss, tp=take_profit)
+            result = self.execute_trade(symbol, action, self.default_lot_size, stop_loss=stop_loss, take_profit=take_profit)
 
             # 12. ERGEBNIS UND BEGRÜNDUNG ANZEIGEN
             if "✅" in str(result): # Convert dict/result to str to be safe
@@ -5216,6 +5216,68 @@ class MT5FinGPT:
             time.sleep(0.1)
         return True
     
+    def should_trade_now(self):
+        """
+        Überprüft, ob der Handel jetzt erlaubt ist basierend auf:
+        - Aktueller Wochentag (Handelstage)
+        - Aktueller Zeit (Handelszeiten)
+        
+        Rückgabe: True wenn Handel erlaubt, False wenn nicht
+        """
+        import datetime
+        from core.app_config import app_config_manager
+        
+        now = datetime.datetime.now()
+        current_day = now.weekday()  # 0 = Montag, 6 = Sonntag
+        current_time = now.time()
+        
+        # Lade Konfiguration aus app_config
+        try:
+            cfg = app_config_manager.load()
+            # Wochentag-Mapping aus Konfiguration (Python weekday: 0=Mo, 6=So)
+            day_mapping = {
+                0: getattr(cfg, 'day_mon', True),   # Montag
+                1: getattr(cfg, 'day_tue', True),   # Dienstag
+                2: getattr(cfg, 'day_wed', True),   # Mittwoch
+                3: getattr(cfg, 'day_thu', True),   # Donnerstag
+                4: getattr(cfg, 'day_fri', True),   # Freitag
+                5: getattr(cfg, 'day_sat', False),   # Samstag
+                6: getattr(cfg, 'day_sun', False),  # Sonntag
+            }
+            # Handelszeiten aus Konfiguration
+            time_filter = getattr(cfg, 'time_filter', True)
+            trade_time_from = getattr(cfg, 'trade_time_from', "08:00")
+            trade_time_to = getattr(cfg, 'trade_time_to', "20:00")
+        except Exception as e:
+            # BEISPIEL: Bei Config-Fehler Trading blockieren statt permissive Defaults zu verwenden
+            self.log("ERROR", f"Konnte Konfiguration nicht laden: {e} - Trading deaktiviert", "SYSTEM")
+            # Sichere Option: Trading blockieren wenn Config nicht verfügbar ist
+            return False
+        
+        # Prüfe ob heute ein Handelstag ist
+        is_trading_day = day_mapping.get(current_day, False)
+        if not is_trading_day:
+            self.log("INFO", f"Kein Handelstag heute ({['Mo','Di','Mi','Do','Fr','Sa','So'][current_day]})", "TRADE")
+            return False
+        
+        # Prüfe Zeitfilter
+        if time_filter:
+            try:
+                # Parse Zeit (unterstütze "08:00" und "8:00" Format)
+                start_time = datetime.datetime.strptime(trade_time_from.strip(), "%H:%M").time()
+                end_time = datetime.datetime.strptime(trade_time_to.strip(), "%H:%M").time()
+                
+                # Prüfe Zeitfenster
+                if not (start_time <= current_time <= end_time):
+                    self.log("INFO", f"Ausserhalb der Handelszeit ({trade_time_from} - {trade_time_to})", "TRADE")
+                    return False
+            except (ValueError, AttributeError) as e:
+                self.log("WARNING", f"Zeitfilter-Fehler: {e} - Trading blockiert", "SYSTEM")
+                # Bei Fehler: Handel BLOCKIEREN (Conservative Security)
+                return False
+        
+        return True
+
     def run_auto_trading(self):
         """Auto-Trading mit MT5 Auto-Reconnect bei Verbindungsverlust."""
         self.log("INFO", "STARTE AUTO-TRADING | STOPP: Taste '0' oder Ctrl+C", "SYSTEM")
@@ -5229,6 +5291,13 @@ class MT5FinGPT:
             while self.auto_trading:
                 cycle += 1
                 self.log("INFO", f"ZYKLUS #{cycle} - {datetime.now().strftime('%H:%M:%S')}", "SYSTEM")
+                
+                # ── Zeit- und Tagesfilterung ───────────────────────────────────
+                if not self.should_trade_now():
+                    self.log("INFO", "Ausserhalb der erlaubten Handelszeiten - Warte...", "TRADE")
+                    if not self._stoppable_sleep(60):
+                        break
+                    continue
 
                 # ── MT5 Liveness-Check & Auto-Reconnect ──────────────────
                 if not self.is_mt5_alive():

@@ -4,19 +4,24 @@ import dataclasses
 from dataclasses import dataclass, field, asdict
 from typing import Dict, Any
 
+
 @dataclass
 class AppConfig:
     # KI & Ollama
     ki_provider: str = "Ollama (Lokal)"
     ollama_url: str = "http://localhost:11434"
     api_key: str = ""
+    api_key_openai: str = ""
+    api_key_anthropic: str = ""
+    api_key_deepseek: str = ""
+    api_key_openrouter: str = ""
     llm_model: str = "llama3.2"
     interval: int = 300
     ai_temperature: float = 0.7
     prompt_lang: str = "Deutsch"
     system_prompt: str = ""
     min_confidence: int = 60
-    
+
     # Trading Style
     trading_style: str = "Day Trading"
     signal_strategy: str = "KI-Entscheidung"
@@ -33,7 +38,7 @@ class AppConfig:
     session_london: bool = True
     session_ny: bool = True
     session_asia: bool = False
-    
+
     # Trading Zeiten
     trade_time_from: str = "07:00"
     trade_time_to: str = "22:00"
@@ -43,7 +48,9 @@ class AppConfig:
     day_wed: bool = True
     day_thu: bool = True
     day_fri: bool = True
-    
+    day_sat: bool = False
+    day_sun: bool = False
+
     # Nachrichten-Filter
     news_filter: bool = False
     news_before_min: int = 30
@@ -51,12 +58,12 @@ class AppConfig:
     news_high: bool = True
     news_medium: bool = False
     news_low: bool = False
-    
+
     # Ausführungsqualität
     max_spread: int = 3
     max_slippage: int = 2
     spread_check: bool = True
-    
+
     # Reinforcement Learning
     rl_algo: str = "DQN"
     rl_learning_rate: float = 0.001
@@ -104,13 +111,16 @@ class AppConfig:
     notif_tp_hit: bool = True
     notif_new_trade: bool = True
     notif_error: bool = True
-    
+
+    # MCP Integration
+    mcp_enabled: bool = False
+
     @classmethod
     def load_from_file(cls, filepath: str) -> "AppConfig":
         if not os.path.exists(filepath):
             return cls()
         try:
-            with open(filepath, 'r', encoding='utf-8') as f:
+            with open(filepath, "r", encoding="utf-8") as f:
                 data = json.load(f)
             if not isinstance(data, dict):
                 return cls()
@@ -123,15 +133,16 @@ class AppConfig:
     def save_to_file(self, filepath: str) -> bool:
         try:
             os.makedirs(os.path.dirname(filepath), exist_ok=True)
-            with open(filepath, 'w', encoding='utf-8') as f:
+            with open(filepath, "w", encoding="utf-8") as f:
                 json.dump(dataclasses.asdict(self), f, indent=2, ensure_ascii=False)
             return True
         except Exception:
             return False
 
+
 class ConfigManagerSingleton:
     _instance = None
-    
+
     def __new__(cls, config_dir=None):
         if cls._instance is None:
             cls._instance = super(ConfigManagerSingleton, cls).__new__(cls)
@@ -140,7 +151,9 @@ class ConfigManagerSingleton:
                 cls._instance.config_path = os.path.join(config_dir, "config.json")
             else:
                 base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-                cls._instance.config_path = os.path.join(base, "storage", "gui_settings", "config.json")
+                cls._instance.config_path = os.path.join(
+                    base, "storage", "gui_settings", "config.json"
+                )
         return cls._instance
 
     def load(self):
@@ -149,6 +162,7 @@ class ConfigManagerSingleton:
 
     def save(self):
         return self.config.save_to_file(self.config_path)
+
 
 # Globale Instanz
 app_config_manager = ConfigManagerSingleton()
