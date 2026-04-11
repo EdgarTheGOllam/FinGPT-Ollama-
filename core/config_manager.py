@@ -377,7 +377,7 @@ class ConfigManager:
                 "fingpt_config": asdict(self.fingpt_config),
                 "fingpt_extended_config": asdict(self.fingpt_extended_config),
                 "export_timestamp": str(datetime.datetime.now()),
-                "version": "1.0"
+                "version": "1.1.3"
             }
             
             with open(filepath, 'w', encoding='utf-8') as f:

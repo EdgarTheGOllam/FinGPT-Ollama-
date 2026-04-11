@@ -170,7 +170,7 @@ class NumberFlowValue:
             text=initial_value,
             font=("Inter", 28, "bold"),
             fg="#FFFFFF",
-            bg="#1A1D24",
+            bg="#18181B",
         )
         self.value_label.pack(side="left")
 

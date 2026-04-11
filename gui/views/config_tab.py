@@ -329,264 +329,259 @@ class ConfigView:
         self.mica_switch.grid(row=2, column=0, columnspan=2, sticky="w", pady=15)
 
     def _build_style_tab(self, parent):
-        _, c1 = self._create_card(parent, "Trading Strategie & Stil", "#E67E22")
-        self.trading_active_switch = ctk.CTkSwitch(
-            c1,
-            text="Auto-Trading Global Erlauben",
-            progress_color="#00FF66",
-            command=self.app._trigger_autosave,
-        )
+        # 1. Automatisierung & Stil
+        _, c_style = self._create_card(parent, "⚙️ Automatisierung & Stil", "#3498DB")
+        
+        # Global Switch
+        self.trading_active_switch = ctk.CTkSwitch(c_style, text="Auto-Trading Global Erlauben", progress_color="#00FF66", font=ctk.CTkFont(weight="bold"), command=self.app._trigger_autosave)
         self.trading_active_switch.select()
-        self.trading_active_switch.grid(
-            row=0, column=0, columnspan=2, sticky="w", pady=5
-        )
-
-        ctk.CTkLabel(c1, text="Trading Style:").grid(
-            row=1, column=0, sticky="w", pady=5
-        )
+        self.trading_active_switch.pack(anchor="w", pady=(0, 15), padx=15)
+        
+        style_grid = ctk.CTkFrame(c_style, fg_color="transparent")
+        style_grid.pack(fill="x", padx=15)
+        
+        ctk.CTkLabel(style_grid, text="Trading Style:").grid(row=0, column=0, sticky="w", pady=8, padx=(0,10))
         self.trading_style_var = ctk.StringVar(value="Swing Trading")
         self._style_combo = ctk.CTkComboBox(
-            c1,
+            style_grid,
             values=[
-                "Scalping",
-                "Day Trading",
-                "Swing Trading",
-                "Position Trading",
-                "Price Action",
-                "Breakout-Trading",
-                "Mean Reversion",
-                "AI-Fulldrive Mode 🤖",
-                "ICT Orderblock",
-                "Market Profile",
-                "Pattern Trading",
-                "Structure Trading",
+                "Scalping", "Day Trading", "Swing Trading", "Position Trading",
+                "Price Action", "Breakout-Trading", "Mean Reversion", "Structure Trading",
+                "Pattern Trading", "Market Profile", "ICT Orderblock", "AI-Fulldrive Mode 🤖"
             ],
             variable=self.trading_style_var,
-            width=260,
+            width=200,
             command=self._on_trading_style_change,
         )
-        self._style_combo.grid(row=1, column=1, sticky="w", pady=5, padx=10)
-
-        ctk.CTkLabel(c1, text="Signal-Strategie:").grid(
-            row=2, column=0, sticky="w", pady=5
-        )
+        self._style_combo.grid(row=0, column=1, sticky="w", pady=8)
+        
+        ctk.CTkLabel(style_grid, text="Signal-Strategie:").grid(row=0, column=2, sticky="w", pady=8, padx=(30,10))
         self.signal_strategy_var = ctk.StringVar(value="KI-gesteuert (Ollama)")
         ctk.CTkComboBox(
-            c1,
-            values=[
-                "KI-gesteuert (Ollama)",
-                "Technische Indikatoren",
-                "Hybrid (KI + Indikatoren)",
-            ],
+            style_grid,
+            values=["KI-gesteuert (Ollama)", "Technische Indikatoren", "Hybrid (KI + Indikatoren)"],
             variable=self.signal_strategy_var,
-            width=280,
-            command=self.app._trigger_autosave,
-        ).grid(row=2, column=1, sticky="w", pady=5, padx=10)
+            width=200,
+            command=self.app._trigger_autosave
+        ).grid(row=0, column=3, sticky="w", pady=8)
 
-        ctk.CTkLabel(c1, text="Risikoprofil:").grid(row=3, column=0, sticky="w", pady=5)
+        ctk.CTkLabel(style_grid, text="Risikoprofil:").grid(row=1, column=0, sticky="w", pady=8, padx=(0,10))
         self.risk_profile_var = ctk.StringVar(value="Moderat")
         ctk.CTkComboBox(
-            c1,
+            style_grid,
             values=["Konservativ", "Moderat", "Aggressiv"],
             variable=self.risk_profile_var,
             width=200,
-            command=self.app._trigger_autosave,
-        ).grid(row=3, column=1, sticky="w", pady=5, padx=10)
+            command=self.app._trigger_autosave
+        ).grid(row=1, column=1, sticky="w", pady=8)
 
-        _, c2 = self._create_card(parent, "Risk Manager", "#FF1744")
-
-        # Validation Summary Label
-        self.risk_summary_lbl = ctk.CTkLabel(
-            c2,
-            text="✅ Settings validiert",
-            text_color="#00FF66",
-            font=ctk.CTkFont(size=12, weight="bold"),
-        )
-        self.risk_summary_lbl.grid(
-            row=0, column=0, columnspan=3, sticky="w", pady=(0, 10)
-        )
-
-        ctk.CTkLabel(c2, text="Max Risiko pro Trade (%):").grid(
-            row=1, column=0, sticky="w", pady=5
-        )
-        self.risk_trade_entry = ctk.CTkEntry(c2, width=80)
-        self.risk_trade_entry.insert(0, "1.0")
-        self.risk_trade_entry.bind(
-            "<KeyRelease>", lambda e: self._validate_risk_settings()
-        )
-        self.risk_trade_entry.grid(row=1, column=1, sticky="w", pady=5, padx=10)
-
-        ctk.CTkLabel(c2, text="Max Daily Loss (%):").grid(
-            row=2, column=0, sticky="w", pady=5
-        )
-        self.risk_daily_entry = ctk.CTkEntry(c2, width=80)
-        self.risk_daily_entry.insert(0, "3.0")
-        self.risk_daily_entry.bind(
-            "<KeyRelease>", lambda e: self._validate_risk_settings()
-        )
-        self.risk_daily_entry.grid(row=2, column=1, sticky="w", pady=5, padx=10)
-
-        ctk.CTkLabel(c2, text="Max. Tagesverlust (€):").grid(
-            row=3, column=0, sticky="w", pady=5
-        )
-        self.rm_daily_loss_entry = ctk.CTkEntry(c2, width=80)
-        self.rm_daily_loss_entry.insert(0, "500")
-        self.rm_daily_loss_entry.bind(
-            "<KeyRelease>", lambda e: self._validate_risk_settings()
-        )
-        self.rm_daily_loss_entry.grid(row=3, column=1, sticky="w", pady=5, padx=10)
-
-        ctk.CTkLabel(c2, text="Max. Wochenverlust (€):").grid(
-            row=4, column=0, sticky="w", pady=5
-        )
-        self.rm_weekly_loss_entry = ctk.CTkEntry(c2, width=80)
-        self.rm_weekly_loss_entry.insert(0, "1500")
-        self.rm_weekly_loss_entry.bind(
-            "<KeyRelease>", lambda e: self._validate_risk_settings()
-        )
-        self.rm_weekly_loss_entry.grid(row=4, column=1, sticky="w", pady=5, padx=10)
-
-        ctk.CTkLabel(c2, text="Min. Zeit zwischen Trades (sek):").grid(
-            row=5, column=0, sticky="w", pady=5
-        )
-        self.rm_cooldown_slider = ctk.CTkSlider(
-            c2, from_=30, to=900, number_of_steps=87, width=180
-        )
+        # 2. Strategie-Parameter (Dynamisch)
+        self.dyn_card, self.dyn_content = self._create_card(parent, "🎯 Strategie-Spezifische Parameter", "#E67E22")
+        
+        # -- Frame für "Fast" (Scalping / Day Trading)
+        self.fast_frame = ctk.CTkFrame(self.dyn_content, fg_color="transparent")
+        
+        ctk.CTkLabel(self.fast_frame, text="Min. Zeit zwischen Trades (sek):").grid(row=0, column=0, sticky="w", pady=5)
+        self.rm_cooldown_slider = ctk.CTkSlider(self.fast_frame, from_=10, to=900, number_of_steps=89, width=180)
         self.rm_cooldown_slider.set(300)
-        self.rm_cooldown_slider.grid(row=5, column=1, sticky="w", pady=5, padx=10)
-        self.rm_cooldown_lbl = ctk.CTkLabel(c2, text="300 sek")
-        self.rm_cooldown_lbl.grid(row=5, column=2)
-        self.rm_cooldown_slider.configure(
-            command=lambda v: (
-                self.rm_cooldown_lbl.configure(text=f"{int(v)} sek"),
-                self._validate_risk_settings(),
-            )
-        )
+        self.rm_cooldown_slider.grid(row=0, column=1, sticky="w", pady=5, padx=10)
+        self.rm_cooldown_lbl = ctk.CTkLabel(self.fast_frame, text="300 sek")
+        self.rm_cooldown_lbl.grid(row=0, column=2, sticky="w")
+        self.rm_cooldown_slider.configure(command=lambda v: (self.rm_cooldown_lbl.configure(text=f"{int(v)} sek"), self._validate_risk_settings(), self.app._trigger_autosave()))
 
-        ctk.CTkLabel(c2, text="Max. Trades pro Tag:").grid(
-            row=6, column=0, sticky="w", pady=5
-        )
-        self.rm_max_trades_entry = ctk.CTkEntry(c2, width=80)
-        self.rm_max_trades_entry.insert(0, "10")
-        self.rm_max_trades_entry.bind(
-            "<KeyRelease>", lambda e: self._validate_risk_settings()
-        )
-        self.rm_max_trades_entry.grid(row=6, column=1, sticky="w", pady=5, padx=10)
+        ctk.CTkLabel(self.fast_frame, text="Max. Spread (Pips):").grid(row=1, column=0, sticky="w", pady=5)
+        self.max_spread_slider = ctk.CTkSlider(self.fast_frame, from_=1, to=20, number_of_steps=19, width=180)
+        self.max_spread_slider.set(3)
+        self.max_spread_slider.grid(row=1, column=1, sticky="w", pady=5, padx=10)
+        self.max_spread_lbl = ctk.CTkLabel(self.fast_frame, text="3 pips")
+        self.max_spread_lbl.grid(row=1, column=2, sticky="w")
+        self.max_spread_slider.configure(command=lambda v: (self.max_spread_lbl.configure(text=f"{int(v)} pips"), self.app._trigger_autosave()))
 
-        ctk.CTkLabel(c2, text="Max Offene Positionen:").grid(
-            row=7, column=0, sticky="w", pady=5
-        )
-        self.max_pos_entry = ctk.CTkEntry(c2, width=80)
+        ctk.CTkLabel(self.fast_frame, text="Max. Slippage (Pips):").grid(row=2, column=0, sticky="w", pady=5)
+        self.max_slippage_slider = ctk.CTkSlider(self.fast_frame, from_=1, to=10, number_of_steps=9, width=180)
+        self.max_slippage_slider.set(2)
+        self.max_slippage_slider.grid(row=2, column=1, sticky="w", pady=5, padx=10)
+        self.max_slippage_lbl = ctk.CTkLabel(self.fast_frame, text="2 pips")
+        self.max_slippage_lbl.grid(row=2, column=2, sticky="w")
+        self.max_slippage_slider.configure(command=lambda v: (self.max_slippage_lbl.configure(text=f"{int(v)} pips"), self.app._trigger_autosave()))
+
+        self.spread_check_switch = ctk.CTkSwitch(self.fast_frame, text="Trade ablehnen wenn Spread zu hoch", progress_color="#00FF66", command=self.app._trigger_autosave)
+        self.spread_check_switch.select()
+        self.spread_check_switch.grid(row=3, column=0, columnspan=3, sticky="w", pady=10)
+
+        # -- Frame für "Fulldrive"
+        self.fd_frame = ctk.CTkFrame(self.dyn_content, fg_color="transparent")
+        
+        self._fd_conf_lbl_l = ctk.CTkLabel(self.fd_frame, text="Min. Konfidenz (%):", text_color="#8B949E")
+        self._fd_conf_lbl_l.grid(row=0, column=0, sticky="w", pady=5)
+        self.fd_confidence_slider = ctk.CTkSlider(self.fd_frame, from_=50, to=95, number_of_steps=45, width=180, progress_color="#9B59B6")
+        self.fd_confidence_slider.set(70)
+        self.fd_confidence_slider.grid(row=0, column=1, sticky="w", padx=10, pady=5)
+        self._fd_conf_val_lbl = ctk.CTkLabel(self.fd_frame, text="70%")
+        self._fd_conf_val_lbl.grid(row=0, column=2, sticky="w")
+        self.fd_confidence_slider.configure(command=lambda v: (self._fd_conf_val_lbl.configure(text=f"{int(v)}%"), self.app._trigger_autosave()))
+
+        self._fd_sharpe_lbl = ctk.CTkLabel(self.fd_frame, text="Sharpe Ratio Ziel:", text_color="#8B949E")
+        self._fd_sharpe_lbl.grid(row=1, column=0, sticky="w", pady=5)
+        self.fd_sharpe_entry = ctk.CTkEntry(self.fd_frame, width=90)
+        self.fd_sharpe_entry.insert(0, "1.5")
+        self.fd_sharpe_entry.grid(row=1, column=1, sticky="w", padx=10, pady=5)
+        self.fd_sharpe_entry.bind("<KeyRelease>", lambda e: self.app._trigger_autosave())
+
+        self._fd_dd_lbl = ctk.CTkLabel(self.fd_frame, text="Max. Drawdown Limit (%):", text_color="#8B949E")
+        self._fd_dd_lbl.grid(row=2, column=0, sticky="w", pady=5)
+        self.fd_maxdd_entry = ctk.CTkEntry(self.fd_frame, width=90)
+        self.fd_maxdd_entry.insert(0, "15")
+        self.fd_maxdd_entry.grid(row=2, column=1, sticky="w", padx=10, pady=5)
+        self.fd_maxdd_entry.bind("<KeyRelease>", lambda e: self.app._trigger_autosave())
+
+        self.fd_selfopt_switch = ctk.CTkSwitch(self.fd_frame, text="Auto-Retraining alle 50 Trades", progress_color="#9B59B6", command=self.app._trigger_autosave)
+        self.fd_selfopt_switch.select()
+        self.fd_selfopt_switch.grid(row=3, column=0, columnspan=3, sticky="w", pady=10)
+
+        self._fd_kpi_frame = ctk.CTkFrame(self.fd_frame, fg_color="#21252D", corner_radius=6)
+        self._fd_kpi_frame.grid(row=4, column=0, columnspan=3, sticky="ew", pady=5)
+        self._fd_kpi_sharpe_lbl = ctk.CTkLabel(self._fd_kpi_frame, text="Sharpe: --")
+        self._fd_kpi_sharpe_lbl.pack(side="left", padx=15, pady=8)
+        self._fd_kpi_dd_lbl = ctk.CTkLabel(self._fd_kpi_frame, text="Max-DD: --")
+        self._fd_kpi_dd_lbl.pack(side="left", padx=15, pady=8)
+        self._fd_kpi_winrate_lbl = ctk.CTkLabel(self._fd_kpi_frame, text="Win-Rate: --")
+        self._fd_kpi_winrate_lbl.pack(side="left", padx=15, pady=8)
+
+        # -- Frame für "Default / Other"
+        self.default_frame = ctk.CTkFrame(self.dyn_content, fg_color="transparent")
+        ctk.CTkLabel(self.default_frame, text="Für diesen Trading Style gelten die globalen Limits und Regeln.\\nKeine zusätzlichen Strategie-Parameter erforderlich.", text_color="#8B949E", justify="left").pack(pady=20, anchor="w", padx=5)
+
+        # 3. Risiko-Management (Allgemein)
+        _, c_risk = self._create_card(parent, "🛡️ Risiko-Management", "#FF1744")
+        
+        self.risk_summary_lbl = ctk.CTkLabel(c_risk, text="✅ Settings validiert", text_color="#00FF66", font=ctk.CTkFont(size=12, weight="bold"))
+        self.risk_summary_lbl.pack(anchor="w", pady=(0, 10), padx=15)
+
+        risk_grid = ctk.CTkFrame(c_risk, fg_color="transparent")
+        risk_grid.pack(fill="x", padx=15)
+        
+        ctk.CTkLabel(risk_grid, text="Risiko pro Trade (%):").grid(row=0, column=0, sticky="w", pady=8, padx=5)
+        self.risk_trade_entry = ctk.CTkEntry(risk_grid, width=80)
+        self.risk_trade_entry.insert(0, "1.0")
+        self.risk_trade_entry.grid(row=0, column=1, sticky="w", pady=8, padx=5)
+        self.risk_trade_entry.bind("<KeyRelease>", lambda e: self._validate_risk_settings())
+        
+        ctk.CTkLabel(risk_grid, text="Max. Offene Pos:").grid(row=0, column=2, sticky="w", pady=8, padx=(30, 5))
+        self.max_pos_entry = ctk.CTkEntry(risk_grid, width=80)
         self.max_pos_entry.insert(0, "3")
-        self.max_pos_entry.bind(
-            "<KeyRelease>", lambda e: self._validate_risk_settings()
-        )
-        self.max_pos_entry.grid(row=7, column=1, sticky="w", pady=5, padx=10)
+        self.max_pos_entry.grid(row=0, column=3, sticky="w", pady=8, padx=5)
+        self.max_pos_entry.bind("<KeyRelease>", lambda e: self._validate_risk_settings())
 
-        ctk.CTkLabel(c2, text="Monatsziel (%):").grid(
-            row=8, column=0, sticky="w", pady=5
-        )
-        self.monthly_target_entry = ctk.CTkEntry(c2, width=80)
+        ctk.CTkLabel(risk_grid, text="Daily Loss Limit (%):").grid(row=1, column=0, sticky="w", pady=8, padx=5)
+        self.risk_daily_entry = ctk.CTkEntry(risk_grid, width=80)
+        self.risk_daily_entry.insert(0, "3.0")
+        self.risk_daily_entry.grid(row=1, column=1, sticky="w", pady=8, padx=5)
+        self.risk_daily_entry.bind("<KeyRelease>", lambda e: self._validate_risk_settings())
+        
+        ctk.CTkLabel(risk_grid, text="Tagesverlust max (€):").grid(row=1, column=2, sticky="w", pady=8, padx=(30, 5))
+        self.rm_daily_loss_entry = ctk.CTkEntry(risk_grid, width=80)
+        self.rm_daily_loss_entry.insert(0, "500")
+        self.rm_daily_loss_entry.grid(row=1, column=3, sticky="w", pady=8, padx=5)
+        self.rm_daily_loss_entry.bind("<KeyRelease>", lambda e: self._validate_risk_settings())
+
+        ctk.CTkLabel(risk_grid, text="Wochenverlust max (€):").grid(row=2, column=0, sticky="w", pady=8, padx=5)
+        self.rm_weekly_loss_entry = ctk.CTkEntry(risk_grid, width=80)
+        self.rm_weekly_loss_entry.insert(0, "1500")
+        self.rm_weekly_loss_entry.grid(row=2, column=1, sticky="w", pady=8, padx=5)
+        self.rm_weekly_loss_entry.bind("<KeyRelease>", lambda e: self._validate_risk_settings())
+        
+        ctk.CTkLabel(risk_grid, text="Monatsziel (%):").grid(row=2, column=2, sticky="w", pady=8, padx=(30, 5))
+        self.monthly_target_entry = ctk.CTkEntry(risk_grid, width=80)
         self.monthly_target_entry.insert(0, "10")
-        self.monthly_target_entry.bind(
-            "<KeyRelease>", lambda e: self._validate_risk_settings()
-        )
-        self.monthly_target_entry.grid(row=8, column=1, sticky="w", pady=5, padx=10)
+        self.monthly_target_entry.grid(row=2, column=3, sticky="w", pady=8, padx=5)
+        self.monthly_target_entry.bind("<KeyRelease>", lambda e: self._validate_risk_settings())
 
-        _, c3 = self._create_card(parent, "Stops & Protections", "#F1C40F")
-        self.trailing_stop_switch = ctk.CTkSwitch(
-            c3,
-            text="Trailt Stops auf Gewinne automatisch",
-            progress_color="#F1C40F",
-            command=self._validate_risk_settings,
-        )
-        self.trailing_stop_switch.select()
-        self.trailing_stop_switch.grid(row=0, column=0, sticky="w", pady=5)
+        # 4. Exit-Regeln & Protections
+        _, c_exit = self._create_card(parent, "🛑 Exit-Regeln & Protections", "#F1C40F")
 
-        ctk.CTkLabel(c3, text="Stop-Loss (Pips):").grid(
-            row=1, column=1, sticky="e", pady=5
-        )
-        self.sl_dist_entry = ctk.CTkEntry(c3, width=80)
+        # Stop-Loss Row
+        sl_row = ctk.CTkFrame(c_exit, fg_color="#21252D", corner_radius=6)
+        sl_row.pack(fill="x", pady=4, padx=10)
+        ctk.CTkLabel(sl_row, text="Stop-Loss (Pips)", font=ctk.CTkFont(weight="bold")).pack(side="left", padx=15, pady=12)
+        self.sl_dist_entry = ctk.CTkEntry(sl_row, width=70)
         self.sl_dist_entry.insert(0, "20")
-        self.sl_dist_entry.bind(
-            "<KeyRelease>", lambda e: self._validate_risk_settings()
-        )
-        self.sl_dist_entry.grid(row=1, column=2, sticky="w", pady=5, padx=10)
+        self.sl_dist_entry.pack(side="left", padx=5)
+        self.sl_dist_entry.bind("<KeyRelease>", lambda e: self._validate_risk_settings())
+        ctk.CTkLabel(sl_row, text="Absolutes Limit für Verluste pro Trade", text_color="#8B949E", font=ctk.CTkFont(size=11)).pack(side="left", padx=15)
 
-        ctk.CTkLabel(c3, text="Trailing Abstand (Pips):").grid(
-            row=2, column=1, sticky="e", pady=5
-        )
-        self.ts_dist_entry = ctk.CTkEntry(c3, width=80)
+        # Trailing Stop Row
+        ts_row = ctk.CTkFrame(c_exit, fg_color="#21252D", corner_radius=6)
+        ts_row.pack(fill="x", pady=4, padx=10)
+        ts_header = ctk.CTkFrame(ts_row, fg_color="transparent")
+        ts_header.pack(fill="x", padx=10, pady=(10, 2))
+        self.trailing_stop_switch = ctk.CTkSwitch(ts_header, text="Trailing Stop", font=ctk.CTkFont(weight="bold"), progress_color="#F1C40F", command=self._validate_risk_settings)
+        self.trailing_stop_switch.select()
+        self.trailing_stop_switch.pack(side="left", padx=5)
+        ctk.CTkLabel(ts_header, text="Trailt den Stop automatisch nach, um Gewinne abzusichern", text_color="#8B949E", font=ctk.CTkFont(size=11)).pack(side="left", padx=15)
+        ts_body = ctk.CTkFrame(ts_row, fg_color="transparent")
+        ts_body.pack(fill="x", padx=10, pady=(2, 10))
+        ctk.CTkLabel(ts_body, text="Abstand (Pips):").pack(side="left", padx=(30, 5))
+        self.ts_dist_entry = ctk.CTkEntry(ts_body, width=70)
         self.ts_dist_entry.insert(0, "15")
-        self.ts_dist_entry.bind(
-            "<KeyRelease>", lambda e: self._validate_risk_settings()
-        )
-        self.ts_dist_entry.grid(row=2, column=2, sticky="w", pady=5, padx=10)
+        self.ts_dist_entry.pack(side="left")
+        self.ts_dist_entry.bind("<KeyRelease>", lambda e: self._validate_risk_settings())
 
-        self.break_even_switch = ctk.CTkSwitch(
-            c3,
-            text="SL auf Einstieg nach X Pips",
-            progress_color="#F1C40F",
-            command=self._validate_risk_settings,
-        )
-        self.break_even_switch.grid(row=3, column=0, sticky="w", pady=5)
-        ctk.CTkLabel(c3, text="BE Abstand (Pips):").grid(
-            row=3, column=1, sticky="e", pady=5
-        )
-        self.be_dist_entry = ctk.CTkEntry(c3, width=80)
+        # Break-Even Row
+        be_row = ctk.CTkFrame(c_exit, fg_color="#21252D", corner_radius=6)
+        be_row.pack(fill="x", pady=4, padx=10)
+        be_header = ctk.CTkFrame(be_row, fg_color="transparent")
+        be_header.pack(fill="x", padx=10, pady=(10, 2))
+        self.break_even_switch = ctk.CTkSwitch(be_header, text="Break-Even", font=ctk.CTkFont(weight="bold"), progress_color="#F1C40F", command=self._validate_risk_settings)
+        self.break_even_switch.pack(side="left", padx=5)
+        ctk.CTkLabel(be_header, text="Sichert den Trade frühzeitig auf den Einstiegspreis ab", text_color="#8B949E", font=ctk.CTkFont(size=11)).pack(side="left", padx=15)
+        be_body = ctk.CTkFrame(be_row, fg_color="transparent")
+        be_body.pack(fill="x", padx=10, pady=(2, 10))
+        ctk.CTkLabel(be_body, text="Aktivierung ab (Pips):").pack(side="left", padx=(30, 5))
+        self.be_dist_entry = ctk.CTkEntry(be_body, width=70)
         self.be_dist_entry.insert(0, "10")
-        self.be_dist_entry.bind(
-            "<KeyRelease>", lambda e: self._validate_risk_settings()
-        )
-        self.be_dist_entry.grid(row=3, column=2, sticky="w", pady=5, padx=10)
+        self.be_dist_entry.pack(side="left")
+        self.be_dist_entry.bind("<KeyRelease>", lambda e: self._validate_risk_settings())
 
-        self.weekend_exit_switch = ctk.CTkSwitch(
-            c3,
-            text="Wochenend-Schutz (Trades Freitags schließen)",
-            progress_color="#FF1744",
-            command=self.app._trigger_autosave,
-        )
-        self.weekend_exit_switch.grid(
-            row=4, column=0, columnspan=2, sticky="w", pady=10
-        )
+        # Weekend Row
+        we_row = ctk.CTkFrame(c_exit, fg_color="#21252D", corner_radius=6)
+        we_row.pack(fill="x", pady=4, padx=10)
+        self.weekend_exit_switch = ctk.CTkSwitch(we_row, text="Wochenend-Schutz (Trades Freitags schließen)", font=ctk.CTkFont(weight="bold"), progress_color="#FF1744", command=self.app._trigger_autosave)
+        self.weekend_exit_switch.pack(side="left", padx=15, pady=12)
+        ctk.CTkLabel(we_row, text="Vermeidet Gaps über das Wochenende", text_color="#8B949E", font=ctk.CTkFont(size=11)).pack(side="left", padx=15)
 
-        # === NEU: Handelstage & Zeiten ===
-        _, c_time = self._create_card(parent, "🗓️ Handelstage & Zeiten", "#3498DB")
 
-        # Titel
-        ctk.CTkLabel(c_time, text="Aktive Handelstage:", text_color="#FFFFFF").grid(
-            row=0, column=0, sticky="w", pady=(5, 10)
-        )
+        # 5. Handelslimits & Zeiten
+        _, c_time = self._create_card(parent, "🗓️ Handelslimits & Zeiten", "#9B59B6")
+        
+        limit_grid = ctk.CTkFrame(c_time, fg_color="transparent")
+        limit_grid.pack(fill="x", pady=(0, 10), padx=15)
+        
+        ctk.CTkLabel(limit_grid, text="Max. Trades pro Tag:").grid(row=0, column=0, sticky="w", pady=5)
+        self.rm_max_trades_entry = ctk.CTkEntry(limit_grid, width=80)
+        self.rm_max_trades_entry.insert(0, "10")
+        self.rm_max_trades_entry.grid(row=0, column=1, sticky="w", padx=10, pady=5)
+        self.rm_max_trades_entry.bind("<KeyRelease>", lambda e: self._validate_risk_settings())
 
-        # Container-Frame für Buttons (horizontale Verteilung)
+        ctk.CTkLabel(c_time, text="Aktive Handelstage:", text_color="#FFFFFF").pack(anchor="w", pady=(10, 5), padx=15)
+        
         days_frame = ctk.CTkFrame(c_time, fg_color="transparent")
-        days_frame.grid(row=1, column=0, sticky="ew", pady=5)
+        days_frame.pack(fill="x", pady=5, padx=15)
         days_frame.grid_columnconfigure((0, 1, 2, 3, 4, 5, 6), weight=1, uniform="day")
 
-        # Wochentag-Buttons erstellen
         self._day_buttons = {}
         self._day_vars = {}
-        days = [
-            ("day_mon", "Mo", 0),
-            ("day_tue", "Di", 1),
-            ("day_wed", "Mi", 2),
-            ("day_thu", "Do", 3),
-            ("day_fri", "Fr", 4),
-            ("day_sat", "Sa", 5),
-            ("day_sun", "So", 6),
-        ]
+        days = [("day_mon", "Mo", 0), ("day_tue", "Di", 1), ("day_wed", "Mi", 2),
+                ("day_thu", "Do", 3), ("day_fri", "Fr", 4), ("day_sat", "Sa", 5), ("day_sun", "So", 6)]
+        
+        active_color = "#00FF66"
+        inactive_color = "#4A4A4A"
 
-        # Farben für aktive/inaktive Tage
-        active_color = "#00FF66"  # Grün für aktive Tage
-        inactive_color = "#4A4A4A"  # Grau für inaktive Tage
-
-        # Callback-Funktion für Button-Klick
         def _on_day_click(day_id):
             var = self._day_vars[day_id]
             btn_data = self._day_buttons[day_id]
             new_state = not var.get()
             var.set(new_state)
-            # Farbe aktualisieren
             if new_state:
                 btn_data["frame"].configure(fg_color=active_color)
                 btn_data["label"].configure(text_color="#000000")
@@ -596,267 +591,46 @@ class ConfigView:
             self.app._trigger_autosave()
 
         for day_id, day_name, col in days:
-            # Variable für jeden Tag (CheckBox-ähnlich)
-            var = ctk.BooleanVar(
-                value=day_id in ["day_mon", "day_tue", "day_wed", "day_thu", "day_fri"]
-            )  # Mo-Fr standardmäßig aktiv
+            var = ctk.BooleanVar(value=day_id in ["day_mon", "day_tue", "day_wed", "day_thu", "day_fri"])
             self._day_vars[day_id] = var
-
-            # Button-Frame - im days_frame
-            btn_frame = ctk.CTkFrame(
-                days_frame,
-                fg_color=active_color if var.get() else inactive_color,
-                corner_radius=8,
-            )
+            btn_frame = ctk.CTkFrame(days_frame, fg_color=active_color if var.get() else inactive_color, corner_radius=8)
             btn_frame.grid(row=0, column=col, padx=4, pady=0, sticky="ew")
-
-            # Label für Tag
-            lbl = ctk.CTkLabel(
-                btn_frame,
-                text=day_name,
-                font=ctk.CTkFont(size=14, weight="bold"),
-                text_color="#000000" if var.get() else "#AAAAAA",
-            )
+            lbl = ctk.CTkLabel(btn_frame, text=day_name, font=ctk.CTkFont(size=14, weight="bold"), text_color="#000000" if var.get() else "#AAAAAA")
             lbl.pack(padx=10, pady=8)
-
-            # Speichere Referenzen für später
             self._day_buttons[day_id] = {"frame": btn_frame, "label": lbl, "var": var}
-
-            # Klick-Event für Toggle
             btn_frame.bind("<Button-1>", lambda e, did=day_id: _on_day_click(did))
             lbl.bind("<Button-1>", lambda e, did=day_id: _on_day_click(did))
 
-        # Checkbox-Variablen für Kompatibilität mit bestehendem Code
-        self.day_mon = ctk.CTkCheckBox(
-            c_time,
-            text="",
-            variable=self._day_vars["day_mon"],
-            command=self.app._trigger_autosave,
-        )
-        self.day_tue = ctk.CTkCheckBox(
-            c_time,
-            text="",
-            variable=self._day_vars["day_tue"],
-            command=self.app._trigger_autosave,
-        )
-        self.day_wed = ctk.CTkCheckBox(
-            c_time,
-            text="",
-            variable=self._day_vars["day_wed"],
-            command=self.app._trigger_autosave,
-        )
-        self.day_thu = ctk.CTkCheckBox(
-            c_time,
-            text="",
-            variable=self._day_vars["day_thu"],
-            command=self.app._trigger_autosave,
-        )
-        self.day_fri = ctk.CTkCheckBox(
-            c_time,
-            text="",
-            variable=self._day_vars["day_fri"],
-            command=self.app._trigger_autosave,
-        )
-        self.day_sat = ctk.CTkCheckBox(
-            c_time,
-            text="",
-            variable=self._day_vars["day_sat"],
-            command=self.app._trigger_autosave,
-        )
-        self.day_sun = ctk.CTkCheckBox(
-            c_time,
-            text="",
-            variable=self._day_vars["day_sun"],
-            command=self.app._trigger_autosave,
-        )
-        # Checkboxen unsichtbar halten (nur für Kompatibilität)
-        for cb in [
-            self.day_mon,
-            self.day_tue,
-            self.day_wed,
-            self.day_thu,
-            self.day_fri,
-            self.day_sat,
-            self.day_sun,
-        ]:
-            cb.grid_forget()
+        # Backwards comp.
+        self.day_mon = ctk.CTkCheckBox(c_time, text="", variable=self._day_vars["day_mon"]); self.day_mon.grid_forget()
+        self.day_tue = ctk.CTkCheckBox(c_time, text="", variable=self._day_vars["day_tue"]); self.day_tue.grid_forget()
+        self.day_wed = ctk.CTkCheckBox(c_time, text="", variable=self._day_vars["day_wed"]); self.day_wed.grid_forget()
+        self.day_thu = ctk.CTkCheckBox(c_time, text="", variable=self._day_vars["day_thu"]); self.day_thu.grid_forget()
+        self.day_fri = ctk.CTkCheckBox(c_time, text="", variable=self._day_vars["day_fri"]); self.day_fri.grid_forget()
+        self.day_sat = ctk.CTkCheckBox(c_time, text="", variable=self._day_vars["day_sat"]); self.day_sat.grid_forget()
+        self.day_sun = ctk.CTkCheckBox(c_time, text="", variable=self._day_vars["day_sun"]); self.day_sun.grid_forget()
 
-        # Zeitsteuerung
-        ctk.CTkLabel(c_time, text="Handelszeitraum:", text_color="#FFFFFF").grid(
-            row=2, column=0, columnspan=7, sticky="w", pady=(15, 5)
-        )
-
-        # Zeit-Filter aktivieren Schalter
-        self.time_filter_switch = ctk.CTkSwitch(
-            c_time,
-            text="Zeitfilter aktivieren",
-            progress_color="#3498DB",
-            command=self.app._trigger_autosave,
-        )
+        ctk.CTkLabel(c_time, text="Handelszeitraum:", text_color="#FFFFFF").pack(anchor="w", pady=(20, 5), padx=15)
+        self.time_filter_switch = ctk.CTkSwitch(c_time, text="Zeitfilter aktivieren", progress_color="#3498DB", command=self.app._trigger_autosave)
         self.time_filter_switch.select()
-        self.time_filter_switch.grid(row=3, column=0, columnspan=3, sticky="w", pady=5)
-
-        # Startzeit
-        ctk.CTkLabel(c_time, text="Von:", text_color="#8B949E").grid(
-            row=4, column=0, sticky="w", pady=5
-        )
-        self.trade_time_from = ctk.CTkEntry(c_time, width=80)
+        self.time_filter_switch.pack(anchor="w", pady=5, padx=15)
+        
+        time_frame = ctk.CTkFrame(c_time, fg_color="transparent")
+        time_frame.pack(fill="x", pady=(5, 10), padx=15)
+        ctk.CTkLabel(time_frame, text="Von:", text_color="#8B949E").pack(side="left", padx=(0,5))
+        self.trade_time_from = ctk.CTkEntry(time_frame, width=80)
         self.trade_time_from.insert(0, "08:00")
-        self.trade_time_from.bind(
-            "<KeyRelease>", lambda e: self.app._trigger_autosave()
-        )
-        self.trade_time_from.grid(row=4, column=1, sticky="w", pady=5, padx=5)
-
-        # Bis
-        ctk.CTkLabel(c_time, text="Bis:", text_color="#8B949E").grid(
-            row=4, column=2, sticky="w", pady=5, padx=(10, 5)
-        )
-        self.trade_time_to = ctk.CTkEntry(c_time, width=80)
+        self.trade_time_from.pack(side="left", padx=5)
+        self.trade_time_from.bind("<KeyRelease>", lambda e: self.app._trigger_autosave())
+        ctk.CTkLabel(time_frame, text="Bis:", text_color="#8B949E").pack(side="left", padx=(15,5))
+        self.trade_time_to = ctk.CTkEntry(time_frame, width=80)
         self.trade_time_to.insert(0, "20:00")
+        self.trade_time_to.pack(side="left", padx=5)
         self.trade_time_to.bind("<KeyRelease>", lambda e: self.app._trigger_autosave())
-        self.trade_time_to.grid(row=4, column=3, sticky="w", pady=5, padx=5)
-
-        # Info-Text
-        ctk.CTkLabel(
-            c_time,
-            text="(24h Format: z.B. 08:00 - 20:00)",
-            text_color="#666666",
-            font=ctk.CTkFont(size=10),
-        ).grid(row=5, column=0, columnspan=4, sticky="w", pady=(0, 10))
-
-        # === ENDE: Handelstage & Zeiten ===
-
-        _, c4 = self._create_card(parent, "Ausführungsqualität", "#00FF66")
-        ctk.CTkLabel(c4, text="Max. Spread (Pips):").grid(
-            row=0, column=0, sticky="w", pady=5
-        )
-        self.max_spread_slider = ctk.CTkSlider(
-            c4, from_=1, to=20, number_of_steps=19, width=180
-        )
-        self.max_spread_slider.set(3)
-        self.max_spread_slider.grid(row=0, column=1, sticky="w", pady=5, padx=10)
-        self.max_spread_lbl = ctk.CTkLabel(c4, text="3 pips")
-        self.max_spread_lbl.grid(row=0, column=2)
-        self.max_spread_slider.configure(
-            command=lambda v: (
-                self.max_spread_lbl.configure(text=f"{int(v)} pips"),
-                self.app._trigger_autosave(),
-            )
-        )
-
-        ctk.CTkLabel(c4, text="Max. Slippage (Pips):").grid(
-            row=1, column=0, sticky="w", pady=5
-        )
-        self.max_slippage_slider = ctk.CTkSlider(
-            c4, from_=1, to=10, number_of_steps=9, width=180
-        )
-        self.max_slippage_slider.set(2)
-        self.max_slippage_slider.grid(row=1, column=1, sticky="w", pady=5, padx=10)
-        self.max_slippage_lbl = ctk.CTkLabel(c4, text="2 pips")
-        self.max_slippage_lbl.grid(row=1, column=2)
-        self.max_slippage_slider.configure(
-            command=lambda v: (
-                self.max_slippage_lbl.configure(text=f"{int(v)} pips"),
-                self.app._trigger_autosave(),
-            )
-        )
-        self.spread_check_switch = ctk.CTkSwitch(
-            c4,
-            text="Trade ablehnen wenn Spread zu hoch",
-            progress_color="#00FF66",
-            command=self.app._trigger_autosave,
-        )
-        self.spread_check_switch.select()
-        self.spread_check_switch.grid(row=2, column=0, columnspan=2, sticky="w", pady=5)
-
-        # Fulldrive Widget references
-        _, self.fd_card = self._create_card(
-            parent, "🚀 AI-Fulldrive Mode Einstellungen", "#9B59B6"
-        )
-
-        self._fd_conf_lbl_l = ctk.CTkLabel(
-            self.fd_card, text="Min. Konfidenz (%):", text_color="#8B949E"
-        )
-        self._fd_conf_lbl_l.grid(row=0, column=0, sticky="w", pady=5)
-        self.fd_confidence_slider = ctk.CTkSlider(
-            self.fd_card,
-            from_=50,
-            to=95,
-            number_of_steps=45,
-            width=180,
-            progress_color="#9B59B6",
-        )
-        self.fd_confidence_slider.set(70)
-        self.fd_confidence_slider.grid(row=0, column=1, sticky="w", padx=10, pady=5)
-        self._fd_conf_val_lbl = ctk.CTkLabel(self.fd_card, text="70%")
-        self._fd_conf_val_lbl.grid(row=0, column=2, sticky="w")
-        self.fd_confidence_slider.configure(
-            command=lambda v: (
-                self._fd_conf_val_lbl.configure(text=f"{int(v)}%"),
-                self.app._trigger_autosave(),
-            )
-        )
-
-        self._fd_sharpe_lbl = ctk.CTkLabel(
-            self.fd_card, text="Sharpe Ratio Ziel:", text_color="#8B949E"
-        )
-        self._fd_sharpe_lbl.grid(row=1, column=0, sticky="w", pady=5)
-        self.fd_sharpe_entry = ctk.CTkEntry(self.fd_card, width=90)
-        self.fd_sharpe_entry.insert(0, "1.5")
-        self.fd_sharpe_entry.bind(
-            "<KeyRelease>", lambda e: self.app._trigger_autosave()
-        )
-        self.fd_sharpe_entry.grid(row=1, column=1, sticky="w", padx=10, pady=5)
-
-        self._fd_dd_lbl = ctk.CTkLabel(
-            self.fd_card, text="Max. Drawdown Limit (%):", text_color="#8B949E"
-        )
-        self._fd_dd_lbl.grid(row=2, column=0, sticky="w", pady=5)
-        self.fd_maxdd_entry = ctk.CTkEntry(self.fd_card, width=90)
-        self.fd_maxdd_entry.insert(0, "15")
-        self.fd_maxdd_entry.bind("<KeyRelease>", lambda e: self.app._trigger_autosave())
-        self.fd_maxdd_entry.grid(row=2, column=1, sticky="w", padx=10, pady=5)
-
-        self._fd_kpi_frame = ctk.CTkFrame(self.fd_card, fg_color="transparent")
-        self._fd_kpi_frame.grid(row=3, column=0, columnspan=3, sticky="ew", pady=10)
-        self._fd_kpi_sharpe_lbl = ctk.CTkLabel(self._fd_kpi_frame, text="Sharpe: --")
-        self._fd_kpi_sharpe_lbl.pack(side="left", padx=10)
-        self._fd_kpi_dd_lbl = ctk.CTkLabel(self._fd_kpi_frame, text="Max-DD: --")
-        self._fd_kpi_dd_lbl.pack(side="left", padx=10)
-        self._fd_kpi_winrate_lbl = ctk.CTkLabel(self._fd_kpi_frame, text="Win-Rate: --")
-        self._fd_kpi_winrate_lbl.pack(side="left", padx=10)
-        self._fd_kpi_annual_lbl = ctk.CTkLabel(self._fd_kpi_frame, text="Annual: --")
-        self._fd_kpi_annual_lbl.pack(side="left", padx=10)
-
-        self._fd_selfopt_lbl = ctk.CTkLabel(
-            self.fd_card, text="Selbst-Optimierung:", text_color="#8B949E"
-        )
-        self._fd_selfopt_lbl.grid(row=4, column=0, sticky="w", pady=5)
-        self.fd_selfopt_switch = ctk.CTkSwitch(
-            self.fd_card,
-            text="Auto-Retraining alle 50 Trades",
-            progress_color="#9B59B6",
-            command=self.app._trigger_autosave,
-        )
-        self.fd_selfopt_switch.select()
-        self.fd_selfopt_switch.grid(
-            row=4, column=1, columnspan=2, sticky="w", padx=10, pady=5
-        )
-
-        self._fulldrive_widgets = [
-            self._fd_conf_lbl_l,
-            self.fd_confidence_slider,
-            self._fd_conf_val_lbl,
-            self._fd_sharpe_lbl,
-            self.fd_sharpe_entry,
-            self._fd_dd_lbl,
-            self.fd_maxdd_entry,
-            self._fd_kpi_frame,
-            self._fd_selfopt_lbl,
-            self.fd_selfopt_switch,
-        ]
-        self._set_fulldrive_visible(False)
-        self.fd_card.master.pack_forget()  # hide the card wrapper initially
+        ctk.CTkLabel(time_frame, text="(24h Format: z.B. 08:00 - 20:00)", text_color="#666666", font=ctk.CTkFont(size=11)).pack(side="left", padx=15)
+        
+        # Trigger initial state
+        self._on_trading_style_change(self.trading_style_var.get())
 
     def _build_rl_tab(self, parent):
         _, c1 = self._create_card(parent, "Reinforcement Learning Parameter", "#8E44AD")
@@ -1164,15 +938,7 @@ class ConfigView:
         self.app._trigger_autosave()
 
     def _set_fulldrive_visible(self, visible: bool):
-        """Zeige/verstecke den AI-Fulldrive Einstellungsbereich."""
-        try:
-            for widget in self._fulldrive_widgets:
-                if visible:
-                    widget.grid()
-                else:
-                    widget.grid_remove()
-        except Exception:
-            pass
+        pass  # Obsolet, Logik in _on_trading_style_change
 
     def update_day_buttons_from_config(self):
         """Aktualisiert die visuellen Wochentag-Buttons basierend auf den geladenen Konfigurationswerten."""
@@ -1213,13 +979,21 @@ class ConfigView:
         """Callback wenn Trading Style geändert wird."""
         if choice is None:
             choice = self.trading_style_var.get()
-        is_fulldrive = "AI-Fulldrive" in choice
-        self._set_fulldrive_visible(is_fulldrive)
-        self._validate_risk_settings()  # Trigger validation when style changes
-
-        # KPI-Labels aktualisieren wenn Engine bereits läuft
-        if is_fulldrive:
+            
+        self.fast_frame.pack_forget()
+        self.fd_frame.pack_forget()
+        self.default_frame.pack_forget()
+        
+        if "Scalping" in choice or "Day Trading" in choice:
+            self.fast_frame.pack(fill="x", pady=5, padx=15)
+        elif "AI-Fulldrive" in choice:
+            self.fd_frame.pack(fill="x", pady=5, padx=15)
             self._refresh_fulldrive_kpis()
+        else:
+            self.default_frame.pack(fill="x", pady=5, padx=15)
+            
+        self._validate_risk_settings()
+        self.app._trigger_autosave()
 
     def _validate_risk_settings(self, event=None):
         """Intelligente Live-Validierung der Risk-Manager Einstellungen (gemäß UX Vorgaben)."""
@@ -1966,37 +1740,53 @@ class ConfigView:
         self.app._trigger_autosave()
 
     def _start_mcp_servers(self):
-        """Manually start MCP servers for testing"""
-        # Erstelle MCP Engine falls noch nicht vorhanden
-        if hasattr(self.app, "trading_controller") and self.app.trading_controller:
-            tc = self.app.trading_controller
-            # Initialisiere MCP Engine falls nicht vorhanden
-            if tc.mcp_engine is None:
-                from core.mcp_integration import create_mcp_integration
-
-                tc.mcp_engine = create_mcp_integration(self.app, None)
-
-            if tc.mcp_engine:
-                try:
-                    tc.mcp_engine.start()
-                    self.tradingview_status.configure(
-                        text="✅ Aktiv", text_color="#4CAF50"
-                    )
-                    self.hive_status.configure(text="✅ Aktiv", text_color="#4CAF50")
-                    messagebox.showinfo("MCP", "MCP Server erfolgreich gestartet!")
-                except Exception as e:
-                    self.tradingview_status.configure(
-                        text=f"❌ Fehler: {e}", text_color="#F44336"
-                    )
-                    self.hive_status.configure(
-                        text=f"❌ Fehler: {e}", text_color="#F44336"
-                    )
-                    messagebox.showerror("MCP", f"Fehler beim Starten:\n{e}")
-            else:
-                messagebox.showwarning(
-                    "MCP", "MCP Engine konnte nicht erstellt werden."
+        """Startet MCP Server manuell – funktioniert auch ohne aktiven Live-Stream.
+        
+        Warum: Der trading_controller wird normalerweise erst beim Live-Stream-Start
+        erstellt. Um den MCP-Test-Button unabhängig davon nutzbar zu machen,
+        erstellen wir ihn hier on-demand, falls er noch nicht existiert.
+        """
+        # Stelle sicher dass trading_controller existiert
+        if not hasattr(self.app, "trading_controller") or not self.app.trading_controller:
+            try:
+                from core.trading_controller import TradingController
+                self.app.trading_controller = TradingController(self.app)
+            except Exception as e:
+                messagebox.showerror(
+                    "MCP", f"Trading Controller konnte nicht erstellt werden:\n{e}"
                 )
+                return
+
+        tc = self.app.trading_controller
+
+        # Initialisiere MCP Engine falls nicht vorhanden
+        if tc.mcp_engine is None:
+            try:
+                from core.mcp_integration import create_mcp_integration
+                tc.mcp_engine = create_mcp_integration(self.app, None)
+            except Exception as e:
+                messagebox.showerror(
+                    "MCP", f"MCP Engine konnte nicht erstellt werden:\n{e}"
+                )
+                return
+
+        if tc.mcp_engine:
+            try:
+                tc.mcp_engine.start()
+                self.tradingview_status.configure(
+                    text="✅ Aktiv", text_color="#4CAF50"
+                )
+                self.hive_status.configure(text="✅ Aktiv", text_color="#4CAF50")
+                messagebox.showinfo("MCP", "MCP Server erfolgreich gestartet!")
+            except Exception as e:
+                self.tradingview_status.configure(
+                    text=f"❌ Fehler: {e}", text_color="#F44336"
+                )
+                self.hive_status.configure(
+                    text=f"❌ Fehler: {e}", text_color="#F44336"
+                )
+                messagebox.showerror("MCP", f"Fehler beim Starten:\n{e}")
         else:
             messagebox.showwarning(
-                "MCP", "Trading Controller nicht verfügbar. Bitte GUI neu starten."
+                "MCP", "MCP Engine konnte nicht erstellt werden."
             )

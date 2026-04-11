@@ -184,8 +184,10 @@ class DarkVeilBackground:
             highlightthickness=0,
             bd=0,
         )
-        c.place(relx=0, rely=0, relwidth=1, relheight=1)
-        c.lower()   # hinter alle anderen Widgets
+        try:
+            c.lower()   # hinter alle anderen Widgets
+        except Exception:
+            pass
         self._canvas = c
 
         self._fallback_t   = 0.0

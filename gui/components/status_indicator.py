@@ -34,10 +34,10 @@ class StatusIndicator(ctk.CTkFrame):
         # Status-Farben
         self._status_colors = {
             'connected': ds.TRADING_COLORS.get('profit', '#27AE60'),
-            'disconnected': ds.TRADING_COLORS.get('neutral', '#6C757D'),
+            'disconnected': ds.TRADING_COLORS.get('neutral', '#71717A'),
             'warning': ds.TRADING_COLORS.get('warning', '#F39C12'),
             'error': ds.TRADING_COLORS.get('loss', '#E74C3C'),
-            'loading': ds.COLORS.get('primary', {}).get('base', '#2E86AB'),
+            'loading': ds.COLORS.get('primary', {}).get('base', '#38BDF8'),
         }
         
         self._current_status = status
@@ -78,7 +78,7 @@ class StatusIndicator(ctk.CTkFrame):
         # Zeichne initialen Kreis
         self._dot_id = self.status_dot.create_oval(
             2, 2, 10, 10,
-            fill=self._status_colors.get(self._current_status, '#6C757D'),
+            fill=self._status_colors.get(self._current_status, '#71717A'),
             outline=''
         )
         
@@ -134,11 +134,11 @@ class StatusIndicator(ctk.CTkFrame):
         """Pulsieren Animation"""
         if not self._pulsing:
             # Reset opacity
-            self.status_dot.itemconfig(self._dot_id, fill=self._status_colors.get('loading', '#2E86AB'))
+            self.status_dot.itemconfig(self._dot_id, fill=self._status_colors.get('loading', '#38BDF8'))
             return
         
         # Einfache Pulsieren durch Farbwechsel simulieren
-        colors = ['#2E86AB', '#58A6FF', '#2E86AB']
+        colors = ['#38BDF8', '#7DD3FC', '#38BDF8']
         current = getattr(self, '_pulse_index', 0)
         self._pulse_index = (current + 1) % len(colors)
         
@@ -163,7 +163,7 @@ class StatusBar(ctk.CTkFrame):
         
         default_kwargs = {
             'corner_radius': 0,
-            'fg_color': '#0B0E14',
+            'fg_color': '#09090B',
             'height': 30,
         }
         default_kwargs.update(kwargs)

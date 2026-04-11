@@ -5,6 +5,7 @@ Verbindet TradingView-MCP und Hive Intelligence MCP mit dem Auto-Trading System
 
 import json
 import subprocess
+import sys
 import threading
 import time
 import logging
@@ -12,6 +13,20 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime
 
 logger = logging.getLogger("FinGPT MCP")
+
+
+def _build_npx_cmd(*args) -> list:
+    """
+    Erstellt den korrekten npx-Befehl abhängig vom Betriebssystem.
+    
+    Warum nötig: Auf Windows blockiert die PowerShell Execution Policy
+    die Ausführung von .ps1-Skripten (npx.ps1, npm.ps1). Durch Verwendung
+    von cmd.exe als Wrapper wird npx via npx.cmd aufgerufen, das keine
+    Execution-Policy-Prüfung unterläuft.
+    """
+    if sys.platform == "win32":
+        return ["cmd", "/c", "npx"] + list(args)
+    return ["npx"] + list(args)
 
 
 # Fancy console colors
@@ -43,6 +58,28 @@ def mcp_print(msg: str, level: str = "INFO"):
     )
 
 
+# Mapping von String-Level-Namen zu logging-Integer-Werten.
+# Warum nötig: logging.Logger.log() lehnt Strings als Level-Parameter ab
+# ("level must be an integer"). Eigene String-Konvention 'SUCCESS' hat kein
+# Standard-Äquivalent – wird auf INFO gemappt.
+_LOG_LEVEL_MAP: dict = {
+    "DEBUG":   logging.DEBUG,
+    "INFO":    logging.INFO,
+    "SUCCESS": logging.INFO,
+    "WARN":    logging.WARNING,
+    "WARNING": logging.WARNING,
+    "ERROR":   logging.ERROR,
+    "CRITICAL":logging.CRITICAL,
+}
+
+
+def _resolve_log_level(level) -> int:
+    """Konvertiert String-Level-Namen sicher in logging-Integer-Werte."""
+    if isinstance(level, int):
+        return level
+    return _LOG_LEVEL_MAP.get(str(level).upper(), logging.INFO)
+
+
 class MCPIntegration:
     """Integration für TradingView und Hive Intelligence MCP Server"""
 
@@ -59,33 +96,50 @@ class MCPIntegration:
         mcp_print(message, level)
 
     def start_tradingview(self):
-        """Startet TradingView MCP Server"""
+        """Startet TradingView MCP Server.
+        
+        Warum subprocess.Popen statt subprocess.run:
+        MCP Server sind langlebige Prozesse die dauerhaft im Hintergrund
+        laufen müssen – .run() würde blockieren bis der Prozess endet.
+        """
         try:
             self.log("INFO", "Starte TradingView MCP Server...")
             self.tradingview_process = subprocess.Popen(
-                ["npx", "-y", "tradingview-mcp-server"],
+                _build_npx_cmd("-y", "tradingview-mcp-server"),
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
                 bufsize=1,
             )
+            # Kurz warten und dann prüfen ob der Prozess noch läuft
             time.sleep(2)
+            if self.tradingview_process.poll() is not None:
+                # Prozess ist bereits beendet = Fehler beim Start
+                stderr_out = self.tradingview_process.stderr.read()
+                mcp_print(f"TradingView sofort beendet: {stderr_out[:200]}", "ERROR")
+                return False
             self.tradingview_ready = True
-            self.log("INFO", "TradingView MCP Server gestartet")
+            self.log("SUCCESS", "TradingView MCP Server gestartet")
             return True
+        except FileNotFoundError:
+            mcp_print("npx nicht gefunden. Bitte Node.js/npm installieren.", "ERROR")
+            return False
         except Exception as e:
             mcp_print(f"TradingView Start fehlgeschlagen: {e}", "ERROR")
             return False
-            self.log("ERROR", f"TradingView Start fehlgeschlagen: {e}")
-            return False
 
     def start_hive(self):
-        """Startet Hive Intelligence MCP Server"""
+        """Startet Hive Intelligence MCP Server.
+        
+        Warum eigenständiger Prozess: Hive Intelligence ist ein separater MCP-Server
+        mit eigenem JSON-RPC-Kanal – beide Server müssen unabhängig voneinander
+        laufen damit ein Ausfall nicht den anderen blockiert.
+        """
         try:
             self.log("INFO", "Starte Hive Intelligence MCP Server...")
             self.hive_process = subprocess.Popen(
-                ["npx", "-y", "hive-intelligence"],
+                _build_npx_cmd("-y", "hive-intelligence"),
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -93,9 +147,16 @@ class MCPIntegration:
                 bufsize=1,
             )
             time.sleep(2)
+            if self.hive_process.poll() is not None:
+                stderr_out = self.hive_process.stderr.read()
+                mcp_print(f"Hive sofort beendet: {stderr_out[:200]}", "ERROR")
+                return False
             self.hive_ready = True
-            self.log("INFO", "Hive Intelligence MCP Server gestartet")
+            self.log("SUCCESS", "Hive Intelligence MCP Server gestartet")
             return True
+        except FileNotFoundError:
+            mcp_print("npx nicht gefunden. Bitte Node.js/npm installieren.", "ERROR")
+            return False
         except Exception as e:
             self.log("ERROR", f"Hive Start fehlgeschlagen: {e}")
             return False
@@ -175,9 +236,10 @@ class TradingViewAnalyzer:
 
     def log(self, level, message):
         if self.logger:
-            self.logger.log(level, message, "TV")
+            # logging.Logger.log() erwartet einen Integer-Level, keinen String
+            self.logger.log(_resolve_log_level(level), "[TV] %s", message)
         else:
-            print(f"[TV] {message}")
+            mcp_print(message, level)
 
     def screen_stocks(
         self,
@@ -283,9 +345,10 @@ class HiveIntelligenceAnalyzer:
 
     def log(self, level, message):
         if self.logger:
-            self.logger.log(level, message, "HIVE")
+            # logging.Logger.log() erwartet einen Integer-Level, keinen String
+            self.logger.log(_resolve_log_level(level), "[HIVE] %s", message)
         else:
-            print(f"[HIVE] {message}")
+            mcp_print(message, level)
 
     def get_crypto_price(self, symbol: str) -> Optional[Dict]:
         """Aktueller Crypto-Preis"""
@@ -359,9 +422,10 @@ class MCPTradingEngine:
 
     def log(self, level, message):
         if self.logger:
-            self.logger.log(level, message, "MCP-ENGINE")
+            # logging.Logger.log() erwartet einen Integer-Level, keinen String
+            self.logger.log(_resolve_log_level(level), "[MCP-ENGINE] %s", message)
         else:
-            print(f"[MCP-ENGINE] {message}")
+            mcp_print(message, level)
 
     def start(self):
         """MCP Server starten"""

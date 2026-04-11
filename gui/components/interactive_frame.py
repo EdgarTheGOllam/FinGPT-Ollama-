@@ -6,7 +6,7 @@ def hex_to_rgb(hex_color):
     """Konvertiert einen Hex-Farbstring in ein RGB-Tuple."""
     if hex_color == "transparent":
         # Fallback falls transparent übergeben wird - wir nehmen den TTG Deep Black als Base
-        return (11, 14, 20) # #0B0E14
+        return (9, 9, 11) # #09090B
     hex_color = hex_color.lstrip('#')
     return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
 
@@ -39,9 +39,9 @@ class HoverFadeFrame(ctk.CTkFrame):
     _drag_start_y = 0
     
     def __init__(self, master, 
-                 active_bg_color="#1A1D24", 
+                 active_bg_color="#18181B", 
                  active_border_color=None, 
-                 idle_border_color="#2A2D34", 
+                 idle_border_color="#27272A", 
                  fade_delay_ms=3000, 
                  draggable=True,
                  **kwargs):
@@ -52,7 +52,7 @@ class HoverFadeFrame(ctk.CTkFrame):
         self.draggable = draggable
         
         # Dashboard Background Color (Deep Black)
-        self.dashboard_bg = "#0B0E14" 
+        self.dashboard_bg = "#09090B" 
         
         # Colors state
         self.active_bg_color = active_bg_color

@@ -595,52 +595,12 @@ class TradingController:
                             for r in last_candles
                         )
 
-                        # Style-spezifisches Signal als Kontext-Hint für die KI
-                        style_signal_hint = ""
-                        if style == "ICT Orderblock":
-                            try:
-                                from trading.ict_trading.ict_strategy import ICTStrategy
-                                _ict = ICTStrategy()
-                                _sig = _ict.get_signal(symbol)
-                                if hasattr(_sig, 'action') and _sig.action in ("BUY", "SELL"):
-                                    style_signal_hint = f"\nICT Orderblock-Analyse: {_sig.action} | {getattr(_sig, 'reason', '')}"
-                            except Exception:
-                                pass
-                        elif style == "Market Profile":
-                            try:
-                                from trading.volume_profile.vp_strategy import VPStrategy
-                                _vp = VPStrategy()
-                                _sig = _vp.get_signal(symbol)
-                                if hasattr(_sig, 'action') and _sig.action in ("BUY", "SELL"):
-                                    style_signal_hint = f"\nMarket Profile / Volume Profile: {_sig.action} | {getattr(_sig, 'reason', '')}"
-                            except Exception:
-                                pass
-                        elif style == "Pattern Trading":
-                            try:
-                                from trading.pattern_trading.pattern_strategy import PatternStrategy
-                                _pat = PatternStrategy()
-                                _sig = _pat.get_signal(symbol)
-                                if hasattr(_sig, 'action') and _sig.action in ("BUY", "SELL"):
-                                    style_signal_hint = f"\nPattern-Erkennung: {getattr(_sig, 'pattern_type', '')} → {_sig.action} | {getattr(_sig, 'reason', '')}"
-                            except Exception:
-                                pass
-                        elif style == "Structure Trading":
-                            try:
-                                from trading.structure_trading.structure_strategy import StructureStrategy
-                                _struct = StructureStrategy()
-                                _sig = _struct.get_signal(symbol)
-                                if hasattr(_sig, 'action') and _sig.action in ("BUY", "SELL"):
-                                    style_signal_hint = f"\nMarktstruktur-Analyse: {_sig.action} | {getattr(_sig, 'reason', '')}"
-                            except Exception:
-                                pass
-
                         signal_hint = (
-                            f"NACKTER CHART (nur Preisdaten, KEINE Indikatoren):\n"
-                            f"Letzte 5 Kerzen ({timeframe}): {candle_summary}\n"
-                            f"Aktueller Preis: {price:.5f} | Spread: {spread_pips:.1f} Pips\n"
-                            f"Übergeordneter Trend (HTF): {htf_trend}\n"
+                            f"NACKTER CHART (nur Preisdaten, KEINE Indikatoren):\\n"
+                            f"Letzte 5 Kerzen ({timeframe}): {candle_summary}\\n"
+                            f"Aktueller Preis: {price:.5f} | Spread: {spread_pips:.1f} Pips\\n"
+                            f"Übergeordneter Trend (HTF): {htf_trend}\\n"
                             f"Nutze NUR Price Action: Kerzenformationen, Struktur, Key-Level."
-                            f"{style_signal_hint}"
                         )
 
                         style_instruction = {

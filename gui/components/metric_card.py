@@ -64,22 +64,22 @@ class MetricCard(HoverFadeFrame):
         "default": "❖",  # Standard
     }
 
-    # Spezifische TTG Neon-Farben für jedes Icon
+    # Spezifische elegante Premium-Farben für jedes Icon
     ICON_COLORS = {
-        "balance": "#00FF66",  # Neon Grün
-        "positions": "#FFEA00",  # Neon Gelb
-        "trades": "#2979FF",  # Neon Blau
-        "pnl": "#FF1744",  # Neon Rot
-        "winrate": "#9C27B0",  # Neon Lila
-        "risk": "#FF9100",  # Neon Orange
-        "default": "#8B949E",  # Grau
+        "balance": "#10B981",    # Emerald
+        "positions": "#F59E0B",  # Amber
+        "trades": "#38BDF8",     # Light Blue
+        "pnl": "#EF4444",        # Red
+        "winrate": "#818CF8",    # Indigo
+        "risk": "#F97316",       # Orange
+        "default": "#A1A1AA",    # Zinc-400
     }
 
     # Farben für Trend-Indikatoren (modern Trading-UI Style)
     TREND_COLORS = {
         "positive": "#10B981",  # Emerald Grün
         "negative": "#EF4444",  # Rot
-        "neutral": "#8B949E",  # Grau
+        "neutral": "#71717A",   # Zinc-500
     }
 
     # Trading-UI Badge-Farben
@@ -123,14 +123,15 @@ class MetricCard(HoverFadeFrame):
         # Standard-Parameter
         default_kwargs = {
             "corner_radius": radius,
-            "border_width": 0,
+            "border_width": 1,
+            "border_color": "#27272A",
         }
         config = {**default_kwargs, **kwargs}
 
         # Hauptframe Container init - Modern Trading-UI Style
         super().__init__(
             master,
-            fg_color="#1A1D24",  # Dunklerer Hintergrund für moderneren Look
+            fg_color="#18181B",  # Dunklerer Hintergrund für moderneren Look (Zinc-900)
             draggable=True,
             **config,
         )
@@ -148,7 +149,7 @@ class MetricCard(HoverFadeFrame):
         # ─────────────────────────────────────────────────────────
 
         # Padding
-        padding = 16
+        padding = 20
 
         # Main container - vertically stacked
         self._main_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -159,7 +160,7 @@ class MetricCard(HoverFadeFrame):
         self._value_row.pack(fill="x", pady=(0, 8))
 
         # 1. Value Label (groß, prominent) - mit Animation
-        value_font = ctk.CTkFont(family="Inter", size=28, weight="bold")
+        value_font = ctk.CTkFont(family="Inter", size=22, weight="bold")
         self.value_label = ctk.CTkLabel(
             self._value_row,
             text=value,
@@ -256,7 +257,7 @@ class MetricCard(HoverFadeFrame):
             self._title_row,
             text=title,
             font=title_font,
-            text_color="#8B949E",  # Gedämpftes Grau
+            text_color="#A1A1AA",  # Gedämpftes Grau (Zinc-400)
         )
         self.title_label.pack(side="left")
 
@@ -533,13 +534,13 @@ class MetricCard(HoverFadeFrame):
 
     def highlight_change(self, duration_ms=500):
         """
-        Hervorhebung bei Wertänderung (Wertetext leuchtet kurz Neon-Grün auf).
+        Hervorhebung bei Wertänderung (Wertetext leuchtet kurz auf).
 
         Args:
             duration_ms: Dauer der Hervorhebung in Millisekunden
         """
         original_color = "#FFFFFF"
-        flash_color = "#00FF66"  # TTG Neon Green
+        flash_color = "#38BDF8"  # Premium Light Blue
 
         # Leucht-Effekt auf dem Wertetext
         if hasattr(self, "value_label") and self.value_label.winfo_exists():

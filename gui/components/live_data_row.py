@@ -32,7 +32,7 @@ class LiveDataRow(ctk.CTkFrame):
         **kwargs,
     ):
         self.default_color = "transparent"
-        self.hover_color = "transparent"  # Professionell: Kein Hover-Effekt
+        self.hover_color = "#18181B"  # Subtiler Hover-Effekt (Zinc-900)
 
         # Responsive Höhe
         from gui.design_system import DesignSystem
@@ -96,7 +96,7 @@ class LiveDataRow(ctk.CTkFrame):
         # Fig-Größe ebenfalls responsive
         fig_width = 0.8 if compact_mode else 1.0
         fig_height = 0.35 if compact_mode else 0.4
-        self.fig = Figure(figsize=(fig_width, fig_height), dpi=100, facecolor="#0B0E14")
+        self.fig = Figure(figsize=(fig_width, fig_height), dpi=100, facecolor="#09090B")
         self.ax = self.fig.add_subplot(111)
         self.ax.axis("off")
         self.ax.margins(x=0, y=0.1)
@@ -117,7 +117,7 @@ class LiveDataRow(ctk.CTkFrame):
         self.price_lbl.grid(row=0, column=2, sticky="w", padx=padx, pady=pady)
 
         change_color = (
-            "#00FF66" if "+" in change else "#FF1744" if "-" in change else "#8B949E"
+            "#10B981" if "+" in change else "#EF4444" if "-" in change else "#71717A"
         )
         self.change_lbl = ctk.CTkLabel(
             self,
@@ -160,11 +160,11 @@ class LiveDataRow(ctk.CTkFrame):
         sig_height = 20 if compact_mode else 24
         sig_font_size = 9 if compact_mode else 10
         sig_color = (
-            "#00FF66"
+            "#10B981"
             if signal == "BUY"
-            else "#FF1744"
+            else "#EF4444"
             if signal == "SELL"
-            else "#8B949E"
+            else "#71717A"
         )
         self.signal_btn = ctk.CTkButton(
             self,
@@ -173,7 +173,7 @@ class LiveDataRow(ctk.CTkFrame):
             height=sig_height,
             fg_color=sig_color,
             hover_color=sig_color,
-            text_color="#0B0E14",
+            text_color="#09090B",
             corner_radius=10,
             font=ctk.CTkFont(family="Inter", size=sig_font_size, weight="bold"),
         )
@@ -199,19 +199,19 @@ class LiveDataRow(ctk.CTkFrame):
 
     def _on_enter(self, event):
         self.configure(fg_color=self.hover_color)
-        self.fig.set_facecolor("#1A1D24")
+        self.fig.set_facecolor("#18181B")
         self.canvas.draw_idle()
 
     def _on_leave(self, event):
         self.configure(fg_color=self.default_color)
-        self.fig.set_facecolor("#0B0E14")  # Reset to default
+        self.fig.set_facecolor("#09090B")  # Reset to default
         self.canvas.draw_idle()
 
     def update_data(self, price, change, history=None):
         self.price_lbl.configure(text=price)
         self.change_lbl.configure(text=change)
         change_color = (
-            "#00FF66" if "+" in change else "#FF1744" if "-" in change else "#8B949E"
+            "#10B981" if "+" in change else "#EF4444" if "-" in change else "#71717A"
         )
         self.change_lbl.configure(text_color=change_color)
 
@@ -227,9 +227,9 @@ class LiveDataRow(ctk.CTkFrame):
 
             # Color code the line
             if y[-1] >= y[0]:
-                self.line.set_color("#00FF66")  # Green
+                self.line.set_color("#10B981")  # Green
             else:
-                self.line.set_color("#FF1744")  # Red
+                self.line.set_color("#EF4444")  # Red
 
             self.canvas.draw_idle()
 
@@ -240,28 +240,28 @@ class LiveDataRow(ctk.CTkFrame):
         self.trend_h4.configure(text_color=h4_color)
 
         # Calculate dynamic signal based on the three trend dots
-        green = "#00FF66"
-        red = "#FF1744"
+        green = "#10B981"
+        red = "#EF4444"
 
         colors = [m15_color, h1_color, h4_color]
         if all(c == green for c in colors):
             self.signal_btn.configure(
                 text="BUY",
-                fg_color="#00FF66",
+                fg_color="#10B981",
                 hover_color="#00E676",
-                text_color="#0B0E14",
+                text_color="#09090B",
             )
         elif all(c == red for c in colors):
             self.signal_btn.configure(
                 text="SELL",
-                fg_color="#FF1744",
+                fg_color="#EF4444",
                 hover_color="#D50000",
-                text_color="#0B0E14",
+                text_color="#09090B",
             )
         else:
             self.signal_btn.configure(
                 text="WAIT",
                 fg_color="#FFEA00",
                 hover_color="#FFD600",
-                text_color="#0B0E14",
+                text_color="#09090B",
             )

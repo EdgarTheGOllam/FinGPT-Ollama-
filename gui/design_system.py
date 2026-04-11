@@ -26,46 +26,46 @@ class DesignSystem:
             'color3': '#8da0ce',
             'dark_bg': '#0B0E14'
         },
-        # Primärfarben (Neon Blue)
+        # Premium FinTech Palette
         'primary': {
-            'base': '#73bfc4',
-            'dark': '#4a8a8e',
-            'light': '#aedce0',
-            'hover': '#5fb0b5'
+            'base': '#38BDF8',  # Elegant Light Blue
+            'dark': '#0284C7',
+            'light': '#7DD3FC',
+            'hover': '#0EA5E9'
         },
         'secondary': {
-            'base': '#ff810a',
-            'dark': '#c76608',
-            'light': '#ffb35c',
-            'hover': '#e67309'
+            'base': '#818CF8',  # Indigo
+            'dark': '#4F46E5',
+            'light': '#A5B4FC',
+            'hover': '#6366F1'
         },
-        # Success (Neon Green)
+        # Success (Emerald)
         'success': {
-            'base': '#00FF66',
-            'dark': '#00C853',
-            'light': '#69FF97',
-            'hover': '#00E676'
+            'base': '#10B981',  # Professional Emerald Green
+            'dark': '#059669',
+            'light': '#34D399',
+            'hover': '#047857'
         },
-        # Warning (Yellow)
+        # Warning (Amber)
         'warning': {
-            'base': '#FFEA00',
-            'dark': '#C7B700',
-            'light': '#FFFF56',
-            'hover': '#FFD600'
+            'base': '#F59E0B',  # Amber
+            'dark': '#D97706',
+            'light': '#FCD34D',
+            'hover': '#B45309'
         },
-        # Danger (Neon Red)
+        # Danger (Rose/Red)
         'danger': {
-            'base': '#FF1744',
-            'dark': '#C4001D',
-            'light': '#FF616F',
-            'hover': '#D50000'
+            'base': '#EF4444',  # Balanced Red
+            'dark': '#DC2626',
+            'light': '#F87171',
+            'hover': '#B91C1C'
         },
         'neutral': {
             'white': '#FFFFFF',
-            'light': '#8B949E',
-            'medium': '#546E7A',
-            'dark': '#1A1D24',
-            'darker': '#0B0E14',
+            'light': '#A1A1AA',    # Zinc-400 (Subtle Text)
+            'medium': '#71717A',   # Zinc-500 (Muted Text)
+            'dark': '#18181B',     # Zinc-900 (Surface/Cards)
+            'darker': '#09090B',   # Zinc-950 (Main Background)
             'black': '#000000'
         }
     }
@@ -77,10 +77,10 @@ class DesignSystem:
         'info': COLORS['primary']['base'],
         'warning': COLORS['warning']['base'],
         'error': COLORS['danger']['base'],
-        'neutral': COLORS['neutral']['medium'],
-        'background': ('#0B0E14', '#0B0E14'),  # Deep Black
-        'surface': ('#1A1D24', '#1A1D24'),    # Dark Slate
-        'border': ('#2A2D34', '#2A2D34'),     # Dark Border
+        'neutral': COLORS['neutral']['light'],  # Bessere Lesbarkeit
+        'background': ('#09090B', '#09090B'),  # Zinc-950
+        'surface': ('#18181B', '#18181B'),    # Zinc-900
+        'border': ('#27272A', '#27272A'),     # Zinc-800
         # Trading-spezifische Farben
         'premium': COLORS['secondary']['base'],
         'buy_signal': COLORS['success']['base'],
@@ -91,12 +91,12 @@ class DesignSystem:
     
     # Trading-Farben (für schnellen Zugriff)
     TRADING_COLORS = {
-        'profit': '#00FF66',     # Positive P&L, BUY-Signale (Neon Green)
-        'loss': '#FF1744',       # Negative P&L, SELL-Signale (Neon Red)
-        'neutral': '#8B949E',    # HOLD-Signale, inaktive Elemente
-        'warning': '#FFEA00',    # Margin-Warnungen, Risiko-Limits
-        'info': '#2979FF',       # Allgemeine Informationen
-        'premium': '#D05CE3',    # AI-Features, Insights
+        'profit': '#10B981',     # Professional Emerald
+        'loss': '#EF4444',       # Professional Red
+        'neutral': '#71717A',    # Zinc-500
+        'warning': '#F59E0B',    # Amber
+        'info': '#38BDF8',       # Light Blue
+        'premium': '#818CF8',    # Indigo
     }
 
     # ─────────────────────────────────────────────────────────────
@@ -148,10 +148,10 @@ class DesignSystem:
     # ─────────────────────────────────────────────────────────────
     RADIUS = {
         'none': 0,
-        'sm': 4,   # Kleine Buttons, Inputs
-        'md': 6,  # Standard-Karten
-        'lg': 8,  # Große Karten, Tabs
-        'xl': 12,  # Hero-Elemente
+        'sm': 6,   # Kleine Buttons, Inputs
+        'md': 8,  # Standard-Karten
+        'lg': 12,  # Große Karten, Tabs
+        'xl': 16,  # Hero-Elemente
         'full': 9999  # Pill-Buttons, Avatare
     }
 

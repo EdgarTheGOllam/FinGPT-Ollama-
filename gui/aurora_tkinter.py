@@ -29,7 +29,7 @@ _HTML_URL  = _HTML_FILE.as_uri()          # file:///...
 # ── Default-Konfiguration ──────────────────────────────────────────────────────
 DEFAULT_CONFIG: Dict = {
     "color0":    "5227FF",   # Violet
-    "color1":    "00C2FF",   # Cyan-Blue
+    "color1":    "7cff67",   # Light Green
     "color2":    "5227FF",   # Violet
     "amplitude": 1.0,
     "blend":     0.5,
@@ -65,11 +65,16 @@ class AuroraBackground:
         if self._running:
             return
         self._running = True
-        try:
-            import tkinterweb
-            self._start_tkinterweb(tkinterweb)
-        except ImportError:
-            self._start_canvas_fallback()
+        
+        # #region agent log
+        import json, time
+        with open("debug-0a8f4e.log", "a") as f:
+            f.write(json.dumps({"sessionId":"0a8f4e", "runId":"post-fix", "hypothesisId":"H1", "location":"aurora_tkinter.py:start", "message":"Starting Aurora via Canvas fallback (tkinterweb disabled)", "data":{}, "timestamp":int(time.time()*1000)}) + "\n")
+        # #endregion
+        
+        # tkinterweb unterstützt kein WebGL, was zu einem schwarzen Bildschirm führt.
+        # Wir erzwingen hier den Canvas-Fallback, der die Aurora simuliert.
+        self._start_canvas_fallback()
 
     def stop(self) -> None:
         self._running = False
@@ -92,12 +97,35 @@ class AuroraBackground:
             )
             # Absolut hinter alle anderen Widgets im Container
             frame.place(relx=0, rely=0, relwidth=1, relheight=1)
-            frame.lower()
+            try:
+                frame.lower()
+            except Exception:
+                try:
+                    siblings = self.container.winfo_children()
+                    first_sibling = next((s for s in siblings if s != frame), None)
+                    if first_sibling:
+                        frame.lower(first_sibling)
+                except Exception:
+                    pass
             frame.load_url(url)
             self._frame = frame
             print("[Aurora] tkinterweb HtmlFrame geladen ✓")
+            
+            # #region agent log
+            import json, time
+            with open("debug-0a8f4e.log", "a") as f:
+                f.write(json.dumps({"sessionId":"0a8f4e", "runId":"run1", "hypothesisId":"H1", "location":"aurora_tkinter.py:_start_tkinterweb", "message":"tkinterweb used", "data":{"url": url}, "timestamp":int(time.time()*1000)}) + "\n")
+            # #endregion
+            
         except Exception as exc:
             print(f"[Aurora] tkinterweb Fehler: {exc} – Canvas-Fallback aktiv")
+            
+            # #region agent log
+            import json, time
+            with open("debug-0a8f4e.log", "a") as f:
+                f.write(json.dumps({"sessionId":"0a8f4e", "runId":"run1", "hypothesisId":"H1", "location":"aurora_tkinter.py:_start_tkinterweb", "message":"tkinterweb failed", "data":{"error": str(exc)}, "timestamp":int(time.time()*1000)}) + "\n")
+            # #endregion
+            
             self._start_canvas_fallback()
 
     # ── Canvas Fallback ───────────────────────────────────────────────────────
@@ -111,7 +139,16 @@ class AuroraBackground:
             bg="#0B0E14",
         )
         c.place(relx=0, rely=0, relwidth=1, relheight=1)
-        c.lower()
+        try:
+            c.lower()
+        except Exception:
+            try:
+                siblings = self.container.winfo_children()
+                first_sibling = next((s for s in siblings if s != c), None)
+                if first_sibling:
+                    c.lower(first_sibling)
+            except Exception:
+                pass
         self._canvas = c
         self._fallback_t = 0.0
         self._last_ts    = time.time()
@@ -119,7 +156,7 @@ class AuroraBackground:
         # Aurora-Palette
         self._palette = [
             (82,  39, 255),   # Violet #5227FF
-            (0,  194, 255),   # Cyan   #00C2FF
+            (124, 255, 103),  # Light green #7cff67
             (40, 100, 200),   # Midblue
             (82,  39, 255),   # Violet (loop)
         ]

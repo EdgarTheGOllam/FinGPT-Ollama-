@@ -181,7 +181,7 @@ class CosmicMap3D(ctk.CTkFrame):
             self._mode = "2D"
             self._tog_target = 0.0
             self._lbl_3d.configure(fg="#555e6e")
-            self._lbl_2d.configure(fg="#00FF66")
+            self._lbl_2d.configure(fg="#10B981")
         else:
             self._mode = "3D"
             self._tog_target = 1.0
@@ -303,10 +303,10 @@ class CosmicMap3D(ctk.CTkFrame):
         ny = r * math.sin(phi) * math.sin(theta)
         nz = r * math.cos(phi)
         if profit_pct > 0:
-            color = "#00FF66"
+            color = "#10B981"
             base_size = min(9, 4 + profit_pct*1.2)
         elif profit_pct < 0:
-            color = "#FF1744"
+            color = "#EF4444"
             base_size = min(9, 4 + abs(profit_pct)*1.2)
         else:
             color = "#00E5FF"
@@ -346,7 +346,7 @@ class CosmicMap3D(ctk.CTkFrame):
             self.particles.append({
                 "x": 0, "y": 0, "z": 0,
                 "vx": vx * speed, "vy": vy * speed, "vz": vz * speed,
-                "life": 1.0, "color": random.choice(["#00FF66", "#00E5FF", "#FFFFFF"])
+                "life": 1.0, "color": random.choice(["#10B981", "#00E5FF", "#FFFFFF"])
             })
 
     # ═══════════════════════════════════════════════════════════════
@@ -729,7 +729,7 @@ class CosmicMap3D(ctk.CTkFrame):
                 flow_speed, flow_color, dots = 0.04, "#c77dff", 1
             elif etype == "trade_link":
                 color = "#004d40" if self.nodes[idx2].get("is_new") and time.time() - self.nodes[idx2]["born"] < 3 else "#102a43"
-                flow_speed, flow_color, dots = 0.02, "#00FF66", 2
+                flow_speed, flow_color, dots = 0.02, "#10B981", 2
             else:
                 color = "#122a3d"
                 flow_speed, flow_color, dots = 0.015, "#00E5FF", 1
@@ -775,7 +775,7 @@ class CosmicMap3D(ctk.CTkFrame):
                                         outline="#00E5FF", width=2, dash=(4, 8))
                 ir = self.nova_radius * 0.8
                 self.canvas.create_oval(nx-ir, ny-ir, nx+ir, ny+ir,
-                                        outline="#00FF66", width=1, dash=(2, 6))
+                                        outline="#10B981", width=1, dash=(2, 6))
             else:
                 self.nova_active = False
             for p in self.particles:

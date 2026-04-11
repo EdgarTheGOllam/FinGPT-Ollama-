@@ -3,8 +3,12 @@ import tkinter as tk
 import threading
 from datetime import datetime
 import time
-from datetime import datetime
 
+import matplotlib
+matplotlib.use('TkAgg')
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 
 # Fancy console
 class C:
@@ -30,8 +34,6 @@ class HeatmapView:
         self._heatmap_running = False
         self._heatmap_thread = None
         self._currencies = ["USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD"]
-        self._currency_labels = {}
-        self._strength_bars = {}
 
         self.setup_ui()
 
@@ -55,46 +57,29 @@ class HeatmapView:
         )
         self.status_lbl.pack(side="right", padx=10)
 
-        # ── Main Container ───────────────────────────────────────
-        main_frame = ctk.CTkFrame(
-            self.tab, corner_radius=15, fg_color=("#F5F5F5", "#151515")
+        # ── Main Container (Matplotlib Embed) ───────────────────
+        self.main_frame = ctk.CTkFrame(
+            self.tab, corner_radius=0, fg_color="transparent"
         )
-        main_frame.grid(row=1, column=0, sticky="nsew", padx=15, pady=10)
-        main_frame.grid_columnconfigure(1, weight=1)
-
-        # Create rows for each currency
-        for i, curr in enumerate(self._currencies):
-            main_frame.grid_rowconfigure(i, weight=1)
-
-            # Currency Label (Left)
-            lbl = ctk.CTkLabel(
-                main_frame,
-                text=curr,
-                font=ctk.CTkFont(family="Inter", size=16, weight="bold"),
-            )
-            lbl.grid(row=i, column=0, sticky="e", padx=(20, 10), pady=10)
-            self._currency_labels[curr] = lbl
-
-            # Bar Container (Middle)
-            bar_frame = ctk.CTkFrame(main_frame, fg_color="transparent", height=30)
-            bar_frame.grid(row=i, column=1, sticky="ew", padx=10, pady=10)
-            bar_frame.grid_propagate(False)
-
-            # Progress Bar
-            progress = ctk.CTkProgressBar(
-                bar_frame, height=20, corner_radius=10, progress_color="gray30"
-            )
-            progress.pack(fill="both", expand=True)
-            progress.set(0.5)  # Start at neutral (0.5)
-
-            # Value Label (Right)
-            val_lbl = ctk.CTkLabel(
-                main_frame, text="0.0", font=ctk.CTkFont(family="Consolas", size=14)
-            )
-            val_lbl.grid(row=i, column=2, sticky="w", padx=(10, 20), pady=10)
-
-            # Store references - single dictionary assignment
-            self._strength_bars[curr] = {"bar": progress, "lbl": val_lbl}
+        self.main_frame.grid(row=1, column=0, sticky="nsew", padx=15, pady=10)
+        
+        # Init Matplotlib Figure
+        self.fig, self.ax = plt.subplots(figsize=(9, 5), facecolor='#0B0E14')
+        self.fig.subplots_adjust(left=0.01, right=0.99, top=0.99, bottom=0.01)
+        
+        self.ax.set_facecolor('#0B0E14')
+        for spine in self.ax.spines.values():
+            spine.set_visible(False)
+        self.ax.set_xticks([])
+        self.ax.set_yticks([])
+        
+        # Initial empty state (avoids white borders)
+        self.ax.text(5, 3.5, "Warte auf Daten-Feed...", color="#4B5563", fontsize=14, ha='center', va='center', fontfamily='sans-serif')
+        self.ax.set_xlim(0, 10)
+        self.ax.set_ylim(0, 7)
+        
+        self.canvas = FigureCanvasTkAgg(self.fig, master=self.main_frame)
+        self.canvas.get_tk_widget().pack(fill="both", expand=True)
 
         # ── Footer / Info ────────────────────────────────────────
         info = ctk.CTkLabel(
@@ -125,10 +110,20 @@ class HeatmapView:
                 self._heatmap_running = False
         except RuntimeError as e:
             # Main thread is not in main loop - GUI is closing or closed
-            print(
-                f"{C.LGRAY}[{ts()}]{C.RESET} {C.YELLOW}🧩 [HEATMAP] GUI nicht verfügbar – Thread gestoppt: {e}{C.RESET}"
-            )
-            self._heatmap_running = False
+            # #region agent log
+            import json, time
+            with open("debug-0a8f4e.log", "a") as f:
+                f.write(json.dumps({"sessionId":"0a8f4e", "runId":"post-fix", "hypothesisId":"H4", "location":"heatmap_tab.py:_safe_after", "message":"RuntimeError in after", "data":{"error": str(e)}, "timestamp":int(time.time()*1000)}) + "\n")
+            # #endregion
+            if "main thread is not in main loop" in str(e):
+                # We started too early. mainloop() hasn't been called yet. 
+                # Do NOT stop the thread. Just ignore and it will retry next time.
+                pass
+            else:
+                print(
+                    f"{C.LGRAY}[{ts()}]{C.RESET} {C.YELLOW}🧩 [HEATMAP] GUI nicht verfügbar – Thread gestoppt: {e}{C.RESET}"
+                )
+                self._heatmap_running = False
         except Exception as e:
             print(
                 f"{C.LGRAY}[{ts()}]{C.RESET} {C.RED}❌ [HEATMAP] Fehler beim GUI-Update: {e}{C.RESET}"
@@ -200,9 +195,8 @@ class HeatmapView:
                             "AUD": round(random.uniform(-0.5, 0.5), 2),
                             "CAD": round(random.uniform(-0.5, 0.5), 2),
                         }
-                        max_abs = 0.5
                         self._safe_after(
-                            0, lambda s=demo_scores, m=max_abs: self._update_bars(s, m)
+                            0, lambda s=demo_scores: self._update_heatmap(s)
                         )
                         time.sleep(5)
                         continue
@@ -233,7 +227,7 @@ class HeatmapView:
 
                     valid_data = False
                     for symbol, base, quote in pairs:
-                        rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_H1, 0, 24)
+                        rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M15, 0, 96) # 24h of M15 = 96 candles
                         if rates is not None and len(rates) > 1:
                             valid_data = True
                             open_p = rates[0]["open"]
@@ -267,34 +261,24 @@ class HeatmapView:
                             "CAD": round(random.uniform(-0.3, 0.3), 2),
                         }
                         self._safe_after(
-                            0, lambda s=demo_scores: self._update_bars(s, 0.3)
+                            0, lambda s=demo_scores: self._update_heatmap(s)
                         )
                         time.sleep(5)
                         continue
 
                     # Normalize and update GUI
-                    max_abs = 0.001
                     final_scores = {}
-
                     for c in self._currencies:
                         if count[c] > 0:
                             score = strengths[c] / count[c]
                         else:
                             score = 0.0
                         final_scores[c] = score
-                        if abs(score) > max_abs:
-                            max_abs = abs(score)
-
-                    # Ensure we have a non-zero max_abs for normalization
-                    if max_abs < 0.001:
-                        max_abs = 0.001
 
                     # Update UI in main thread - using safe wrapper
                     self._safe_after(
                         0,
-                        lambda scores=final_scores.copy(), m=max_abs: self._update_bars(
-                            scores, m
-                        ),
+                        lambda scores=final_scores.copy(): self._update_heatmap(scores),
                     )
 
                 except Exception as e:
@@ -314,20 +298,102 @@ class HeatmapView:
         self._heatmap_thread = threading.Thread(target=loop, daemon=True)
         self._heatmap_thread.start()
 
-    def _update_bars(self, scores, max_abs):
-        for c, score in scores.items():
-            # Flatten to 0.0 - 1.0 (0.5 is neutral)
-            normalized = (score / max_abs) / 2.0 + 0.5
-            normalized = max(0.0, min(1.0, normalized))
+    def _update_heatmap(self, scores):
+        """
+        Updates the matplotlib canvas with the new scores using the Broadcast-Market-Panel look.
+        """
+        # Transform scores dict to list of dicts for the render function
+        data = [{"symbol": k, "change": v} for k, v in scores.items()]
+        
+        # Sort by change descending
+        data_sorted = sorted(data, key=lambda x: x["change"], reverse=True)
+        n_items = len(data_sorted)
+        
+        # Clear previous plot
+        self.ax.clear()
+        
+        # Plot styling
+        bg_color = '#0B0E14'
+        text_color = '#E0E0E0'
+        up_color = '#089981'   # TradingView Green
+        down_color = '#F23645' # TradingView Red
+        line_color = '#1A1D24'
+        
+        self.fig.patch.set_facecolor(bg_color)
+        self.ax.set_facecolor(bg_color)
+        for spine in self.ax.spines.values():
+            spine.set_visible(False)
+        self.ax.set_xticks([])
+        self.ax.set_yticks([])
+        
+        self.ax.set_xlim(0, 10)
+        self.ax.set_ylim(0, n_items)
+        
+        max_val = max(abs(d['change']) for d in data_sorted) if data_sorted else 1
+        if max_val == 0:
+            max_val = 1
+            
+        # Layout metrics
+        x_symbol = 0.5
+        x_change = 2.8
+        x_zero_line = 6.0
+        max_bar_width = 3.0
+        bar_height = 0.4
+        
+        # Add background highlighting for alternating rows
+        for i in range(n_items):
+            if i % 2 == 0:
+                y = n_items - i - 0.5
+                bg_rect = patches.Rectangle((0, y - 0.5), 10, 1, facecolor='#0D1117', edgecolor='none', zorder=0)
+                self.ax.add_patch(bg_rect)
+        
+        # Vertical zero line
+        self.ax.plot([x_zero_line, x_zero_line], [0, n_items], color='#1F2937', linewidth=1, zorder=1)
+        
+        for i, item in enumerate(data_sorted):
+            y = n_items - i - 0.5
+            
+            symbol = item['symbol']
+            change = item['change']
+            
+            is_up = change >= 0
+            color = up_color if is_up else down_color
+            sign = '+' if is_up else ''
+            arrow = '▲' if is_up else '▼'
+            
+            # 1. Symbol
+            self.ax.text(x_symbol, y, symbol, color=text_color, fontsize=15, fontweight='bold', ha='left', va='center', fontfamily='sans-serif')
+            
+            # 2. Change value (fixed width alignment)
+            change_text = f"{sign}{change:.2f}%"
+            self.ax.text(x_change, y, change_text, color=color, fontsize=15, fontweight='bold', ha='right', va='center', fontfamily='sans-serif')
+            
+            # 3. Bar
+            bar_len = (abs(change) / max_val) * max_bar_width
+            
+            # Background track for the bar (adds a professional widget feel)
+            bg_track = patches.Rectangle((x_zero_line - max_bar_width, y - bar_height/2), max_bar_width * 2, bar_height, 
+                                         facecolor='#161B22', edgecolor='none', zorder=1)
+            self.ax.add_patch(bg_track)
 
-            color = "#00FF66" if score > 0 else "#FF1744" if score < 0 else "gray50"
-
-            bar_dict = self._strength_bars[c]
-            bar_dict["bar"].set(normalized)
-            bar_dict["bar"].configure(progress_color=color)
-
-            sign = "+" if score > 0 else ""
-            bar_dict["lbl"].configure(text=f"{sign}{score:.2f}", text_color=color)
-
+            if is_up:
+                rect = patches.Rectangle((x_zero_line, y - bar_height/2), bar_len, bar_height, 
+                                         facecolor=color, edgecolor='none', zorder=2)
+                self.ax.text(x_zero_line + bar_len + 0.15, y, arrow, color=color, fontsize=11, ha='left', va='center')
+            else:
+                rect = patches.Rectangle((x_zero_line - bar_len, y - bar_height/2), bar_len, bar_height, 
+                                         facecolor=color, edgecolor='none', zorder=2)
+                self.ax.text(x_zero_line - bar_len - 0.15, y, arrow, color=color, fontsize=11, ha='right', va='center')
+                
+            self.ax.add_patch(rect)
+            
+            # 4. Separator line (subtle)
+            if i < n_items - 1:
+                self.ax.plot([0.1, 9.9], [y - 0.5, y - 0.5], color=line_color, linewidth=0.5, zorder=3)
+                
+        # Draw canvas
+        self.canvas.draw()
+        
+        # Update status
         now = datetime.now().strftime("%H:%M:%S")
-        self.status_lbl.configure(text=f"Live ({now})", text_color="#00FF66")
+        self.status_lbl.configure(text=f"Live ({now})", text_color=up_color)

@@ -56,7 +56,7 @@ def hex_to_rgb(h: str) -> tuple:
 
 def rgba_str(r, g, b, a: float, bg_color: tuple = (11, 14, 20)) -> str:
     """Gibt einen Tkinter-kompatiblen Hex-Farbstring mit Alpha-Annäherung zurück."""
-    bg = bg_color  # #0B0E14 – FinGPT Background Farbe (Deep Black)
+    bg = bg_color  # #09090B – FinGPT Background Farbe (Deep Black)
     r2 = int(bg[0] + (r - bg[0]) * a)
     g2 = int(bg[1] + (g - bg[1]) * a)
     b2 = int(bg[2] + (b - bg[2]) * a)
@@ -255,7 +255,7 @@ class SonarAnimation:
         anim.set_symbol("EURUSD")
     """
 
-    def __init__(self, master, width: int = 300, height: int = 140, fps: int = 60, bg_color: str = "#0B0E14"):
+    def __init__(self, master, width: int = 300, height: int = 140, fps: int = 60, bg_color: str = "#09090B"):
         self.master = master
         self.width = width
         self.height = height

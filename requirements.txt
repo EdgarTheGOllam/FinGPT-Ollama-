@@ -1,21 +1,20 @@
-# FinGPT Requirements
-# Generiert aus vollständigem Import-Scan aller Projektdateien
-# Stand: März 2026
-# Mindestanforderung: Python 3.9+
+# FinGPT Requirements - Updated Version
+# Generated from full Import Scan and Architectural Analysis
+# Stand: 4. März 2026
+# Minimum Requirement: Python 3.10+ (Recommended)
 
 # ==============================================================================
 # KERN-ABHÄNGIGKEITEN (Pflicht)
-# ==============================================================================
+# =============================================================================
 
-# HTTP-Anfragen (Ollama, OpenAI, APIs)
+# HTTP-Anfragen (Ollama, OpenAI, APIs, httpx für async)
 requests>=2.31.0
+httpx>=0.26.0
 
-# Modernes GUI-Framework
-customtkinter>=5.2.2
-
-# Datenverarbeitung
+# Datenverarbeitung & Numerik
 numpy>=1.24.0
 pandas>=2.0.0
+pandas_ta>=0.3.14b0  # Für technische Indikatoren
 
 # Visualisierung
 matplotlib>=3.7.0
@@ -27,72 +26,57 @@ psutil>=5.9.0
 # Bildverarbeitung (Icons, Assets)
 Pillow>=10.0.0
 
-# Streamlit Dashboard (News-Tab)
+# Umgebungsvariablen (.env Datei-Support)
+python-dotenv>=1.0.0
+
+# Web- & Dashboard-Komponenten
 streamlit>=1.28.0
 plotly>=5.18.0
 feedparser>=6.0.0
 
+# GUI Framework
+customtkinter>=5.2.2
+
 # Graphen und Netzwerkanalyse (Debate-Tab)
 networkx>=3.1
 
-# Umgebungsvariablen (.env Datei-Support)
-python-dotenv>=1.0.0
+# Broker-Schnittstelle (WICHTIG: Abhängig von MT5 Installation)
+# MetaTrader5 >= 5.0.45
+# Hinweis: Dies ist kritisch für mt5_broker.py und die meisten Trading-Module.
+# MetaTrader5
 
-# HTTP-Client (async, wird in trading_controller verwendet)
-httpx>=0.26.0
-
-# Technische Indikatoren (pandas-basiert, Fallback auf NumPy möglich)
-pandas_ta>=0.3.14b0
-
-# ==============================================================================
-# MACHINE LEARNING / REINFORCEMENT LEARNING
-# ==============================================================================
+# ================================================================================
+# MACHINE LEARNING / REINFORCEMENT LEARNING (GPU-Unterstützung empfohlen)
+# ================================================================================
 
 # PyTorch (RL-Training, GPU-Unterstützung)
 # Für CUDA-Support: pip install torch --index-url https://download.pytorch.org/whl/cu121
 torch>=2.1.0
+# Hinweis: Sicherstellen, dass die richtige PyTorch-Version für das System installiert ist.
 
-# ==============================================================================
-# OPTIONAL: MetaTrader5 Bridge (nur Windows + MT5 installiert)
-# ==============================================================================
-
-# MetaTrader5 Python API
-# Nur installieren wenn MT5 auf dem System vorhanden ist
-# MetaTrader5>=5.0.45
-
-# ==============================================================================
+# ================================================================================
 # OPTIONAL: Web-Bridge / API-Server
-# ==============================================================================
+# ================================================================================
 
 # Flask Web-Framework (für externe Bridge/API)
 # flask>=3.0.0
 # flask-socketio>=5.3.0
 
+# ================================================================================
+# OPTIONAL: MT5 Bridge (Nur falls MT5 nicht über MetaTrader5-Paket verfügbar ist)
+# ================================================================================
+
+# Hinweis: Die Abhängigkeit sollte primär durch das MetaTrader5-Paket abgedeckt werden.
+# Falls spezifische Funktionen des Bridges benötigt werden, müssen diese geprüft werden.
+
 # ==============================================================================
 # STDLIB (keine Installation nötig, zur Dokumentation)
 # ==============================================================================
-# tkinter       - GUI-Basis
-# json          - JSON-Verarbeitung
-# pathlib       - Pfadverwaltung
-# threading     - Multi-Threading
-# queue         - Thread-Queues
-# datetime      - Datum/Zeit
-# logging       - Protokollierung
-# sqlite3       - Lokale Datenbank
-# subprocess    - Prozesse starten
-# os, sys       - Betriebssystem
-# re            - Reguläre Ausdrücke
-# collections   - Datenstrukturen
-# dataclasses   - Datenklassen (Python 3.7+)
-# typing        - Typ-Hints
-# hashlib, hmac - Kryptographie
-# pickle        - Serialisierung
-# random        - Zufallszahlen
-# signal        - Signalverarbeitung
-# urllib        - URL-Verarbeitung
-# calendar      - Kalender
-# glob          - Dateimuster
-# atexit        - Exit-Handler
-# functools     - Funktionswerkzeuge
-# warnings      - Warnungen
-# traceback     - Fehler-Ausgabe
+# tkinter, json, pathlib, threading, queue, datetime, logging, sqlite3, subprocess, os, sys, re, collections, dataclasses, typing, hashlib, hmac, pickle, random, signal, urllib, calendar, glob, atexit, functools, warnings, traceback
+
+# ================================================================================
+# API SERVER (FastAPI, Uvicorn)
+# ================================================================================
+fastapi>=0.100.0
+uvicorn>=0.23.0
+pydantic>=2.0.0

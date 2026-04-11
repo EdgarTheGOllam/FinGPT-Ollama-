@@ -403,12 +403,12 @@ class ModernFinGPTGUI(ctk.CTk):
         # Responsive Fenstergröße - verwende verfügbare Bildschirmgröße
         self._setup_responsive_geometry()
 
-        self.attributes("-alpha", 0.0)  # Start transparent for fade-in animation
+        self.attributes("-alpha", 1.0)  # Make window visible immediately
 
         # Custom Apple-like Titlebar Setup
         self.overrideredirect(True)
         # Set main background color directly to TTG Deep Black
-        self.configure(fg_color="#0B0E14")
+        self.configure(fg_color="#09090B")
 
         # Hack to show window in Windows taskbar and apply native rounded corners
         self.after(200, self._set_appwindow)
@@ -420,11 +420,29 @@ class ModernFinGPTGUI(ctk.CTk):
         )
         self.main_container.pack(fill="both", expand=True, padx=0, pady=0)
 
-
+        # ── Aurora Hintergrund (als ERSTES Element in main_container laden -> Z-Index ganz unten) ──────
+        self._aurora_bg = None
+        if _AURORA_AVAILABLE:
+            try:
+                self._aurora_bg = attach_aurora_to_frame(
+                    self.main_container,
+                    config={
+                        "color0":    "5227FF",   # Violet
+                        "color1":    "7cff67",   # Light Green
+                        "color2":    "5227FF",   # Violet
+                        "amplitude": 1.0,
+                        "blend":     0.5,
+                        "speed":     0.8,
+                    },
+                )
+                fancy_print("Aurora Hintergrund aktiv", "SYSTEM")
+            except Exception as _aurora_err:
+                fancy_print(f"Aurora Hintergrund Fehler: {_aurora_err}", "WARN")
+        # ─────────────────────────────────────────────────────────────────────────────────────────────
 
         # Custom Titlebar inside main_container
         self.title_bar = ctk.CTkFrame(
-            self.main_container, height=40, corner_radius=0, fg_color="#1A1D24"
+            self.main_container, height=40, corner_radius=0, fg_color="#18181B"
         )
         self.title_bar.pack(fill="x", side="top")
         self.title_bar.bind("<B1-Motion>", self._move_window)
@@ -441,7 +459,7 @@ class ModernFinGPTGUI(ctk.CTk):
             height=12,
             corner_radius=6,
             text="",
-            fg_color="#FF1744",
+            fg_color="#EF4444",
             hover_color="#FF5252",
             command=self._close_window,
         )
@@ -453,7 +471,7 @@ class ModernFinGPTGUI(ctk.CTk):
             height=12,
             corner_radius=6,
             text="",
-            fg_color="#FFEA00",
+            fg_color="#F59E0B",
             hover_color="#FFFF00",
             command=self._minimize_window,
         )
@@ -465,7 +483,7 @@ class ModernFinGPTGUI(ctk.CTk):
             height=12,
             corner_radius=6,
             text="",
-            fg_color="#00FF66",
+            fg_color="#10B981",
             hover_color="#00E676",
             command=self._maximize_window,
         )
@@ -716,25 +734,7 @@ class ModernFinGPTGUI(ctk.CTk):
         self.content_frame.grid_rowconfigure(2, weight=1)
         self.content_frame.grid_columnconfigure(0, weight=1)
 
-        # ── Aurora Hintergrund (in main_container, hinter allen anderen Widgets) ──────
-        self._aurora_bg = None
-        if _AURORA_AVAILABLE:
-            try:
-                self._aurora_bg = attach_aurora_to_frame(
-                    self.main_container,
-                    config={
-                        "color0":    "5227FF",   # Violet
-                        "color1":    "00C2FF",   # Cyan-Blue
-                        "color2":    "5227FF",   # Violet
-                        "amplitude": 1.0,
-                        "blend":     0.5,
-                        "speed":     0.8,
-                    },
-                )
-                fancy_print("Aurora Hintergrund aktiv", "SYSTEM")
-            except Exception as _aurora_err:
-                fancy_print(f"Aurora Hintergrund Fehler: {_aurora_err}", "WARN")
-        # ─────────────────────────────────────────────────────────────────────
+        # Aurora wurde bereits in __init__ geladen, um ganz hinten im Z-Index zu liegen
 
         # 1. Header Frame - KOMPakt: pady=(15,15) → (5,5)
         self.header_frame = ctk.CTkFrame(self.content_frame, fg_color="transparent")
@@ -786,9 +786,9 @@ class ModernFinGPTGUI(ctk.CTk):
             self.header_frame,
             text="▶ Live",
             command=self.toggle_live_data,  # KOMPakt: "▶ Live Starten" → "▶ Live"
-            fg_color="#00FF66",
+            fg_color="#10B981",
             hover_color="#00C853",
-            text_color="#0B0E14",
+            text_color="#09090B",
             corner_radius=15,
             height=28,  # KOMPakt: height=28
             font=ctk.CTkFont(family="Inter", size=11, weight="bold"),
@@ -799,7 +799,7 @@ class ModernFinGPTGUI(ctk.CTk):
         self.status_dot = ctk.CTkLabel(
             self.header_frame,
             text="●",
-            text_color="#FF1744",
+            text_color="#EF4444",
             font=ctk.CTkFont(family="Inter", size=14),
         )  # KOMPakt: 20→14
         self.status_dot.pack(side="right")
@@ -838,13 +838,13 @@ class ModernFinGPTGUI(ctk.CTk):
         self.tabview = ctk.CTkTabview(
             self.content_frame,
             corner_radius=15,
-            segmented_button_fg_color="#0B0E14",
+            segmented_button_fg_color="#09090B",
             segmented_button_selected_color="#1E2228",
-            segmented_button_unselected_color="#0B0E14",
+            segmented_button_unselected_color="#09090B",
             segmented_button_selected_hover_color="#1E2228",
-            segmented_button_unselected_hover_color="#0B0E14",
+            segmented_button_unselected_hover_color="#09090B",
             text_color="#8B949E",
-            fg_color="#0B0E14",
+            fg_color="transparent",
         )
         self.tabview.grid(
             row=2, column=0, sticky="nsew", padx=30, pady=(0, 8)
@@ -853,7 +853,9 @@ class ModernFinGPTGUI(ctk.CTk):
         self.tabview.configure(border_width=0)
 
         for name in _TAB_NAMES:
-            self.tabview.add(name)
+            tab_frame = self.tabview.add(name)
+            # Make tabs transparent so the aurora background can shine through
+            tab_frame.configure(fg_color="transparent")
 
         # Hide the built-in segmented button completely after tabs are added
         self.tabview._segmented_button.grid_remove()
@@ -861,6 +863,13 @@ class ModernFinGPTGUI(ctk.CTk):
 
         # Tabs konfigurieren - Reihenfolge muss mit _TAB_NAMES übereinstimmen
         self.dashboard_view = DashboardView(self.tabview.tab("📊 Dashboard"), self)
+        
+        # #region agent log
+        import json, time
+        with open("debug-0a8f4e.log", "a") as f:
+            f.write(json.dumps({"sessionId":"0a8f4e", "runId":"post-fix", "hypothesisId":"H3", "location":"modern_fingpt_gui.py:tab_bg", "message":"Tab Dashboard fg_color", "data":{"fg_color": str(self.tabview.tab("📊 Dashboard").cget("fg_color"))}, "timestamp":int(time.time()*1000)}) + "\n")
+        # #endregion
+        
         self.charts_view = ChartsView(self.tabview.tab("📈 Charts"), self)
         self.debate_view = DebateView(self.tabview.tab("🎭 Debate"), self)
         self.backtest_view = BacktestView(self.tabview.tab("📉 Backtest"), self)
