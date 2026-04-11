@@ -104,6 +104,14 @@ class BacktestView:
                                          command=self._export_csv)
         self.export_btn.pack(side="left", padx=(0, 10))
 
+        # ── New: Open HTML Report ──
+        self.report_btn = ctk.CTkButton(ctrl, text="📄 Report Öffnen",
+                                         fg_color="transparent", border_width=1,
+                                         text_color="#8B949E", width=120,
+                                         state="disabled",
+                                         command=self._open_report)
+        self.report_btn.pack(side="left", padx=(0, 10))
+
         self.status_lbl = ctk.CTkLabel(ctrl, text="Bereit.", text_color="#8B949E",
                                         font=ctk.CTkFont(family="Inter", size=12))
         self.status_lbl.pack(side="left", padx=10)
@@ -192,6 +200,7 @@ class BacktestView:
     def _run_backtest_threaded(self):
         self.run_btn.configure(state="disabled", text="⏳ Läuft…")
         self.export_btn.configure(state="disabled")
+        self.report_btn.configure(state="disabled")
         self.status_lbl.configure(text="Lade Daten…", text_color="#E67E22")
         self.progress_bar.start()
         threading.Thread(target=self._run_backtest_bg, daemon=True).start()
@@ -227,207 +236,36 @@ class BacktestView:
         else:                 tf = mt5.TIMEFRAME_H1
 
         try:
-            if not mt5.initialize():
-                raise RuntimeError("MT5 nicht verbunden")
-
-            rates = mt5.copy_rates_from_pos(symbol, tf, 0, bars)
-            if rates is None or len(rates) < 50:
-                raise RuntimeError(f"Zu wenig Daten für {symbol}")
-
-            df = pd.DataFrame(rates)
-
-            # ── Signal Generation ──────────────────────────────────
-            signals = []   # list of (index, direction) where direction = 1 (buy) / -1 (sell)
-
-            if strategy == "SMC Fair Value Gap":
-                for i in range(2, len(df) - 1):
-                    c0, c1, c2 = df.iloc[i-2], df.iloc[i-1], df.iloc[i]
-                    if c0['high'] < c2['low'] and c1['close'] > c1['open']:
-                        gap = c2['low'] - c0['high']
-                        if gap > (c1['high'] - c1['low']) * 0.1:
-                            signals.append((i, 1))
-                    if c0['low'] > c2['high'] and c1['close'] < c1['open']:
-                        gap = c0['low'] - c2['high']
-                        if gap > (c1['high'] - c1['low']) * 0.1:
-                            signals.append((i, -1))
-
-            elif strategy == "SMC Order Block":
-                for i in range(2, len(df) - 1):
-                    c0, c1, c2 = df.iloc[i-2], df.iloc[i-1], df.iloc[i]
-                    if c0['close'] < c0['open'] and c1['close'] > c1['open'] and c2['close'] > c2['open']:
-                        if (c1['close']-c1['open']) > (c0['open']-c0['close']) * 1.5:
-                            signals.append((i, 1))
-                    if c0['close'] > c0['open'] and c1['close'] < c1['open'] and c2['close'] < c2['open']:
-                        if (c1['open']-c1['close']) > (c0['close']-c0['open']) * 1.5:
-                            signals.append((i, -1))
-
-            elif strategy == "Bullish Engulfing":
-                for i in range(1, len(df) - 1):
-                    prev, curr = df.iloc[i-1], df.iloc[i]
-                    if prev['close'] < prev['open'] and curr['close'] > curr['open']:
-                        if curr['close'] >= prev['open'] and curr['open'] <= prev['close']:
-                            signals.append((i, 1))
-                    if prev['close'] > prev['open'] and curr['close'] < curr['open']:
-                        if curr['close'] <= prev['open'] and curr['open'] >= prev['close']:
-                            signals.append((i, -1))
-
-            elif strategy == "EMA 20/50 Crossover":
-                df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
-                df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
-                for i in range(51, len(df) - 1):
-                    prev_cross = df['ema20'].iloc[i-1] - df['ema50'].iloc[i-1]
-                    curr_cross = df['ema20'].iloc[i]   - df['ema50'].iloc[i]
-                    if prev_cross <= 0 < curr_cross:
-                        signals.append((i, 1))
-                    elif prev_cross >= 0 > curr_cross:
-                        signals.append((i, -1))
-
-            elif strategy == "RSI Überkauft/Überverkauft":
-                # RSI-based reversal signals
-                delta = df['close'].diff()
-                gain = delta.clip(lower=0).rolling(14).mean()
-                loss = (-delta.clip(upper=0)).rolling(14).mean()
-                rs = gain / loss.replace(0, 1e-9)
-                df['rsi'] = 100 - (100 / (1 + rs))
-                for i in range(15, len(df) - 1):
-                    rsi_prev = df['rsi'].iloc[i-1]
-                    rsi_curr = df['rsi'].iloc[i]
-                    # Cross from oversold → buy
-                    if rsi_prev < 30 and rsi_curr >= 30:
-                        signals.append((i, 1))
-                    # Cross from overbought → sell
-                    elif rsi_prev > 70 and rsi_curr <= 70:
-                        signals.append((i, -1))
-
-            elif strategy == "Bollinger Band Squeeze":
-                # Volatility squeeze breakout
-                df['bb_mid']  = df['close'].rolling(20).mean()
-                bb_std        = df['close'].rolling(20).std()
-                df['bb_up']   = df['bb_mid'] + 2 * bb_std
-                df['bb_low']  = df['bb_mid'] - 2 * bb_std
-                df['bb_width'] = df['bb_up'] - df['bb_low']
-                df['bw_avg']  = df['bb_width'].rolling(50).mean()
-                for i in range(51, len(df) - 1):
-                    bw  = df['bb_width'].iloc[i]
-                    bwa = df['bw_avg'].iloc[i]
-                    c   = df['close'].iloc[i]
-                    mid = df['bb_mid'].iloc[i]
-                    # Squeeze detected (low volatility), then candle closes above mid → buy breakout
-                    if bw < bwa * 0.7 and c > mid:
-                        signals.append((i, 1))
-                    elif bw < bwa * 0.7 and c < mid:
-                        signals.append((i, -1))
-
-            # ── Trade Simulation (ATR-based SL / dynamic TP from RR) ──
-            ATR_PERIOD = 14
-            df['atr'] = (df['high'] - df['low']).rolling(ATR_PERIOD).mean()
-
-            # Pip size for the symbol (simplified)
-            sym_info = mt5.symbol_info(symbol)
-            pip_value_per_lot = 10.0  # approximate €/pip for standard lot, ~1€ for micro
-            pip_factor = 0.0001 if sym_info and sym_info.digits >= 4 else 0.01
-
-            trades   = []
-            balance  = start_capital
-            equity   = [balance]
-            last_exit = -1
-
-            for sig_idx, direction in signals:
-                if sig_idx <= last_exit:
-                    continue   # skip overlapping trades
-                if sig_idx + 1 >= len(df):
-                    continue
-
-                entry_bar = df.iloc[sig_idx + 1]
-                entry     = entry_bar['open']
-                atr       = df['atr'].iloc[sig_idx]
-                if atr == 0 or math.isnan(atr):
-                    continue
-
-                sl_dist_price = atr * atr_mult
-                tp_dist_price = sl_dist_price * rr_ratio
-                sl = entry - direction * sl_dist_price
-                tp = entry + direction * tp_dist_price
-
-                # Risk amount in euros
-                risk_amount = balance * risk_pct
-
-                # Scan forward for TP/SL hit
-                result_eur = None
-                exit_idx   = None
-                for j in range(sig_idx + 2, min(sig_idx + 100, len(df))):
-                    bar = df.iloc[j]
-                    if direction == 1:
-                        if bar['low']  <= sl:
-                            result_eur = -risk_amount
-                            exit_idx   = j; break
-                        if bar['high'] >= tp:
-                            result_eur = risk_amount * rr_ratio
-                            exit_idx   = j; break
-                    else:
-                        if bar['high'] >= sl:
-                            result_eur = -risk_amount
-                            exit_idx   = j; break
-                        if bar['low']  <= tp:
-                            result_eur = risk_amount * rr_ratio
-                            exit_idx   = j; break
-
-                if result_eur is None:
-                    continue   # trade still open at end of data
-
-                # Deduct spread cost (approximate)
-                spread_cost = spread_pips * pip_factor * pip_value_per_lot
-                result_eur -= spread_cost
-
-                last_exit = exit_idx
-                balance  += result_eur
-                equity.append(balance)
-
-                trades.append({
-                    "entry_time": str(pd.to_datetime(entry_bar['time'], unit='s'))[:16],
-                    "dir":   "BUY" if direction == 1 else "SELL",
-                    "entry": round(entry, 5),
-                    "result_eur": round(result_eur, 2),
-                    "balance": round(balance, 2),
-                    "win":   result_eur > 0,
-                })
-
-            # ── Calculate Stats ────────────────────────────────────
-            if not trades:
+            from trading.backtesting.engine import BacktestEngine
+            
+            engine = BacktestEngine()
+            result = engine.run(
+                symbol=symbol,
+                timeframe=tf,
+                bars=bars,
+                strategy=strategy,
+                start_capital=start_capital,
+                risk_pct=risk_pct,
+                rr_ratio=rr_ratio,
+                atr_mult=atr_mult,
+                spread_pips=spread_pips
+            )
+            
+            if not result or not result["trades"]:
                 self.app.after(0, lambda: (
                     self.status_lbl.configure(text="Keine Trades gefunden.", text_color="#E67E22"),
                     self.progress_bar.stop(),
                     self.run_btn.configure(state="normal", text="▶ Backtest Starten")
                 ))
                 return
-
-            total   = len(trades)
-            wins    = sum(1 for t in trades if t['win'])
-            winrate = wins / total * 100
-            gross_p = sum(t['result_eur'] for t in trades if t['result_eur'] > 0)
-            gross_l = abs(sum(t['result_eur'] for t in trades if t['result_eur'] < 0))
-            pf      = gross_p / gross_l if gross_l > 0 else float('inf')
-            pnl     = equity[-1] - start_capital
-
-            # Max drawdown in euros
-            peak, maxdd = start_capital, 0.0
-            for e in equity:
-                if e > peak: peak = e
-                dd = peak - e
-                if dd > maxdd: maxdd = dd
-
-            # Sharpe (simplified)
-            if len(equity) > 2:
-                rets  = [equity[i] - equity[i-1] for i in range(1, len(equity))]
-                mean_r = sum(rets) / len(rets)
-                std_r  = (sum((r - mean_r)**2 for r in rets) / len(rets)) ** 0.5
-                sharpe = (mean_r / std_r * (252 ** 0.5)) if std_r > 0 else 0.0
-            else:
-                sharpe = 0.0
-
-            self._last_trades = trades
+                
+            self._last_trades = result["trades"]
+            self._last_report_path = result.get("report_path")
+            
             self.app.after(0, lambda: self._bt_show_results(
-                trades, equity, total, winrate, pf, maxdd, pnl, sharpe, start_capital))
+                result["trades"], result["equity"], result["total"], 
+                result["winrate"], result["pf"], result["maxdd"], 
+                result["pnl"], result["sharpe"], start_capital))
 
         except Exception as e:
             err = str(e)
@@ -502,6 +340,15 @@ class BacktestView:
             ctk.CTkLabel(rc, text=str(t['entry']), font=ctk.CTkFont(family="Inter", size=9), text_color="#8B949E").grid(row=0, column=2, padx=6, sticky="w")
             ctk.CTkLabel(rc, text=f"{t['result_eur']:+.2f}€", font=ctk.CTkFont(family="Inter", size=10, weight="bold"), text_color=pip_color).grid(row=0, column=3, padx=6, sticky="w")
             ctk.CTkLabel(rc, text=f"{t['balance']:.2f}€", font=ctk.CTkFont(family="Inter", size=9), text_color="#8B949E").grid(row=0, column=4, padx=6, sticky="w")
+
+    def _open_report(self):
+        """Open the generated QuantStats HTML report in the default browser."""
+        if hasattr(self, '_last_report_path') and self._last_report_path:
+            import webbrowser
+            try:
+                webbrowser.open(f"file://{os.path.abspath(self._last_report_path)}")
+            except Exception as e:
+                self.status_lbl.configure(text=f"❌ Konnte Report nicht öffnen: {e}", text_color="#FF1744")
 
     def _export_csv(self):
         """Export last backtest trades to CSV."""

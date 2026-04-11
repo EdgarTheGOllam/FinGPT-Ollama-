@@ -7,6 +7,10 @@ from typing import Dict, Any
 
 @dataclass
 class AppConfig:
+    # Appearance & Theming
+    appearance_mode: str = "Dark"
+    color_theme: str = "green"
+
     # KI & Ollama
     ki_provider: str = "Ollama (Lokal)"
     ollama_url: str = "http://localhost:11434"

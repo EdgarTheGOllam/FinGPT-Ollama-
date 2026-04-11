@@ -118,6 +118,11 @@ class DashboardView:
 
         # Lade Metriken aus Konfiguration
         metric_configs = {m.key: m for m in config.metrics}
+        
+        mode = ctk.get_appearance_mode()
+        # Neue harmonische Farbtokens
+        card_bg     = DesignSystem.BG['card']       # '#13151A'
+        border_idle = DesignSystem.BORDERS['subtle'] # '#1E2128'
 
         # Erstelle Metric Cards mit Konfigurationswerten
         balance_cfg = metric_configs.get("balance")
@@ -215,10 +220,10 @@ class DashboardView:
             self.tab,
             height=ai_height,
             corner_radius=ds.get_radius("lg"),
-            fg_color="transparent",
-            active_bg_color="transparent",
-            border_width=2,
-            idle_border_color="#2A2D34",
+            fg_color=card_bg,            # Einheitlicher bg_card Hintergrund
+            active_bg_color=card_bg,
+            border_width=1,
+            idle_border_color=border_idle,  # Sehr subtiler Rahmen
         )
         self.app.ai_visualizer_frame.grid(
             row=2,
@@ -274,8 +279,10 @@ class DashboardView:
         self.app.goal_lbl.pack(anchor="e")
 
         # 2. AI Sonar Animation (Center — GSAP-inspiriert, 60 fps)
+        # Hintergrund explizit auf bg_card setzen: nahtlose Einbettung im Panel
+        sonar_bg = DesignSystem.BG['card']  # '#13151A'
         sonar_container = ctk.CTkFrame(
-            self.app.ai_visualizer_frame, fg_color="transparent"
+            self.app.ai_visualizer_frame, fg_color=sonar_bg
         )
         sonar_container.grid(
             row=0,
@@ -291,7 +298,8 @@ class DashboardView:
         sonar_height = 110 if self._window_width < ds.BREAKPOINTS["md"] else 145
 
         self.app.sonar_anim = SonarAnimation(
-            sonar_container, width=sonar_width, height=sonar_height, fps=60
+            sonar_container, width=sonar_width, height=sonar_height, fps=60,
+            bg_color=sonar_bg,  # BG-Sync: Animation passt zur Panel-Farbe
         )
         self.app.sonar_anim.canvas.grid(row=0, column=0)
 
@@ -357,9 +365,10 @@ class DashboardView:
         data_frame = HoverFadeFrame(
             self.tab,
             corner_radius=ds.get_radius("lg"),
-            active_bg_color="transparent",
-            border_width=2,
-            idle_border_color="#2A2D34",
+            fg_color=card_bg,          # Einheitlicher bg_card Hintergrund
+            active_bg_color=card_bg,
+            border_width=1,
+            idle_border_color=border_idle,
         )
         data_frame.grid(
             row=chart_row,
@@ -427,8 +436,9 @@ class DashboardView:
             )
             lbl.grid(row=0, column=i, sticky="w", padx=ds.get_spacing("md"))
 
+        # Subtile Trennlinie — passend zum neuen Designsystem
         ctk.CTkFrame(
-            self.app.scroll_list, height=1, fg_color=ds.get_color("neutral", "medium")
+            self.app.scroll_list, height=1, fg_color=border_idle  # '#1E2128'
         ).pack(fill="x", pady=(0, ds.get_spacing("sm")))
 
         # Live P&L Chart (Right Side) - nur wenn genug Platz
@@ -436,9 +446,10 @@ class DashboardView:
             self.app.chart_frame = HoverFadeFrame(
                 self.tab,
                 corner_radius=ds.get_radius("lg"),
-                active_bg_color="transparent",
-                border_width=2,
-                idle_border_color="#2A2D34",
+                fg_color=card_bg,
+                active_bg_color=card_bg,
+                border_width=1,
+                idle_border_color=border_idle,
             )
             self.app.chart_frame.grid(
                 row=chart_row,
@@ -477,7 +488,7 @@ class DashboardView:
 
             self.app.pnl_canvas = tk.Canvas(
                 self.app.chart_frame,
-                bg=ds.get_color("neutral", "darker"),
+                bg=DesignSystem.BG['card'],  # Einheitlich mit allen anderen Panels
                 highlightthickness=0,
             )
             self.app.pnl_canvas.grid(

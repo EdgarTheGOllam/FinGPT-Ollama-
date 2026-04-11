@@ -4,9 +4,16 @@ from gui.design_system import DesignSystem
 
 def hex_to_rgb(hex_color):
     """Konvertiert einen Hex-Farbstring in ein RGB-Tuple."""
-    if hex_color == "transparent":
-        # Fallback falls transparent übergeben wird - wir nehmen den TTG Deep Black als Base
-        return (9, 9, 11) # #09090B
+    if isinstance(hex_color, tuple):
+        # Wähle den korrekten Wert je nach Appearance Mode
+        mode = ctk.get_appearance_mode()
+        hex_color = hex_color[0] if mode == "Light" else hex_color[1]
+    
+    if hex_color == "transparent" or not isinstance(hex_color, str):
+        # Fallback falls transparent übergeben wird - nimm den Hintergrund-Basiswert
+        mode = ctk.get_appearance_mode()
+        return (255, 255, 255) if mode == "Light" else (9, 9, 11)
+
     hex_color = hex_color.lstrip('#')
     return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
 
@@ -39,10 +46,10 @@ class HoverFadeFrame(ctk.CTkFrame):
     _drag_start_y = 0
     
     def __init__(self, master, 
-                 active_bg_color="#18181B", 
+                 active_bg_color=None, 
                  active_border_color=None, 
-                 idle_border_color="#27272A", 
-                 fade_delay_ms=3000, 
+                 idle_border_color=None, 
+                 fade_delay_ms=6000,  # Längere Verzögerung für ruhigeres UI
                  draggable=True,
                  **kwargs):
         super().__init__(master, **kwargs)
@@ -51,20 +58,41 @@ class HoverFadeFrame(ctk.CTkFrame):
         self.fade_delay_ms = fade_delay_ms
         self.draggable = draggable
         
-        # Dashboard Background Color (Deep Black)
-        self.dashboard_bg = "#09090B" 
-        
         # Colors state
-        self.active_bg_color = active_bg_color
-        self.active_border_color = active_border_color or ds.get_color('primary')
-        self.idle_border_color = idle_border_color
+        mode = ctk.get_appearance_mode()
+        
+        # Dashboard Background Color (neue bg_deep Ebene)
+        self.dashboard_bg = ds.BG['deep'] if mode != 'Light' else '#F8F9FA'
+        # Card-Hintergrundfarbe (neue bg_card Ebene)
+        self.card_bg      = ds.BG['card'] if mode != 'Light' else '#FFFFFF'
+        # Elevated-Zustand für Hover
+        self.elevated_bg  = ds.BG['elevated'] if mode != 'Light' else '#F0F1F3'
+        
+        def resolve_color(color_val):
+            if isinstance(color_val, tuple):
+                return color_val[0] if mode == "Light" else color_val[1]
+            return color_val
+
+        # active_bg_color param was passed from MetricCard directly
+        # Fallback = bg_card, damit Karten nie transparent werden
+        resolved_active_bg = resolve_color(active_bg_color) if active_bg_color else self.card_bg
+        self.active_bg_color = resolved_active_bg if resolved_active_bg != 'transparent' else self.card_bg
+        
+        # Hover-Rahmen: subtile Aufhellung, kein grelles Blau
+        self.active_border_color = resolve_color(active_border_color) if active_border_color else ds.BORDERS['active']
+        
+        # Idle-Rahmen: sehr subtil, nur für Tiefenwirkung
+        idle_col = idle_border_color or ds.BORDERS['subtle']
+        if isinstance(idle_col, tuple):
+            idle_col = idle_col[0] if mode == "Light" else idle_col[1]
+        self.idle_border_color = idle_col
         
         # Momentane Zustände
         self._fade_timer = None
         self._is_hovered = False
         self._is_dragging = False
         
-        # Initialer, wacher Zustand
+        # Initialer Zustand: card_bg Hintergrund + subtiler Rahmen
         self.configure(fg_color=self.active_bg_color, border_color=self.idle_border_color)
         
         # Events binden (rekursiv für alle Kinder)
@@ -119,24 +147,30 @@ class HoverFadeFrame(ctk.CTkFrame):
         self.reset_fade_timer()
 
     def _fade_out(self):
-        """Sanfter Farb-Übergang zur Dashboard Hintergrundfarbe."""
+        """Sanfter, sehr subtiler Farbwechsel bei Inaktivität.
+        
+        Statt komplett in den Hintergrund zu verschwinden, wird nur
+        der Rahmen etwas abgedunkelt und der Hintergrund minimal dunkler.
+        Das hält alle Karten visuell zusammen.
+        """
         if self._is_hovered or self._is_dragging:
             return
             
-        # Wir blenden den Border in die Dashboard-HG-Farbe (unsichtbar)
-        steps = 15
-        duration = 300 # ms
+        # Nur den Border leicht zurückführen auf idle_border_color
+        # Hintergrundfarbe bleibt = card_bg (keine starke Verdunkelung mehr)
+        steps = 10
+        duration = 500  # etwas langsamer für Sanftheit
         delay_per_step = duration // steps
         
         current_border = self.cget("border_color")
         if isinstance(current_border, tuple):
             current_border = current_border[0]
-            
+        
         for i in range(1, steps + 1):
             factor = i / float(steps)
-            new_border = interpolate_color(current_border, self.dashboard_bg, factor)
-            # Optional: fg_color auch leicht abdunkeln
-            new_bg = interpolate_color(self.active_bg_color, self.dashboard_bg, factor * 0.8) # 80% an den HG anpassen
+            new_border = interpolate_color(current_border, self.idle_border_color, factor)
+            # Hintergrund: nur minimal abdunkeln (maximal 30%), bleibt bei card_bg
+            new_bg = interpolate_color(self.active_bg_color, self.card_bg, factor * 0.3)
             
             self.after(i * delay_per_step, lambda b=new_border, bg=new_bg: self._set_colors_if_not_hovered(bg, b))
             

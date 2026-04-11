@@ -110,11 +110,6 @@ class HeatmapView:
                 self._heatmap_running = False
         except RuntimeError as e:
             # Main thread is not in main loop - GUI is closing or closed
-            # #region agent log
-            import json, time
-            with open("debug-0a8f4e.log", "a") as f:
-                f.write(json.dumps({"sessionId":"0a8f4e", "runId":"post-fix", "hypothesisId":"H4", "location":"heatmap_tab.py:_safe_after", "message":"RuntimeError in after", "data":{"error": str(e)}, "timestamp":int(time.time()*1000)}) + "\n")
-            # #endregion
             if "main thread is not in main loop" in str(e):
                 # We started too early. mainloop() hasn't been called yet. 
                 # Do NOT stop the thread. Just ignore and it will retry next time.

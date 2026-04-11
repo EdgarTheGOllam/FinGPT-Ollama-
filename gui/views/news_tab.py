@@ -84,12 +84,25 @@ class NewsView:
         self._signal_label = None
         self._auto_refresh_btn = None
         
+        # Trading News Filter UI Elements
+        self.news_filter_switch = None
+        self.news_high = None
+        self.news_medium = None
+        self.news_low = None
+        self.news_before_slider = None
+        self.news_before_lbl = None
+        self.news_after_slider = None
+        self.news_after_lbl = None
+        
         # Metrics labels
         self._metric_bullish = None
         self._metric_bearish = None
         self._metric_neutral = None
         
         self.setup_ui()
+        
+        # Lade den Kalender initial beim Start (verzögert, um RuntimeError zu vermeiden)
+        self.app.after(1000, self._fetch_calendar_threaded)
 
     def setup_ui(self):
         self.tab.grid_columnconfigure(0, weight=1)
@@ -225,10 +238,79 @@ class NewsView:
         # ═══════════════ WIRTSCHAFTSKALENDER SUB-TAB ═════════════
         cal_tab = news_sub.tab("📅 Wirtschaftskalender")
         cal_tab.grid_columnconfigure(0, weight=1)
-        cal_tab.grid_rowconfigure(2, weight=1)
+        cal_tab.grid_rowconfigure(3, weight=1)
+
+        # --- TRADING NEWS FILTER ---
+        filter_frame = ctk.CTkFrame(cal_tab, fg_color=SEMANTIC['surface'], corner_radius=RADIUS['lg'])
+        filter_frame.grid(row=0, column=0, sticky="ew", padx=SPACING['lg'], pady=(SPACING['lg'], 0))
+        
+        # Header Row
+        hdr_row = ctk.CTkFrame(filter_frame, fg_color="transparent")
+        hdr_row.pack(fill="x", padx=SPACING['md'], pady=(SPACING['sm'], SPACING['xs']))
+        
+        ctk.CTkLabel(
+            hdr_row, 
+            text="🛡️ Trading News Filter", 
+            font=ds.get_font('md', 'bold')
+        ).pack(side="left")
+        
+        self.news_filter_switch = ctk.CTkSwitch(
+            hdr_row, 
+            text="Auto-Trading bei News pausieren", 
+            progress_color=COLORS['primary']['base'],
+            font=ds.get_font('sm', 'bold'),
+            command=self.app._trigger_autosave
+        )
+        self.news_filter_switch.pack(side="right")
+        
+        ctk.CTkFrame(filter_frame, height=1, fg_color=COLORS['neutral']['dark']).pack(fill="x", padx=SPACING['md'], pady=SPACING['xs'])
+        
+        # Body Row
+        body_row = ctk.CTkFrame(filter_frame, fg_color="transparent")
+        body_row.pack(fill="x", padx=SPACING['md'], pady=(SPACING['xs'], SPACING['sm']))
+        
+        # Wichtigkeit
+        imp_frame = ctk.CTkFrame(body_row, fg_color="transparent")
+        imp_frame.pack(side="left", padx=(0, SPACING['lg']))
+        ctk.CTkLabel(imp_frame, text="Relevanz filtern:", text_color=COLORS['neutral']['light'], font=ds.get_font('xs')).pack(anchor="w", pady=(0, 2))
+        
+        self.news_high = ctk.CTkCheckBox(imp_frame, text="Hoch", text_color=COLORS['danger']['base'], font=ds.get_font('sm', 'bold'), command=self.app._trigger_autosave)
+        self.news_high.pack(side="left", padx=(0, SPACING['sm']))
+        
+        self.news_medium = ctk.CTkCheckBox(imp_frame, text="Mittel", text_color=COLORS['warning']['base'], font=ds.get_font('sm', 'bold'), command=self.app._trigger_autosave)
+        self.news_medium.pack(side="left", padx=(0, SPACING['sm']))
+        
+        self.news_low = ctk.CTkCheckBox(imp_frame, text="Niedrig", text_color=COLORS['success']['base'], font=ds.get_font('sm', 'bold'), command=self.app._trigger_autosave)
+        self.news_low.pack(side="left", padx=(0, 0))
+
+        # Slider Before
+        bef_frame = ctk.CTkFrame(body_row, fg_color="transparent")
+        bef_frame.pack(side="left", padx=SPACING['lg'])
+        ctk.CTkLabel(bef_frame, text="Sperrzeit Vorher (Min):", text_color=COLORS['neutral']['light'], font=ds.get_font('xs')).pack(anchor="w", pady=(0, 2))
+        
+        slider_bef_row = ctk.CTkFrame(bef_frame, fg_color="transparent")
+        slider_bef_row.pack(fill="x")
+        self.news_before_slider = ctk.CTkSlider(slider_bef_row, from_=0, to=120, number_of_steps=24, width=120)
+        self.news_before_slider.pack(side="left")
+        self.news_before_lbl = ctk.CTkLabel(slider_bef_row, text="30 Min", font=ds.get_font('sm'))
+        self.news_before_lbl.pack(side="left", padx=(SPACING['sm'], 0))
+        self.news_before_slider.configure(command=lambda v: (self.news_before_lbl.configure(text=f"{int(v)} Min"), self.app._trigger_autosave()))
+
+        # Slider After
+        aft_frame = ctk.CTkFrame(body_row, fg_color="transparent")
+        aft_frame.pack(side="left", padx=SPACING['lg'])
+        ctk.CTkLabel(aft_frame, text="Sperrzeit Nachher (Min):", text_color=COLORS['neutral']['light'], font=ds.get_font('xs')).pack(anchor="w", pady=(0, 2))
+        
+        slider_aft_row = ctk.CTkFrame(aft_frame, fg_color="transparent")
+        slider_aft_row.pack(fill="x")
+        self.news_after_slider = ctk.CTkSlider(slider_aft_row, from_=0, to=120, number_of_steps=24, width=120)
+        self.news_after_slider.pack(side="left")
+        self.news_after_lbl = ctk.CTkLabel(slider_aft_row, text="15 Min", font=ds.get_font('sm'))
+        self.news_after_lbl.pack(side="left", padx=(SPACING['sm'], 0))
+        self.news_after_slider.configure(command=lambda v: (self.news_after_lbl.configure(text=f"{int(v)} Min"), self.app._trigger_autosave()))
 
         cal_ctrl = ctk.CTkFrame(cal_tab, fg_color="transparent")
-        cal_ctrl.grid(row=0, column=0, sticky="ew", padx=SPACING['lg'], pady=(SPACING['lg'], SPACING['md']))
+        cal_ctrl.grid(row=1, column=0, sticky="ew", padx=SPACING['lg'], pady=(SPACING['md'], SPACING['md']))
 
         ctk.CTkButton(
             cal_ctrl, 
@@ -278,7 +360,7 @@ class NewsView:
             corner_radius=RADIUS['lg'], 
             height=36
         )
-        cal_hdr.grid(row=1, column=0, sticky="ew", padx=SPACING['lg'], pady=(SPACING['xs'], 0))
+        cal_hdr.grid(row=2, column=0, sticky="ew", padx=SPACING['lg'], pady=(SPACING['xs'], 0))
         cal_hdr.grid_columnconfigure((0,1,2,3,4,5), weight=1, uniform="ch")
         cal_hdr.grid_propagate(False)
         
@@ -295,7 +377,7 @@ class NewsView:
             fg_color="transparent", 
             corner_radius=RADIUS['lg']
         )
-        self._cal_scroll.grid(row=2, column=0, sticky="nsew", padx=SPACING['lg'], pady=(0, SPACING['lg']))
+        self._cal_scroll.grid(row=3, column=0, sticky="nsew", padx=SPACING['lg'], pady=(0, SPACING['lg']))
         self._cal_scroll.grid_columnconfigure((0,1,2,3,4,5), weight=1, uniform="ch")
         ctk.CTkLabel(
             self._cal_scroll, 
@@ -757,19 +839,72 @@ Nachricht: {text[:300]}"""
         threading.Thread(target=self._fetch_calendar_bg, daemon=True).start()
 
     def _fetch_calendar_bg(self):
-        import time
-        time.sleep(0.5)
+        try:
+            url = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
+            headers = {'User-Agent': 'Mozilla/5.0'}
+            response = requests.get(url, headers=headers, timeout=10)
+            
+            if response.status_code == 200:
+                data = response.json()
+                self._cal_items = []
+                
+                # Parse JSON data
+                for item in data:
+                    # Time formatting
+                    try:
+                        # "2026-04-05T05:15:00-04:00" -> Parse and extract time
+                        dt = datetime.fromisoformat(item.get("date", "").replace("Z", "+00:00"))
+                        time_str = dt.strftime("%H:%M")
+                    except:
+                        time_str = ""
+                    
+                    impact = item.get("impact", "Low").upper()
+                    if impact not in ["HIGH", "MEDIUM", "LOW"]:
+                        impact = "LOW"
+                        
+                    forecast = item.get("forecast", "")
+                    previous = item.get("previous", "")
+                    forecast_str = f"{forecast} / {previous}" if forecast and previous else forecast or previous
+                    
+                    self._cal_items.append({
+                        "time": time_str,
+                        "currency": item.get("country", ""),
+                        "impact": impact,
+                        "event": item.get("title", ""),
+                        "forecast": forecast_str,
+                        "sentiment": "Neutral"
+                    })
+            else:
+                logging.error(f"Calendar API error: {response.status_code}")
+                # Log to terminal UI if possible
+                if hasattr(self, 'app') and hasattr(self.app, 'write_terminal'):
+                    self.app.write_terminal(f">> [API ERROR] Kalender: HTTP {response.status_code}. Lade Fallback-Daten...\n", "ERROR")
+                
+                # Fallback mock data if API fails (z.B. wegen Rate Limit 429)
+                self._cal_items = [
+                    {"time": "14:30", "currency": "USD", "impact": "HIGH", "event": "Non-Farm Payrolls", "forecast": "200K / 180K", "sentiment": "Bearish"},
+                    {"time": "14:30", "currency": "EUR", "impact": "HIGH", "event": "ECB Rate Decision", "forecast": "4.50%", "sentiment": "Neutral"},
+                    {"time": "10:00", "currency": "EUR", "impact": "MEDIUM", "event": "German GDP", "forecast": "0.2%", "sentiment": "Bullish"},
+                    {"time": "09:30", "currency": "GBP", "impact": "MEDIUM", "event": "Retail Sales", "forecast": "0.3%", "sentiment": "Neutral"},
+                    {"time": "13:30", "currency": "USD", "impact": "MEDIUM", "event": "CPI Data", "forecast": "3.2%", "sentiment": "Bearish"},
+                    {"time": "15:00", "currency": "USD", "impact": "LOW", "event": "Michigan Sentiment", "forecast": "72", "sentiment": "Neutral"}
+                ]
+        except Exception as e:
+            logging.error(f"Calendar fetch error: {e}")
+            if hasattr(self, 'app') and hasattr(self.app, 'write_terminal'):
+                self.app.write_terminal(f">> [API ERROR] Kalender Fetch: {e}. Lade Fallback-Daten...\n", "ERROR")
+            self._cal_items = [
+                {"time": "14:30", "currency": "USD", "impact": "HIGH", "event": "Non-Farm Payrolls", "forecast": "200K / 180K", "sentiment": "Bearish"},
+                {"time": "14:30", "currency": "EUR", "impact": "HIGH", "event": "ECB Rate Decision", "forecast": "4.50%", "sentiment": "Neutral"}
+            ]
+            
+        # Speichere die Kalenderdaten in der App-Instanz für den TradingController
+        self.app.calendar_events = self._cal_items
         
-        # Get economic events (mock data with real API structure)
-        self._cal_items = [
-            {"time": "14:30", "currency": "USD", "impact": "Hoch", "event": "Non-Farm Payrolls", "forecast": "200K / 180K", "sentiment": "Bearish"},
-            {"time": "14:30", "currency": "EUR", "impact": "Hoch", "event": "ECB Rate Decision", "forecast": "4.50%", "sentiment": "Neutral"},
-            {"time": "10:00", "currency": "EUR", "impact": "Mittel", "event": "German GDP", "forecast": "0.2%", "sentiment": "Bullish"},
-            {"time": "09:30", "currency": "GBP", "impact": "Mittel", "event": "Retail Sales", "forecast": "0.3%", "sentiment": "Neutral"},
-            {"time": "13:30", "currency": "USD", "impact": "Mittel", "event": "CPI Data", "forecast": "3.2%", "sentiment": "Bearish"},
-            {"time": "15:00", "currency": "USD", "impact": "Niedrig", "event": "Michigan Sentiment", "forecast": "72", "sentiment": "Neutral"}
-        ]
-        self.app.after(0, self._on_calendar_fetched)
+        try:
+            self.app.after(0, self._on_calendar_fetched)
+        except RuntimeError:
+            pass
 
     def _on_calendar_fetched(self):
         self._cal_status_lbl.configure(text="● Aktuell", text_color="#00FF66")
@@ -823,9 +958,13 @@ Nachricht: {text[:300]}"""
             
             imp = ev.get("impact", "LOW")
             icol = COLORS['danger']['base'] if imp == "HIGH" else COLORS['warning']['base'] if imp == "MEDIUM" else COLORS['success']['base']
+            
+            display_map = {"HIGH": "Hoch", "MEDIUM": "Mittel", "LOW": "Niedrig"}
+            display_imp = display_map.get(imp, imp)
+            
             ctk.CTkLabel(
                 row_f, 
-                text=imp, 
+                text=display_imp, 
                 text_color=icol, 
                 font=ds.get_font('sm', 'bold')
             ).grid(row=0, column=2, padx=SPACING['sm'])

@@ -86,6 +86,16 @@ class MultiAccountManager(ctk.CTkFrame):
         )
         switch_btn.pack(fill="x", pady=5)
         
+        sync_btn = ctk.CTkButton(
+            action_frame,
+            text="📥 Aktuelles MT5-Konto abrufen",
+            command=self._manual_sync_mt5,
+            height=35,
+            fg_color="#2E86AB",
+            hover_color="#1F618D"
+        )
+        sync_btn.pack(fill="x", pady=5)
+        
         delete_btn = ctk.CTkButton(
             action_frame,
             text="🗑️ Konto entfernen",
@@ -369,6 +379,7 @@ class MultiAccountManager(ctk.CTkFrame):
             except:
                 self.saved_accounts = []
                 
+        self._auto_detect_mt5_account()
         self._refresh_account_list()
         
     def _save_accounts_to_file(self):
@@ -498,21 +509,104 @@ class MultiAccountManager(ctk.CTkFrame):
             messagebox.showwarning("Warnung", "Bitte wähle zuerst ein Konto aus.")
             return
             
-        # Hier würde echte MT5-Verbindung hergestellt
-        # Für Demo: Zeige Platzhalter-Daten
+        try:
+            import MetaTrader5 as mt5
+            if mt5.initialize():
+                info = mt5.account_info()
+                if info and str(info.login) == str(self.selected_account.get("login")):
+                    # Reale MT5 Daten
+                    balance = info.balance
+                    equity = info.equity
+                    margin = info.margin
+                    free_margin = info.margin_free
+                    currency = info.currency
+                    
+                    self.balance_label.configure(text=f"Balance: {balance:,.2f} {currency}")
+                    self.equity_label.configure(text=f"Equity: {equity:,.2f} {currency}")
+                    self.margin_label.configure(text=f"Margin: {margin:,.2f} {currency}")
+                    self.freemargin_label.configure(text=f"Free Margin: {free_margin:,.2f} {currency}")
+                    
+                    self.connection_status_label.configure(
+                        text="Status: Verbunden (Live-Daten)", 
+                        text_color="#27AE60"
+                    )
+                    return
+                else:
+                    self.connection_status_label.configure(
+                        text="Status: In MT5 nicht aktiv", 
+                        text_color="#E74C3C"
+                    )
+            else:
+                self.connection_status_label.configure(
+                    text="Status: MT5 nicht erreichbar", 
+                    text_color="#E74C3C"
+                )
+        except Exception as e:
+            print(f"Fehler bei MT5-Datenabruf: {e}")
+            self.connection_status_label.configure(
+                text="Status: Fehler beim Abruf", 
+                text_color="#E74C3C"
+            )
+            
+        # Reset labels if not connected or different account
+        self.balance_label.configure(text="Balance: -")
+        self.equity_label.configure(text="Equity: -")
+        self.margin_label.configure(text="Margin: -")
+        self.freemargin_label.configure(text="Free Margin: -")
         
-        import random
-        
-        balance = 10000 + random.randint(-1000, 5000)
-        equity = balance + random.randint(-200, 500)
-        margin = balance * 0.1
-        free_margin = balance - margin
-        
-        self.balance_label.configure(text=f"Balance: {balance:,.2f} EUR")
-        self.equity_label.configure(text=f"Equity: {equity:,.2f} EUR")
-        self.margin_label.configure(text=f"Margin: {margin:,.2f} EUR")
-        self.freemargin_label.configure(text=f"Free Margin: {free_margin:,.2f} EUR")
-        
+    def _manual_sync_mt5(self):
+        """Führt eine manuelle Erkennung des aktuell in MT5 aktiven Kontos durch."""
+        added = self._auto_detect_mt5_account()
+        if added:
+            messagebox.showinfo("Konto gefunden", "Das aktuell in MT5 angemeldete Konto wurde automatisch hinzugefügt!")
+        else:
+            messagebox.showinfo("Sync abgeschlossen", "Das aktuell in MT5 angemeldete Konto ist bereits in der Liste oder MT5 ist nicht gestartet.")
+            
+    def _auto_detect_mt5_account(self):
+        """Erkennt automatisch das aktuell in MT5 angemeldete Konto und fügt es hinzu."""
+        try:
+            import MetaTrader5 as mt5
+            if not mt5.initialize():
+                return False
+                
+            info = mt5.account_info()
+            if not info:
+                return False
+                
+            login = str(info.login)
+            server = info.server
+            
+            exists = False
+            for acc in self.saved_accounts:
+                if str(acc.get("login")) == login and acc.get("server") == server:
+                    exists = True
+                    break
+                    
+            if not exists:
+                account_type = "Demo" if info.trade_mode == mt5.ACCOUNT_TRADE_MODE_DEMO else "Live"
+                name = getattr(info, "name", f"{account_type} - {login}")
+                if not name or name.strip() == "":
+                    name = f"{account_type} - {login}"
+                    
+                account = {
+                    "id": len(self.saved_accounts) + 1,
+                    "name": name,
+                    "server": server,
+                    "login": login,
+                    "type": account_type,
+                    "added_date": datetime.now().strftime("%Y-%m-%d"),
+                    "last_used": datetime.now().strftime("%Y-%m-%d")
+                }
+                
+                self.saved_accounts.append(account)
+                self._save_accounts_to_file()
+                self._refresh_account_list()
+                return True
+                
+        except Exception as e:
+            print(f"Fehler bei MT5-Auto-Erkennung: {e}")
+        return False
+
     def _switch_to_selected(self):
         """Wechselt zum ausgewählten Konto"""
         if not hasattr(self, 'selected_account') or not self.selected_account:

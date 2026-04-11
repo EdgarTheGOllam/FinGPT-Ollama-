@@ -104,13 +104,17 @@ class FinGPTLauncher:
 
     def start_splash(self):
         """Versucht, den visuellen Ladebildschirm zu öffnen."""
+        LogSystem.info("Initialisiere Startbildschirm (Splash Screen)...")
         if SplashScreen is not None and TKINTER_AVAILABLE:
             try:
                 self.splash = SplashScreen()
+                LogSystem.success("Splash Screen erfolgreich gestartet.")
             except Exception as e:
                 LogSystem.warning(
                     f"Konnte grafischen Ladebildschirm nicht erstellen: {e}"
                 )
+        else:
+            LogSystem.info("Splash Screen übersprungen (nicht verfügbar oder fehlerhaft).")
 
     def destroy_splash(self):
         """Sicheres Zerstören des Splash-Widgets, z. B. bei Abstürzen."""
@@ -138,7 +142,12 @@ class FinGPTLauncher:
         Prüft Versionen & Standard-Bibliotheken, bevor Custom-Code geladen wird.
         Python 3.7+ ist zwingend nötig für moderne Asynchronität und Type-Hints.
         """
+        self._update_progress(1, "Systemprüfung...", "Initialisiere Boot-Sequenz", 5)
+        LogSystem.info(f"Betriebssystem: {sys.platform}")
+        LogSystem.info(f"Python Executable: {sys.executable}")
+        
         self._update_progress(1, "Systemprüfung...", "Überprüfe Python-Version", 10)
+        LogSystem.info(f"Gefundene Python-Version: {sys.version.split()[0]}")
 
         if sys.version_info < (3, 7):
             msg = f"Veraltete Python-Version erkannt: {sys.version}. Bitte nutze Python 3.7+"
@@ -146,18 +155,50 @@ class FinGPTLauncher:
                 self.splash.show_error(msg)
             LogSystem.error(msg)
             return False
+            
+        LogSystem.success("Python-Version ist kompatibel (3.7+).")
 
-        self._update_progress(2, "Abhängigkeiten...", "Lade Core-Module", 30)
+        self._update_progress(2, "Abhängigkeiten...", "Lade Core-Module", 20)
+        
+        LogSystem.info("Prüfe 'tkinter' (Standard GUI Bibliothek)...")
         try:
             import tkinter as tk
-            import customtkinter
-            import requests  # type: ignore
+            LogSystem.success(f"tkinter erfolgreich geladen (Tcl/Tk Version: {tk.TkVersion}).")
         except ImportError as e:
-            msg = f"Fehlende Abhängigkeit: {e}. Führe 'pip install -r requirements.txt' aus."
+            msg = f"Fehlende Abhängigkeit (tkinter): {e}. Bitte Python mit tk-Support installieren."
             if self.splash:
                 self.splash.show_error(msg)
             LogSystem.error(msg)
             return False
+
+        LogSystem.info("Prüfe 'customtkinter' (Modern UI Framework)...")
+        try:
+            import customtkinter
+            LogSystem.success(f"customtkinter erfolgreich geladen (v{customtkinter.__version__}).")
+        except ImportError as e:
+            msg = f"Fehlende Abhängigkeit: customtkinter. Führe 'pip install -r requirements.txt' aus."
+            if self.splash:
+                self.splash.show_error(msg)
+            LogSystem.error(msg)
+            return False
+
+        LogSystem.info("Prüfe 'requests' (HTTP Client)...")
+        try:
+            import requests  # type: ignore
+            LogSystem.success(f"requests erfolgreich geladen (v{requests.__version__}).")
+        except ImportError as e:
+            msg = f"Fehlende Abhängigkeit: requests. Führe 'pip install -r requirements.txt' aus."
+            if self.splash:
+                self.splash.show_error(msg)
+            LogSystem.error(msg)
+            return False
+
+        self._update_progress(2, "Abhängigkeiten...", "Prüfe Projektstruktur", 40)
+        for d in ["core", "gui", "storage", "trading"]:
+            if os.path.exists(d):
+                LogSystem.success(f"Verzeichnis './{d}' gefunden.")
+            else:
+                LogSystem.warning(f"Verzeichnis './{d}' fehlt möglicherweise!")
 
         self._update_progress(2, "Abhängigkeiten...", "Fertig! Alles gefunden.", 50)
         return True
@@ -169,15 +210,24 @@ class FinGPTLauncher:
         nur die reinen Trading-Metriken (ohne LLM) anschauen möchten.
         """
         self._update_progress(3, "KI Backend...", "Verbindung zu Ollama testen", 60)
+        LogSystem.info("Sende Ping an lokales Ollama Backend (http://127.0.0.1:11434)...")
         try:
-            # Hier kann ein tatsächlicher Ping zu http://127.0.0.1:11434/ eingebaut werden
-            # z.B. requests.get('http://127.0.0.1:11434/', timeout=3)
-            LogSystem.success("Ollama Integration vorbereitet.")
-            return True
+            import requests  # type: ignore
+            try:
+                res = requests.get('http://127.0.0.1:11434/', timeout=2)
+                if res.status_code == 200:
+                    LogSystem.success("Ollama antwortet (HTTP 200). Integration vorbereitet.")
+                else:
+                    LogSystem.warning(f"Ollama antwortet mit unerwartetem Statuscode: {res.status_code}")
+                return True
+            except requests.exceptions.Timeout:
+                LogSystem.warning("Ollama Backend Timeout (nicht gestartet). LLM-Funktionen eingeschränkt.")
+                return False
+            except requests.exceptions.ConnectionError:
+                LogSystem.warning("Ollama Backend nicht erreichbar (Verbindung abgelehnt).")
+                return False
         except Exception as e:
-            LogSystem.warning(
-                "Ollama Backend nicht erreicht. LLM-Funktionen werden eingeschränkt."
-            )
+            LogSystem.warning(f"Fehler bei Ollama-Verbindungsprüfung: {e}")
             return False
 
     def load_gui_engine(self) -> bool:
@@ -186,20 +236,24 @@ class FinGPTLauncher:
         deshalb geschieht er hier erst spät und in einem isolierten Try/Except-Block.
         """
         self._update_progress(4, "GUI Engine...", "Lade ModernFinGPTGUI", 80)
+        LogSystem.info("Importiere 'gui.modern_fingpt_gui' (dies kann einen Moment dauern)...")
         try:
             from gui.modern_fingpt_gui import ModernFinGPTGUI
-
+            LogSystem.success("ModernFinGPTGUI Klasse erfolgreich geladen.")
+            
+            LogSystem.info("Instanziiere GUI-Hauptfenster...")
             self.gui_main_func = lambda: ModernFinGPTGUI().mainloop()
             self._update_progress(4, "GUI Engine...", "Moderne GUI importiert", 100)
             return True
         except Exception as e:
-            LogSystem.error(f"Moderne GUI konnte nicht geladen werden.")
+            LogSystem.error(f"Moderne GUI konnte nicht geladen werden: {e}")
             traceback.print_exc()
 
             # Versuche Fallback auf ältere GUI
             if self.splash:
                 self.splash.update_progress(4, "Fallback...", "Lade klassische GUI", 90)
 
+            LogSystem.warning("Versuche Fallback auf 'gui.fingpt_config_gui'...")
             try:
                 from gui.fingpt_config_gui import main as fallback_gui_main
 

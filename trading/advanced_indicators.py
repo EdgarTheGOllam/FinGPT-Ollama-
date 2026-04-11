@@ -683,6 +683,91 @@ class AdvancedIndicators:
             self.log("ERROR", f"ADX Fehler: {e}")
             return None
 
+    def get_higher_timeframes(self, timeframe):
+        """Ermittelt die zwei nächsthöheren Timeframes für die MTF-Analyse"""
+        mapping = {
+            mt5.TIMEFRAME_M1: (mt5.TIMEFRAME_M5, mt5.TIMEFRAME_M15),
+            mt5.TIMEFRAME_M5: (mt5.TIMEFRAME_M15, mt5.TIMEFRAME_H1),
+            mt5.TIMEFRAME_M15: (mt5.TIMEFRAME_H1, mt5.TIMEFRAME_H4),
+            mt5.TIMEFRAME_M30: (mt5.TIMEFRAME_H1, mt5.TIMEFRAME_H4),
+            mt5.TIMEFRAME_H1: (mt5.TIMEFRAME_H4, mt5.TIMEFRAME_D1),
+            mt5.TIMEFRAME_H4: (mt5.TIMEFRAME_D1, mt5.TIMEFRAME_W1),
+            mt5.TIMEFRAME_D1: (mt5.TIMEFRAME_W1, mt5.TIMEFRAME_MN1)
+        }
+        return mapping.get(timeframe, (mt5.TIMEFRAME_H1, mt5.TIMEFRAME_H4))
+
+    def calculate_mtf_trend(self, symbol, base_timeframe):
+        """
+        Analysiert den Trend über mehrere Timeframes (Multi-Timeframe Analysis).
+        Gibt zurück, ob die übergeordneten Timeframes (HTF) mit dem Basis-Timeframe übereinstimmen.
+        Nutzt dafür EMA 20/50 Crossover.
+        """
+        try:
+            htf1, htf2 = self.get_higher_timeframes(base_timeframe)
+            
+            def get_trend_for_tf(tf):
+                df = self.get_market_data(symbol, tf, 60)
+                if df is None or len(df) < 50:
+                    return "NEUTRAL"
+                close = df["close"]
+                ema20 = close.rolling(window=20).mean().iloc[-1]
+                ema50 = close.rolling(window=50).mean().iloc[-1]
+                current_price = close.iloc[-1]
+                
+                if current_price > ema20 and ema20 > ema50:
+                    return "BULLISH"
+                elif current_price < ema20 and ema20 < ema50:
+                    return "BEARISH"
+                return "NEUTRAL"
+
+            base_trend = get_trend_for_tf(base_timeframe)
+            htf1_trend = get_trend_for_tf(htf1)
+            htf2_trend = get_trend_for_tf(htf2)
+            
+            # Alignment check
+            alignment = "MIXED"
+            signal = "NEUTRAL"
+            
+            if base_trend == htf1_trend == htf2_trend and base_trend != "NEUTRAL":
+                if base_trend == "BULLISH":
+                    alignment = "FULL_BULLISH_ALIGNMENT"
+                    signal = "STRONG_BUY"
+                elif base_trend == "BEARISH":
+                    alignment = "FULL_BEARISH_ALIGNMENT"
+                    signal = "STRONG_SELL"
+            elif base_trend == htf1_trend and htf1_trend != "NEUTRAL":
+                if base_trend == "BULLISH":
+                    alignment = "PARTIAL_BULLISH_ALIGNMENT"
+                    signal = "BUY"
+                elif base_trend == "BEARISH":
+                    alignment = "PARTIAL_BEARISH_ALIGNMENT"
+                    signal = "SELL"
+            
+            # TF Namen ermitteln für lesbaren Output
+            tf_names = {
+                mt5.TIMEFRAME_M1: "M1", mt5.TIMEFRAME_M5: "M5", mt5.TIMEFRAME_M15: "M15",
+                mt5.TIMEFRAME_M30: "M30", mt5.TIMEFRAME_H1: "H1", mt5.TIMEFRAME_H4: "H4",
+                mt5.TIMEFRAME_D1: "D1", mt5.TIMEFRAME_W1: "W1", mt5.TIMEFRAME_MN1: "MN1"
+            }
+            b_name = tf_names.get(base_timeframe, "BASE")
+            h1_name = tf_names.get(htf1, "HTF1")
+            h2_name = tf_names.get(htf2, "HTF2")
+
+            description = f"[{b_name}={base_trend} | {h1_name}={htf1_trend} | {h2_name}={htf2_trend}]"
+
+            return {
+                "base_trend": base_trend,
+                "htf1_trend": htf1_trend,
+                "htf2_trend": htf2_trend,
+                "alignment": alignment,
+                "signal": signal,
+                "description": description
+            }
+            
+        except Exception as e:
+            self.log("ERROR", f"MTF Trend Fehler: {e}")
+            return None
+
     def get_comprehensive_analysis(self, symbol, timeframe=mt5.TIMEFRAME_M15):
         """
         Führt eine umfassende Analyse mit allen erweiterten Indikatoren durch
@@ -727,6 +812,11 @@ class AdvancedIndicators:
             if adx:
                 results["adx"] = adx
 
+            # MTF Trend
+            mtf = self.calculate_mtf_trend(symbol, timeframe)
+            if mtf:
+                results["mtf_trend"] = mtf
+
             return results
 
         except Exception as e:
@@ -750,6 +840,7 @@ class AdvancedIndicators:
                 "vwap": 1.2,
                 "mfi": 1.0,
                 "adx": 1.8,  # Höheres Gewicht für Trend-Stärke
+                "mtf_trend": 2.5, # Sehr hohes Gewicht für Multi-Timeframe Alignment
             }
 
             buy_score = 0
@@ -913,6 +1004,12 @@ class AdvancedIndicators:
                 )
                 print(f"   DI+: {adx['di_plus']} | DI-: {adx['di_minus']}")
 
+            # MTF Trend
+            if "mtf_trend" in analysis_results:
+                mtf = analysis_results["mtf_trend"]
+                icon = "🔥" if "FULL" in mtf["alignment"] else ("🟢" if mtf["signal"] in ["BUY", "STRONG_BUY"] else "🔴" if mtf["signal"] in ["SELL", "STRONG_SELL"] else "🟡")
+                print(f"{icon} MTF Trend Alignment: {mtf['alignment']} - {mtf['description']}")
+
             print(f"{'=' * 60}")
 
             # Konsens
@@ -1042,6 +1139,7 @@ Berücksichtige folgende erweiterte Indikatoren:
 - VWAP (Volumen-gewichteter Preis)
 - Money Flow Index (MFI) (Volumen + Preis)
 - Average Directional Index (ADX) (Trend-Stärke)
+- MTF Trend Alignment (Multi-Timeframe Trend Bestätigung)
 
 Analysiere:
 1. Momentum-Indikatoren (Williams %R, CCI, AO)
@@ -1119,6 +1217,11 @@ Antworte präzise und konkret auf Deutsch.
                         f"  Trend Strength: {data['trend_strength']}, Direction: {data['trend_direction']}"
                     )
 
+                elif indicator == "mtf_trend":
+                    formatted_lines.append(
+                        f"MTF Trend Alignment: {data['alignment']} ({data['signal']}) - {data['description']}"
+                    )
+
             return "\n".join(formatted_lines)
 
         except Exception as e:
@@ -1185,6 +1288,8 @@ Antworte präzise und konkret auf Deutsch.
                             signal_weights[indicator.upper()] = 2.0
                         elif indicator == "adx":
                             signal_weights[indicator.upper()] = 1.8
+                        elif indicator == "mtf_trend":
+                            signal_weights[indicator.upper()] = 2.5
                         else:
                             signal_weights[indicator.upper()] = 1.0
 

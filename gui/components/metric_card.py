@@ -82,9 +82,9 @@ class MetricCard(HoverFadeFrame):
         "neutral": "#71717A",   # Zinc-500
     }
 
-    # Trading-UI Badge-Farben
-    BADGE_POSITIVE = "#10B981"  # Emerald Grün
-    BADGE_NEGATIVE = "#EF4444"  # Rot
+    # Trading-UI Badge-Farben (gedämpft für harmonisches Dark-Theme)
+    BADGE_POSITIVE = "#0EA572"  # Gedämpftes Emerald
+    BADGE_NEGATIVE = "#E84040"  # Gedämpftes Rot
 
     def __init__(
         self,
@@ -120,18 +120,25 @@ class MetricCard(HoverFadeFrame):
 
         radius = ds.get_radius("md")
 
+        # Neue einheitliche Farben aus dem Designsystem
+        card_bg     = ds.BG['card']           # '#13151A' — einheitlich für alle Cards
+        border_idle = ds.BORDERS['subtle']    # '#1E2128' — sehr subtil
+        border_hover= ds.BORDERS['active']    # '#353A47' — sanfte Aufhellung beim Hover
+
         # Standard-Parameter
         default_kwargs = {
             "corner_radius": radius,
             "border_width": 1,
-            "border_color": "#27272A",
+            "border_color": border_idle,
         }
         config = {**default_kwargs, **kwargs}
 
-        # Hauptframe Container init - Modern Trading-UI Style
+        # Hauptframe: einheitlicher bg_card Hintergrund, sanfter Hover-Rahmen
         super().__init__(
             master,
-            fg_color="#18181B",  # Dunklerer Hintergrund für moderneren Look (Zinc-900)
+            active_bg_color=card_bg,
+            idle_border_color=border_idle,
+            active_border_color=border_hover,
             draggable=True,
             **config,
         )
@@ -165,7 +172,7 @@ class MetricCard(HoverFadeFrame):
             self._value_row,
             text=value,
             font=value_font,
-            text_color="#FFFFFF",
+            text_color=("#09090B", "#FFFFFF"),
         )
         self.value_label.pack(side="left")
 
@@ -205,7 +212,7 @@ class MetricCard(HoverFadeFrame):
 
             # Canvas für rotierenden Pfeil
             arrow_canvas = tk.Canvas(
-                trend_inner, width=14, height=14, highlightthickness=0, bg="transparent"
+                trend_inner, width=14, height=14, highlightthickness=0, bg=badge_color
             )
             arrow_canvas.pack(side="left", padx=(0, 2))
 
@@ -257,19 +264,19 @@ class MetricCard(HoverFadeFrame):
             self._title_row,
             text=title,
             font=title_font,
-            text_color="#A1A1AA",  # Gedämpftes Grau (Zinc-400)
+            text_color=ds.SEMANTIC.get('neutral', ('#71717A', '#A1A1AA')),
         )
         self.title_label.pack(side="left")
 
-        # Spotlight-Effekt: Radialer Gradient folgt dem Mauszeiger (temporär deaktiviert)
-        # self.spotlight = SpotlightOverlay(
-        #     self,
-        #     spotlight_color="#60A5FA",  # Blauer Spotlight
-        #     spotlight_radius=120,
-        #     intensity=0.12,
-        #     border_glow_color="#4B5563",
-        #     border_glow_intensity=0.3,
-        # )
+        # Spotlight-Effekt: Radialer Gradient folgt dem Mauszeiger
+        self.spotlight = SpotlightOverlay(
+             self,
+             spotlight_color="#60A5FA",  # Blauer Spotlight
+             spotlight_radius=120,
+             intensity=0.12,
+             border_glow_color="#4B5563",
+             border_glow_intensity=0.3,
+        )
 
         # Event-Bindings für Hover-Animation auf allen relevanten Widgets werden nun im HoverFadeFrame geregelt
 
@@ -316,8 +323,9 @@ class MetricCard(HoverFadeFrame):
         start_time = None
         original_format = target_value
 
-        def animate(timestamp):
+        def animate():
             nonlocal start_time
+            timestamp = time.time() * 1000
             if start_time is None:
                 start_time = timestamp
 
@@ -331,11 +339,12 @@ class MetricCard(HoverFadeFrame):
             )
 
             if progress < 1.0:
-                self.after(16, lambda: animate(self.winfo_fpixels(".")))
+                self.after(16, animate)
             else:
                 self.value_label.configure(text=target_value)
 
-        self.after(16, lambda: animate(self.winfo_fpixels(".")))
+        import time
+        self.after(16, animate)
 
     def _animate_value_update(self, new_value: str):
         """Animiert Value-Update von altem zu neuem Wert."""
@@ -351,8 +360,9 @@ class MetricCard(HoverFadeFrame):
         start_time = None
         original_format = new_value
 
-        def animate(timestamp):
+        def animate():
             nonlocal start_time
+            timestamp = time.time() * 1000
             if start_time is None:
                 start_time = timestamp
 
@@ -366,11 +376,12 @@ class MetricCard(HoverFadeFrame):
             )
 
             if progress < 1.0:
-                self.after(16, lambda: animate(self.winfo_fpixels(".")))
+                self.after(16, animate)
             else:
                 self.value_label.configure(text=new_value)
 
-        self.after(16, lambda: animate(self.winfo_fpixels(".")))
+        import time
+        self.after(16, animate)
 
     def _animate_arrow_rotation(self, target_angle: float, duration_ms: float = 500):
         """Animiert die Rotation des Pfeils."""
@@ -380,8 +391,9 @@ class MetricCard(HoverFadeFrame):
         start_angle = self._current_angle
         start_time = None
 
-        def animate(timestamp):
+        def animate():
             nonlocal start_time, start_angle
+            timestamp = time.time() * 1000
             if start_time is None:
                 start_time = timestamp
 
@@ -393,11 +405,12 @@ class MetricCard(HoverFadeFrame):
             self._rotate_arrow(angle)
 
             if progress < 1.0:
-                self.after(16, lambda: animate(self.winfo_fpixels(".")))
+                self.after(16, animate)
             else:
                 self._current_angle = target_angle
 
-        self.after(16, lambda: animate(self.winfo_fpixels(".")))
+        import time
+        self.after(16, animate)
 
     def _rotate_arrow(self, angle: float):
         """Rotiert den Pfeil um den gegebenen Winkel."""
@@ -432,8 +445,9 @@ class MetricCard(HoverFadeFrame):
         start_color = self.trend_badge.cget("fg_color") or "#8B949E"
         start_time = None
 
-        def animate(timestamp):
+        def animate():
             nonlocal start_time
+            timestamp = time.time() * 1000
             if start_time is None:
                 start_time = timestamp
 
@@ -445,9 +459,10 @@ class MetricCard(HoverFadeFrame):
             self.trend_badge.configure(fg_color=new_color)
 
             if progress < 1.0:
-                self.after(16, lambda: animate(self.winfo_fpixels(".")))
+                self.after(16, animate)
 
-        self.after(16, lambda: animate(self.winfo_fpixels(".")))
+        import time
+        self.after(16, animate)
 
     # ─────────────────────────────────────────────────────────
     # Public Methods
@@ -539,7 +554,7 @@ class MetricCard(HoverFadeFrame):
         Args:
             duration_ms: Dauer der Hervorhebung in Millisekunden
         """
-        original_color = "#FFFFFF"
+        original_color = ("#09090B", "#FFFFFF")
         flash_color = "#38BDF8"  # Premium Light Blue
 
         # Leucht-Effekt auf dem Wertetext

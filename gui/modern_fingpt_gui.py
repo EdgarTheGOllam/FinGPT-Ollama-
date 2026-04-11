@@ -407,8 +407,8 @@ class ModernFinGPTGUI(ctk.CTk):
 
         # Custom Apple-like Titlebar Setup
         self.overrideredirect(True)
-        # Set main background color directly to TTG Deep Black
-        self.configure(fg_color="#09090B")
+        # Set main background color directly zu neuem bg_deep
+        self.configure(fg_color="#0C0D0F")
 
         # Hack to show window in Windows taskbar and apply native rounded corners
         self.after(200, self._set_appwindow)
@@ -442,7 +442,7 @@ class ModernFinGPTGUI(ctk.CTk):
 
         # Custom Titlebar inside main_container
         self.title_bar = ctk.CTkFrame(
-            self.main_container, height=40, corner_radius=0, fg_color="#18181B"
+            self.main_container, height=40, corner_radius=0, fg_color="#13151A"  # bg_card
         )
         self.title_bar.pack(fill="x", side="top")
         self.title_bar.bind("<B1-Motion>", self._move_window)
@@ -489,12 +489,25 @@ class ModernFinGPTGUI(ctk.CTk):
         )
         self.max_btn.pack(side="left", padx=4)
 
+        # Picture-in-Picture Button
+        self.pip_btn = ctk.CTkButton(
+            self.apple_buttons_frame,
+            width=12,
+            height=12,
+            corner_radius=6,
+            text="",
+            fg_color="#8B5CF6",
+            hover_color="#A78BFA",
+            command=self.toggle_pip_mode,
+        )
+        self.pip_btn.pack(side="left", padx=4)
+
         # Title inside titlebar
         self.title_lbl = ctk.CTkLabel(
             self.title_bar,
             text="FinGPT Professional Dashboard",
             font=ctk.CTkFont(family="Inter", size=12, weight="bold"),
-            text_color="#FFFFFF",
+            text_color=DesignSystem.SEMANTIC.get('neutral', ('#09090B', '#FFFFFF')),
         )
         self.title_lbl.pack(side="left", padx=(10, 0))
         self.title_lbl.bind("<B1-Motion>", self._move_window)
@@ -543,6 +556,49 @@ class ModernFinGPTGUI(ctk.CTk):
         self.start_simulated_data()
 
     # --- Custom Titlebar & Resize Methods ---
+    def toggle_pip_mode(self):
+        """Toggles Picture-in-Picture Mode."""
+        if not hasattr(self, "is_pip_mode"):
+            self.is_pip_mode = False
+            
+        self.is_pip_mode = not self.is_pip_mode
+        
+        if self.is_pip_mode:
+            # Enter PiP Mode
+            self._normal_geometry = self.geometry()
+            self.geometry("350x150")
+            self.attributes("-topmost", True)
+            
+            # Hide main components
+            self.content_frame.pack_forget()
+                
+            # Create or show PiP container
+            if not hasattr(self, "pip_container"):
+                self.pip_container = ctk.CTkFrame(self.main_container, fg_color="transparent")
+                
+                # Mini PnL
+                self.pip_pnl_label = ctk.CTkLabel(self.pip_container, text="PnL: €0.00", font=ctk.CTkFont(size=24, weight="bold"), text_color="#10B981")
+                self.pip_pnl_label.pack(pady=(20, 5))
+                
+                # Sonar or Status
+                self.pip_status_label = ctk.CTkLabel(self.pip_container, text="FinGPT Live Monitoring", font=ctk.CTkFont(size=12), text_color="#8B949E")
+                self.pip_status_label.pack()
+                
+            self.pip_container.pack(fill="both", expand=True, padx=10, pady=10)
+            self.title_lbl.configure(text="FinGPT PiP")
+            
+        else:
+            # Exit PiP Mode
+            self.geometry(getattr(self, "_normal_geometry", "1400x850"))
+            self.attributes("-topmost", False)
+            
+            if hasattr(self, "pip_container"):
+                self.pip_container.pack_forget()
+                
+            # Restore main components
+            self.content_frame.pack(fill="both", expand=True, padx=0, pady=(0, 10))
+            self.title_lbl.configure(text="FinGPT Professional Dashboard")
+
     def _resize_window(self, event):
         """Allows resizing of the frameless window from the bottom right corner."""
         width = int(event.x_root - self.winfo_rootx())
@@ -863,13 +919,6 @@ class ModernFinGPTGUI(ctk.CTk):
 
         # Tabs konfigurieren - Reihenfolge muss mit _TAB_NAMES übereinstimmen
         self.dashboard_view = DashboardView(self.tabview.tab("📊 Dashboard"), self)
-        
-        # #region agent log
-        import json, time
-        with open("debug-0a8f4e.log", "a") as f:
-            f.write(json.dumps({"sessionId":"0a8f4e", "runId":"post-fix", "hypothesisId":"H3", "location":"modern_fingpt_gui.py:tab_bg", "message":"Tab Dashboard fg_color", "data":{"fg_color": str(self.tabview.tab("📊 Dashboard").cget("fg_color"))}, "timestamp":int(time.time()*1000)}) + "\n")
-        # #endregion
-        
         self.charts_view = ChartsView(self.tabview.tab("📈 Charts"), self)
         self.debate_view = DebateView(self.tabview.tab("🎭 Debate"), self)
         self.backtest_view = BacktestView(self.tabview.tab("📉 Backtest"), self)
@@ -1472,18 +1521,29 @@ class ModernFinGPTGUI(ctk.CTk):
         cfg.day_sat = bool(view.day_sat.get()) if hasattr(view, "day_sat") else False
         cfg.day_sun = bool(view.day_sun.get()) if hasattr(view, "day_sun") else False
 
-        cfg.news_filter = bool(view.news_filter_switch.get())
+        # Appearance & Theming
         try:
-            cfg.news_before_min = int(view.news_before_slider.get())
+            cfg.appearance_mode = view.appearance_var.get()
+            cfg.color_theme = view.theme_var.get()
         except:
             pass
+
         try:
-            cfg.news_after_min = int(view.news_after_slider.get())
-        except:
-            pass
-        cfg.news_high = bool(view.news_high.get())
-        cfg.news_medium = bool(view.news_medium.get())
-        cfg.news_low = bool(view.news_low.get())
+            news_view = self.news_view
+            cfg.news_filter = bool(news_view.news_filter_switch.get())
+            try:
+                cfg.news_before_min = int(news_view.news_before_slider.get())
+            except:
+                pass
+            try:
+                cfg.news_after_min = int(news_view.news_after_slider.get())
+            except:
+                pass
+            cfg.news_high = bool(news_view.news_high.get())
+            cfg.news_medium = bool(news_view.news_medium.get())
+            cfg.news_low = bool(news_view.news_low.get())
+        except Exception as e:
+            self.write_terminal(f">> [SETTINGS ERROR] News Filter speichern fehlgeschlagen: {e}\n", "ERROR")
 
         try:
             cfg.max_spread = int(view.max_spread_slider.get())
@@ -1642,6 +1702,14 @@ class ModernFinGPTGUI(ctk.CTk):
                 "{:.0f}%",
             )
 
+            # Appearance & Theming
+            if hasattr(cfg, "appearance_mode"):
+                _set_combo(view.appearance_var, cfg.appearance_mode)
+                view._on_appearance_change(cfg.appearance_mode)
+            if hasattr(cfg, "color_theme"):
+                _set_combo(view.theme_var, cfg.color_theme)
+                ctk.set_default_color_theme(cfg.color_theme)
+
             self.after(200, lambda: self._on_provider_change())
 
             _set_combo(view.trading_style_var, cfg.trading_style)
@@ -1683,22 +1751,26 @@ class ModernFinGPTGUI(ctk.CTk):
             if hasattr(view, "update_day_buttons_from_config"):
                 self.after(100, view.update_day_buttons_from_config)
 
-            _set_switch(view.news_filter_switch, cfg.news_filter)
-            _set_slider(
-                view.news_before_slider,
-                view.news_before_lbl,
-                cfg.news_before_min,
-                "{:.0f} Min",
-            )
-            _set_slider(
-                view.news_after_slider,
-                view.news_after_lbl,
-                cfg.news_after_min,
-                "{:.0f} Min",
-            )
-            _set_switch(view.news_high, cfg.news_high)
-            _set_switch(view.news_medium, cfg.news_medium)
-            _set_switch(view.news_low, cfg.news_low)
+            try:
+                news_view = self.news_view
+                _set_switch(news_view.news_filter_switch, cfg.news_filter)
+                _set_slider(
+                    news_view.news_before_slider,
+                    news_view.news_before_lbl,
+                    cfg.news_before_min,
+                    "{:.0f} Min",
+                )
+                _set_slider(
+                    news_view.news_after_slider,
+                    news_view.news_after_lbl,
+                    cfg.news_after_min,
+                    "{:.0f} Min",
+                )
+                _set_switch(news_view.news_high, cfg.news_high)
+                _set_switch(news_view.news_medium, cfg.news_medium)
+                _set_switch(news_view.news_low, cfg.news_low)
+            except Exception as e:
+                self.write_terminal(f">> [SETTINGS ERROR] News Filter laden fehlgeschlagen: {e}\n", "ERROR")
 
             _set_slider(
                 view.max_spread_slider,
@@ -1842,7 +1914,7 @@ class ModernFinGPTGUI(ctk.CTk):
             self.status_dot.configure(text_color="#E74C3C")  # Static Red
             self.write_terminal(">> Live-Stream angehalten.\\n")
             if hasattr(self, "sonar_anim"):
-                self.sonar_anim.set_active(False)
+                self.sonar_anim.set_state("idle")
             if hasattr(self, "trading_controller"):
                 self.trading_controller.stop()
         else:
@@ -1851,6 +1923,11 @@ class ModernFinGPTGUI(ctk.CTk):
                     "MT5 Fehler",
                     "Konnte MetaTrader 5 nicht für Live-Daten initialisieren.",
                 )
+                if hasattr(self, "sonar_anim"):
+                    self.sonar_anim.set_state("error")
+                    # Nach 5 Sekunden wieder auf idle zurücksetzen
+                    self.after(5000, lambda: self.sonar_anim.set_state("idle") 
+                               if hasattr(self, "sonar_anim") else None)
                 return
 
             self.is_live_running = True
@@ -1861,7 +1938,7 @@ class ModernFinGPTGUI(ctk.CTk):
 
             # Neue SonarAnimation aktivieren
             if hasattr(self, "sonar_anim"):
-                self.sonar_anim.set_active(True)
+                self.sonar_anim.set_state("analyzing")
 
             # Startup Sweep Effect
             self._play_startup_sweep()
@@ -2265,9 +2342,9 @@ class ModernFinGPTGUI(ctk.CTk):
                         tf_rates = mt5.copy_rates_from_pos(symbol, tf, 0, 5)
                         if tf_rates is not None and len(tf_rates) >= 2:
                             if tf_rates[-1]["close"] > tf_rates[0]["close"]:
-                                trend_colors.append("#5EBA7D")  # Green / Bull
+                                trend_colors.append("#10B981")  # Green / Bull
                             elif tf_rates[-1]["close"] < tf_rates[0]["close"]:
-                                trend_colors.append("#E74C3C")  # Red / Bear
+                                trend_colors.append("#EF4444")  # Red / Bear
                             else:
                                 trend_colors.append("gray")  # Neutral
                         else:
@@ -2424,8 +2501,41 @@ class ModernFinGPTGUI(ctk.CTk):
         """Wird aufgerufen wenn Daten aktualisiert wurden"""
         if hasattr(event, "data"):
             data_type = event.event_type
-            # Hier können wir UI-Updates basierend auf Datenänderungen durchführen
-            # z.B. Metric Cards aktualisieren, Charts neu zeichnen, etc.
+            
+            # ── Dashboard Theming based on PnL ──
+            if hasattr(self, "_aurora_bg") and self._aurora_bg:
+                # We assume event.data contains 'pnl' or 'profit' from the account
+                pnl = event.data.get("pnl", event.data.get("profit", 0))
+                try:
+                    pnl_val = float(pnl)
+                    if pnl_val > 0:
+                        # Profit Theme (Emerald / Light Green)
+                        self._aurora_bg.config["color0"] = "10B981"
+                        self._aurora_bg.config["color1"] = "34D399"
+                        self._aurora_bg.config["color2"] = "059669"
+                    elif pnl_val < 0:
+                        # Loss Theme (Red / Orange)
+                        self._aurora_bg.config["color0"] = "EF4444"
+                        self._aurora_bg.config["color1"] = "F87171"
+                        self._aurora_bg.config["color2"] = "DC2626"
+                    else:
+                        # Neutral Theme (Violet / Default)
+                        self._aurora_bg.config["color0"] = "5227FF"
+                        self._aurora_bg.config["color1"] = "7cff67"
+                        self._aurora_bg.config["color2"] = "5227FF"
+                except:
+                    pass
+
+            # ── PiP Mode Updates ──
+            if getattr(self, "is_pip_mode", False) and hasattr(self, "pip_pnl_label"):
+                pnl = event.data.get("pnl", event.data.get("profit", 0))
+                try:
+                    pnl_val = float(pnl)
+                    color = "#10B981" if pnl_val >= 0 else "#EF4444"
+                    self.pip_pnl_label.configure(text=f"PnL: €{pnl_val:.2f}", text_color=color)
+                except:
+                    pass
+
             self.write_terminal(f">> [EVENT] Daten aktualisiert: {data_type}")
 
     def _on_trade_executed(self, event):

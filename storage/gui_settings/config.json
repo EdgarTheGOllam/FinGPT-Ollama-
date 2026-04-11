@@ -1,4 +1,6 @@
 {
+  "appearance_mode": "Dark",
+  "color_theme": "green",
   "ki_provider": "Ollama (Lokal)",
   "ollama_url": "http://localhost:11434",
   "api_key": "",
@@ -6,7 +8,7 @@
   "api_key_anthropic": "",
   "api_key_deepseek": "",
   "api_key_openrouter": "",
-  "llm_model": "gpt-oss:120b-cloud",
+  "llm_model": "Verbindung fehlgeschlagen",
   "interval": 5,
   "ai_temperature": 0.3,
   "prompt_lang": "Deutsch",

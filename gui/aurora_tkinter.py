@@ -66,12 +66,6 @@ class AuroraBackground:
             return
         self._running = True
         
-        # #region agent log
-        import json, time
-        with open("debug-0a8f4e.log", "a") as f:
-            f.write(json.dumps({"sessionId":"0a8f4e", "runId":"post-fix", "hypothesisId":"H1", "location":"aurora_tkinter.py:start", "message":"Starting Aurora via Canvas fallback (tkinterweb disabled)", "data":{}, "timestamp":int(time.time()*1000)}) + "\n")
-        # #endregion
-        
         # tkinterweb unterstützt kein WebGL, was zu einem schwarzen Bildschirm führt.
         # Wir erzwingen hier den Canvas-Fallback, der die Aurora simuliert.
         self._start_canvas_fallback()
@@ -111,20 +105,8 @@ class AuroraBackground:
             self._frame = frame
             print("[Aurora] tkinterweb HtmlFrame geladen ✓")
             
-            # #region agent log
-            import json, time
-            with open("debug-0a8f4e.log", "a") as f:
-                f.write(json.dumps({"sessionId":"0a8f4e", "runId":"run1", "hypothesisId":"H1", "location":"aurora_tkinter.py:_start_tkinterweb", "message":"tkinterweb used", "data":{"url": url}, "timestamp":int(time.time()*1000)}) + "\n")
-            # #endregion
-            
         except Exception as exc:
             print(f"[Aurora] tkinterweb Fehler: {exc} – Canvas-Fallback aktiv")
-            
-            # #region agent log
-            import json, time
-            with open("debug-0a8f4e.log", "a") as f:
-                f.write(json.dumps({"sessionId":"0a8f4e", "runId":"run1", "hypothesisId":"H1", "location":"aurora_tkinter.py:_start_tkinterweb", "message":"tkinterweb failed", "data":{"error": str(exc)}, "timestamp":int(time.time()*1000)}) + "\n")
-            # #endregion
             
             self._start_canvas_fallback()
 

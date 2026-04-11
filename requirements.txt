@@ -13,8 +13,9 @@ httpx>=0.26.0
 
 # Datenverarbeitung & Numerik
 numpy>=1.24.0
-pandas>=2.0.0
+pandas==2.*
 pandas_ta>=0.3.14b0  # Für technische Indikatoren
+quantstats>=0.0.62  # Für professionelle Backtest-HTML-Reports
 
 # Visualisierung
 matplotlib>=3.7.0
@@ -52,6 +53,9 @@ networkx>=3.1
 # PyTorch (RL-Training, GPU-Unterstützung)
 # Für CUDA-Support: pip install torch --index-url https://download.pytorch.org/whl/cu121
 torch>=2.1.0
+stable-baselines3>=2.0.0
+gymnasium>=0.29.0
+optuna>=3.4.0  # Hyperparameter-Optimierung für RL
 # Hinweis: Sicherstellen, dass die richtige PyTorch-Version für das System installiert ist.
 
 # ================================================================================

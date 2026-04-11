@@ -18,13 +18,34 @@ class DesignSystem:
     # ─────────────────────────────────────────────────────────────
     # FARBSYSTEM (WCAG 2.1 AA konform)
     # ─────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────
+    # NEUE 3-EBENEN GRAUPALETTE (harmonisch, professionell)
+    # Ebene 1 — bg_deep:    Haupt-App-Hintergrund
+    # Ebene 2 — bg_card:    Karten & Panels (kaum heller)
+    # Ebene 3 — bg_elevated: Hover-Zustand
+    # ─────────────────────────────────────────────────────────────
+    BG = {
+        'deep':     '#0C0D0F',  # Haupt-App-Hintergrund
+        'card':     '#13151A',  # Karten / Panels
+        'elevated': '#1A1D24',  # Hover-Zustand
+        'overlay':  '#20232B',  # Dropdown / Modals
+    }
+
+    # Rahmenfarben – sehr subtil, nur für Tiefenwirkung
+    BORDERS = {
+        'subtle':  '#1E2128',   # Idle-Rahmen (kaum sichtbar)
+        'default': '#272B35',   # Standard-Rahmen
+        'active':  '#353A47',   # Hover-Rahmen (sanfte Aufhellung)
+        'focus':   '#38BDF8',   # Nur für echte CTAs / Inputs
+    }
+
     COLORS = {
         # Shader-Inspired Palette (from React Snippet)
         'shader': {
             'color1': '#73bfc4',
-            'color2': '#ff8    ',
+            'color2': '#ff8530',
             'color3': '#8da0ce',
-            'dark_bg': '#0B0E14'
+            'dark_bg': '#0C0D0F'
         },
         # Premium FinTech Palette
         'primary': {
@@ -39,33 +60,33 @@ class DesignSystem:
             'light': '#A5B4FC',
             'hover': '#6366F1'
         },
-        # Success (Emerald)
+        # Success (Emerald — leicht gedämpft für Dark-Mode Harmonie)
         'success': {
-            'base': '#10B981',  # Professional Emerald Green
-            'dark': '#059669',
+            'base': '#0EA572',  # Gedämpftes Emerald
+            'dark': '#047857',
             'light': '#34D399',
-            'hover': '#047857'
+            'hover': '#059669'
         },
-        # Warning (Amber)
+        # Warning (Amber — leicht gedämpft)
         'warning': {
-            'base': '#F59E0B',  # Amber
-            'dark': '#D97706',
+            'base': '#D4920A',  # Gedämpftes Amber
+            'dark': '#B45309',
             'light': '#FCD34D',
             'hover': '#B45309'
         },
-        # Danger (Rose/Red)
+        # Danger (Rot — leicht gedämpft)
         'danger': {
-            'base': '#EF4444',  # Balanced Red
-            'dark': '#DC2626',
+            'base': '#E84040',  # Gedämpftes Rot
+            'dark': '#C0392B',
             'light': '#F87171',
             'hover': '#B91C1C'
         },
         'neutral': {
             'white': '#FFFFFF',
-            'light': '#A1A1AA',    # Zinc-400 (Subtle Text)
-            'medium': '#71717A',   # Zinc-500 (Muted Text)
-            'dark': '#18181B',     # Zinc-900 (Surface/Cards)
-            'darker': '#09090B',   # Zinc-950 (Main Background)
+            'light': '#9CA3AF',    # Grau-400 (Subtle Text)
+            'medium': '#6B7280',   # Grau-500 (Muted Text)
+            'dark': '#13151A',     # bg_card
+            'darker': '#0C0D0F',   # bg_deep (Haupt-BG)
             'black': '#000000'
         }
     }
@@ -77,24 +98,26 @@ class DesignSystem:
         'info': COLORS['primary']['base'],
         'warning': COLORS['warning']['base'],
         'error': COLORS['danger']['base'],
-        'neutral': COLORS['neutral']['light'],  # Bessere Lesbarkeit
-        'background': ('#09090B', '#09090B'),  # Zinc-950
-        'surface': ('#18181B', '#18181B'),    # Zinc-900
-        'border': ('#27272A', '#27272A'),     # Zinc-800
+        'neutral': ('#13151A', '#9CA3AF'),  # Dark text in light / muted in dark
+        'background': ('#F8F9FA', '#0C0D0F'),   # bg_deep
+        'surface':    ('#FFFFFF',  '#13151A'),   # bg_card
+        'elevated':   ('#F0F1F3',  '#1A1D24'),   # bg_elevated
+        'border':     ('#DDE1E7',  '#1E2128'),   # border_subtle
+        'border_active': ('#B0B8C4', '#272B35'), # border_default
         # Trading-spezifische Farben
         'premium': COLORS['secondary']['base'],
         'buy_signal': COLORS['success']['base'],
         'sell_signal': COLORS['danger']['base'],
-        'hold_signal': COLORS['neutral']['medium'],
+        'hold_signal': ('#6B7280', '#6B7280'),
         'margin_warning': COLORS['warning']['base'],
     }
     
     # Trading-Farben (für schnellen Zugriff)
     TRADING_COLORS = {
-        'profit': '#10B981',     # Professional Emerald
-        'loss': '#EF4444',       # Professional Red
-        'neutral': '#71717A',    # Zinc-500
-        'warning': '#F59E0B',    # Amber
+        'profit': '#0EA572',     # Gedämpftes Emerald
+        'loss': '#E84040',       # Gedämpftes Rot
+        'neutral': '#6B7280',    # Grau-500
+        'warning': '#D4920A',    # Gedämpftes Amber
         'info': '#38BDF8',       # Light Blue
         'premium': '#818CF8',    # Indigo
     }
@@ -271,8 +294,16 @@ class DesignSystem:
 
     @classmethod
     def get_semantic_color(cls, semantic: str) -> str:
-        """Gibt eine semantische Farbe zurück."""
-        return cls.SEMANTIC.get(semantic, '#000000')
+        """Gibt eine semantische Farbe zurück (immer als einzelnen String aufgelöst)."""
+        color = cls.SEMANTIC.get(semantic, '#000000')
+        if isinstance(color, tuple):
+            try:
+                import customtkinter as ctk
+                mode = ctk.get_appearance_mode()
+                return color[0] if mode == "Light" else color[1]
+            except Exception:
+                return color[1]
+        return color
 
     @classmethod
     def apply_theme(cls, app: ctk.CTk) -> None:

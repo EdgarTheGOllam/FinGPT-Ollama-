@@ -31,13 +31,14 @@ class LiveDataRow(ctk.CTkFrame):
         compact_mode=False,
         **kwargs,
     ):
+        from gui.design_system import DesignSystem
+        ds = DesignSystem
+        
         self.default_color = "transparent"
-        self.hover_color = "#18181B"  # Subtiler Hover-Effekt (Zinc-900)
+        # Hover: sanftes bg_elevated statt zu hellem surface
+        self.hover_color = ds.BG['elevated']  # '#1A1D24'
 
         # Responsive Höhe
-        from gui.design_system import DesignSystem
-
-        ds = DesignSystem
         self._min_height = min_height or ds.COMPONENTS["live_data_row"]["height"]
         self._compact_mode = compact_mode
 
@@ -96,7 +97,13 @@ class LiveDataRow(ctk.CTkFrame):
         # Fig-Größe ebenfalls responsive
         fig_width = 0.8 if compact_mode else 1.0
         fig_height = 0.35 if compact_mode else 0.4
-        self.fig = Figure(figsize=(fig_width, fig_height), dpi=100, facecolor="#09090B")
+        
+        mode = ctk.get_appearance_mode()
+        self._fig_bg_idle  = ds.BG['card']    # '#13151A' — passt zu Card-BG
+        self._fig_bg_hover = ds.BG['elevated']  # '#1A1D24'
+        bg_color = self._fig_bg_idle
+        
+        self.fig = Figure(figsize=(fig_width, fig_height), dpi=100, facecolor=bg_color)
         self.ax = self.fig.add_subplot(111)
         self.ax.axis("off")
         self.ax.margins(x=0, y=0.1)
@@ -112,7 +119,7 @@ class LiveDataRow(ctk.CTkFrame):
             self,
             text=price,
             font=ctk.CTkFont(family="Consolas", size=font_size),
-            text_color="#FFFFFF",
+            text_color=("#09090B", "#FFFFFF"),
         )
         self.price_lbl.grid(row=0, column=2, sticky="w", padx=padx, pady=pady)
 
@@ -155,26 +162,27 @@ class LiveDataRow(ctk.CTkFrame):
         )
         self.trend_h4.pack(side="left", padx=trend_padx)
 
-        # Signal Button - responsive Größe
+        # Signal Button — gedämpfte Farben für harmonisches Dark-Theme
         sig_width = 45 if compact_mode else 60
         sig_height = 20 if compact_mode else 24
         sig_font_size = 9 if compact_mode else 10
         sig_color = (
-            "#10B981"
+            "#0EA572"   # Gedämpftes Grün
             if signal == "BUY"
-            else "#EF4444"
+            else "#C0392B"  # Gedämpftes Dunkelrot
             if signal == "SELL"
-            else "#71717A"
+            else "#7A5C00"  # Dunkles Amber (völlig neu statt knalligem Gelb)
         )
+        sig_text = signal if signal else "WAIT"
         self.signal_btn = ctk.CTkButton(
             self,
-            text=signal,
+            text=sig_text,
             width=sig_width,
             height=sig_height,
             fg_color=sig_color,
             hover_color=sig_color,
-            text_color="#09090B",
-            corner_radius=10,
+            text_color="#FFFFFF",  # Weiß statt Schwarz — besser lesbar auf dunklen Farben
+            corner_radius=6,
             font=ctk.CTkFont(family="Inter", size=sig_font_size, weight="bold"),
         )
         self.signal_btn.grid(row=0, column=5, sticky="w", padx=padx, pady=pady)
@@ -199,12 +207,12 @@ class LiveDataRow(ctk.CTkFrame):
 
     def _on_enter(self, event):
         self.configure(fg_color=self.hover_color)
-        self.fig.set_facecolor("#18181B")
+        self.fig.set_facecolor(self.hover_color)
         self.canvas.draw_idle()
 
     def _on_leave(self, event):
         self.configure(fg_color=self.default_color)
-        self.fig.set_facecolor("#09090B")  # Reset to default
+        self.fig.set_facecolor(self._fig_bg_idle)
         self.canvas.draw_idle()
 
     def update_data(self, price, change, history=None):
@@ -240,28 +248,28 @@ class LiveDataRow(ctk.CTkFrame):
         self.trend_h4.configure(text_color=h4_color)
 
         # Calculate dynamic signal based on the three trend dots
-        green = "#10B981"
-        red = "#EF4444"
+        green = "#0EA572"  # Neues gedämpftes Grün
+        red   = "#E84040"  # Neues gedämpftes Rot
 
         colors = [m15_color, h1_color, h4_color]
-        if all(c == green for c in colors):
+        if all(c == green or c == '#10B981' for c in colors):
             self.signal_btn.configure(
                 text="BUY",
-                fg_color="#10B981",
-                hover_color="#00E676",
-                text_color="#09090B",
+                fg_color="#0EA572",
+                hover_color="#059669",
+                text_color="#FFFFFF",
             )
-        elif all(c == red for c in colors):
+        elif all(c == red or c == '#EF4444' for c in colors):
             self.signal_btn.configure(
                 text="SELL",
-                fg_color="#EF4444",
-                hover_color="#D50000",
-                text_color="#09090B",
+                fg_color="#C0392B",
+                hover_color="#A93226",
+                text_color="#FFFFFF",
             )
         else:
             self.signal_btn.configure(
                 text="WAIT",
-                fg_color="#FFEA00",
-                hover_color="#FFD600",
-                text_color="#09090B",
+                fg_color="#7A5C00",
+                hover_color="#694E00",
+                text_color="#FFFFFF",
             )

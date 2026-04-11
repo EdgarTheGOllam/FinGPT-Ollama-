@@ -167,6 +167,106 @@ class MT5FinGPT:
         self.sr_tolerance = self.market.sr_tolerance
         self.sr_strength_threshold = self.market.sr_strength_threshold
     
+
+        # MACD SETTINGS
+        self.macd_fast_period = 12
+        self.macd_slow_period = 26
+        self.macd_signal_period = 9
+        self.macd_timeframe = mt5.TIMEFRAME_M15 if MT5_AVAILABLE else None
+    
+        # MULTI-TIMEFRAME SETTINGS
+        self.mtf_enabled = True
+        self.trend_timeframe = mt5.TIMEFRAME_H1 if MT5_AVAILABLE else None
+        self.entry_timeframe = mt5.TIMEFRAME_M15 if MT5_AVAILABLE else None
+        self.trend_ema_period = self.market.trend_ema_period
+        self.trend_strength_threshold = self.market.trend_strength_threshold
+        self.require_trend_confirmation = True
+    
+        # PARTIAL CLOSE SETTINGS
+        self.partial_close_enabled = True
+        self.first_target_percent = 50
+        self.second_target_percent = 25
+        self.profit_target_1 = 1.5
+        self.profit_target_2 = 3.0
+    
+        # UI VERBESSERUNGEN
+        self.companion_output_queue = queue.Queue()
+        self.ui_lock = threading.Lock()
+        self.companion_silent_mode = False
+        self.last_menu_display = 0
+    
+        # TRAILING STOP SETTINGS
+        self.trailing_stop_enabled = True
+        self.trailing_stop_distance_pips = 20
+        self.trailing_stop_step_pips = 5
+        self.trailing_stop_start_profit_pips = 15
+
+        self.trading_enabled = True
+
+        # RL INTEGRATION - NACH LOGGING!
+        try:
+            self.rl_manager = RLTradingManager(self)
+            self.rl_enabled = True
+            self.log("INFO", "✅ RL Manager erfolgreich initialisiert", "RL")
+        except Exception as e:
+            self.log("WARNING", f"RL Manager nicht verfügbar: {e}", "RL")
+            self.rl_manager = None
+            self.rl_enabled = False
+
+        # RL SETTINGS (Basic)
+        self.rl_training_mode = False
+        self.rl_recommendation_weight = 0.3  # Gewichtung der RL-Empfehlung (30%)
+
+        # RL HYPERPARAMETER (GUI-Parität: config_tab.py → Reinforcement Learning Tab)
+        self.rl_algorithm = "PPO"               # PPO | DQN | A2C | SAC
+        self.rl_learning_rate = 0.0003
+        self.rl_gamma = 0.99                    # Discount-Faktor
+        self.rl_training_steps = 100000
+        self.rl_reward_function = "Profit + Sharpe Ratio"  # Belohnungsfunktion
+        self.rl_buffer_size = 10000             # Replay Buffer Size
+        self.rl_batch_size = 64
+        self.rl_epochs = 10                     # Epochs (PPO)
+        self.rl_target_update = 1000            # Target Update Frequenz (DQN)
+        self.rl_epsilon_start = 1.0
+        self.rl_epsilon_min = 0.01
+        self.rl_epsilon_decay = 0.995
+        self.rl_training_timeframe = "M15"      # Training-Zeitrahmen
+        self.rl_training_bars = 5000            # Anzahl der Datenpunkte
+        self.rl_nn_architecture = "Mittel (128-128)"  # Klein | Mittel | Groß
+        self.rl_checkpoint_path = "storage/rl_agents/model.zip"
+        self.rl_live_trading_enabled = False    # RL für Live-Trading (Experimentell)
+        self.rl_use_gpu = True                  # GPU-Beschleunigung
+
+        # Lade Konfiguration (GUI-Parität)
+        from core.app_config import app_config_manager
+        self.app_config = app_config_manager.load()
+        
+        # Backward compatibility for model and intervals
+        self.selected_model = self.app_config.llm_model
+        self.auto_trade_interval = self.app_config.interval
+        
+        # ABSCHLUSS UND STATUS
+        self.log("INFO", "FinGPT System mit Core Modulen initialisiert")
+    
+        # STATUS CHECKS
+        if self.risk_manager:
+            self.log("INFO", "✅ Risk Manager ist verfügbar", "STATUS")
+        else:
+            self.log("WARNING", "❌ Risk Manager ist NICHT verfügbar", "STATUS")
+    
+        if self.has_extended_indicators:
+            self.log("INFO", "✅ Erweiterte Indikatoren verfügbar", "STATUS")
+        else:
+            self.log("INFO", "📊 Basis-Indikatoren verfügbar (RSI, MACD, S/R)", "STATUS")
+    
+        if self.rl_enabled:
+            self.log("INFO", "✅ RL Trading Agent verfügbar", "STATUS")
+        else:
+            self.log("INFO", "📈 Standard Trading Logik aktiv", "STATUS")
+       
+    # ==========================================
+    # 2. LOGGING & UI HELPERS
+    # ==========================================
     def calculate_support_resistance(self, symbol, timeframe=None):
         """Berechnet Support und Resistance Level und gibt sie im erwarteten Format zurück.
         
@@ -274,173 +374,6 @@ class MT5FinGPT:
         except Exception as e:
             return "NEUTRAL", f"S/R Signal Fehler: {e}"
 
-        # MACD SETTINGS
-        self.macd_fast_period = 12
-        self.macd_slow_period = 26
-        self.macd_signal_period = 9
-        self.macd_timeframe = mt5.TIMEFRAME_M15 if MT5_AVAILABLE else None
-    
-        # MULTI-TIMEFRAME SETTINGS
-        self.mtf_enabled = True
-        self.trend_timeframe = mt5.TIMEFRAME_H1 if MT5_AVAILABLE else None
-        self.entry_timeframe = mt5.TIMEFRAME_M15 if MT5_AVAILABLE else None
-        self.trend_ema_period = self.market.trend_ema_period
-        self.trend_strength_threshold = self.market.trend_strength_threshold
-        self.require_trend_confirmation = True
-    
-        # PARTIAL CLOSE SETTINGS
-        self.partial_close_enabled = True
-        self.first_target_percent = 50
-        self.second_target_percent = 25
-        self.profit_target_1 = 1.5
-        self.profit_target_2 = 3.0
-    
-        # UI VERBESSERUNGEN
-        self.companion_output_queue = queue.Queue()
-        self.ui_lock = threading.Lock()
-        self.companion_silent_mode = False
-        self.last_menu_display = 0
-    
-        # TRAILING STOP SETTINGS
-        self.trailing_stop_enabled = True
-        self.trailing_stop_distance_pips = 20
-        self.trailing_stop_step_pips = 5
-        self.trailing_stop_start_profit_pips = 15
-
-        self.trading_enabled = True
-
-        # RL INTEGRATION - NACH LOGGING!
-        try:
-            self.rl_manager = RLTradingManager(self)
-            self.rl_enabled = True
-            self.log("INFO", "✅ RL Manager erfolgreich initialisiert", "RL")
-        except Exception as e:
-            self.log("WARNING", f"RL Manager nicht verfügbar: {e}", "RL")
-            self.rl_manager = None
-            self.rl_enabled = False
-
-        # RL SETTINGS (Basic)
-        self.rl_training_mode = False
-        self.rl_recommendation_weight = 0.3  # Gewichtung der RL-Empfehlung (30%)
-
-        # RL HYPERPARAMETER (GUI-Parität: config_tab.py → Reinforcement Learning Tab)
-        self.rl_algorithm = "PPO"               # PPO | DQN | A2C | SAC
-        self.rl_learning_rate = 0.0003
-        self.rl_gamma = 0.99                    # Discount-Faktor
-        self.rl_training_steps = 100000
-        self.rl_reward_function = "Profit + Sharpe Ratio"  # Belohnungsfunktion
-        self.rl_buffer_size = 10000             # Replay Buffer Size
-        self.rl_batch_size = 64
-        self.rl_epochs = 10                     # Epochs (PPO)
-        self.rl_target_update = 1000            # Target Update Frequenz (DQN)
-        self.rl_epsilon_start = 1.0
-        self.rl_epsilon_min = 0.01
-        self.rl_epsilon_decay = 0.995
-        self.rl_training_timeframe = "M15"      # Training-Zeitrahmen
-        self.rl_training_bars = 5000            # Anzahl der Datenpunkte
-        self.rl_nn_architecture = "Mittel (128-128)"  # Klein | Mittel | Groß
-        self.rl_checkpoint_path = "storage/rl_agents/model.zip"
-        self.rl_live_trading_enabled = False    # RL für Live-Trading (Experimentell)
-        self.rl_use_gpu = True                  # GPU-Beschleunigung
-
-        # AI & OLLAMA SETTINGS (GUI-Parität: config_tab.py → KI & Ollama Tab)
-        self.ai_provider = "Ollama (Lokal)"     # Ollama | OpenAI | Anthropic | DeepSeek | OpenRouter
-        self.ollama_url = "http://localhost:11434"
-        self.ai_api_key = ""
-        self.ai_temperature = 0.3
-        self.ai_max_tokens = 500
-        self.ai_prompt_language = "Deutsch"
-        self.ai_system_prompt = (
-            "Du bist ein professioneller Trading-Analyst. Bewerte den Markt objektiv "
-            "basierend auf der technischen Ausgangslage und nutze eine klare, sachliche Sprache."
-        )
-        self.ai_min_confidence = 75             # Min. Konfidenz für Trade-Signale (%)
-        self.auto_trade_interval = 5            # Auto-Trading Intervall in Sekunden
-
-        # TRADING STYLE SETTINGS (GUI-Parität: config_tab.py → Trading Style Tab)
-        self.trading_style = "Swing Trading"    # Scalping | Day Trading | Swing Trading | Position Trading |
-                                                # Price Action | Breakout-Trading | Mean Reversion | AI-Fulldrive Mode
-        self.signal_strategy = "KI-gesteuert (Ollama)"  # KI | Technische Indikatoren | Hybrid
-        self.risk_profile = "Moderat"           # Konservativ | Moderat | Aggressiv
-        self.max_risk_per_trade_pct = 1.0       # Max Risiko pro Trade (%)
-        self.max_daily_loss_pct = 3.0           # Max Daily Loss (%)
-        self.max_open_positions = 3
-        self.break_even_enabled = False
-        self.break_even_distance_pips = 10
-        self.weekend_exit_enabled = False       # Trades Freitags schließen
-
-        # TRADING SESSIONS (GUI-Parität)
-        self.sessions_london = True
-        self.sessions_ny = True
-        self.sessions_asia = False
-        self.active_days = ["Mo", "Di", "Mi", "Do", "Fr"]
-        self.trade_time_from = "07:00"
-        self.trade_time_to = "22:00"
-        self.time_filter_enabled = True
-
-        # NEWS FILTER SETTINGS
-        self.news_filter_enabled = True
-        self.news_filter_high = True
-        self.news_filter_medium = False
-        self.news_filter_low = False
-        self.news_before_minutes = 30
-        self.news_after_minutes = 15
-
-        # EXECUTION QUALITY (GUI-Parität)
-        self.max_spread_pips = 3
-        self.max_slippage_pips = 2
-        self.spread_check_enabled = True
-
-        # RISK MANAGER (GUI-Parität: config_tab.py → 🛡️ Risk Manager)
-        self.rm_max_daily_loss_eur = 500.0
-        self.rm_max_weekly_loss_eur = 1500.0
-        self.rm_cooldown_seconds = 300
-        self.rm_max_trades_per_day = 10
-
-        # AI-FULLDRIVE MODE SETTINGS (GUI-Parität: config_tab.py → 🚀 AI-Fulldrive)
-        self.fulldrive_min_confidence = 70      # Min. Konfidenz für AI-Fulldrive (%)
-        self.fulldrive_sharpe_target = 1.5      # Sharpe Ratio Ziel
-        self.fulldrive_max_drawdown = 15.0      # Max. Drawdown Limit (%)
-        self.fulldrive_self_optimization = True # Auto-Retraining alle 50 Trades
-        self.fulldrive_engine = None            # AIFulldriveEngine Instanz
-
-        # NOTIFICATION SETTINGS (GUI-Parität: config_tab.py → Benachrichtigungen)
-        self.telegram_token = ""
-        self.telegram_chat_id = ""
-        self.discord_webhook = ""
-        self.notify_sl_hit = True
-        self.notify_tp_hit = True
-        self.notify_new_trade = True
-        self.notify_error = True
-        self.sound_alerts_enabled = False
-
-        # MT5 CURRENCY PAIRS PRESETS
-        self.pairs_preset = "Majors (6 Paare)"
-        self.active_pairs_str = "EURUSD, GBPUSD, USDJPY, USDCHF, AUDUSD, USDCAD"
-        self.debug_mode = False
-
-        # ABSCHLUSS UND STATUS
-        self.log("INFO", "FinGPT System mit Core Modulen initialisiert")
-    
-        # STATUS CHECKS
-        if self.risk_manager:
-            self.log("INFO", "✅ Risk Manager ist verfügbar", "STATUS")
-        else:
-            self.log("WARNING", "❌ Risk Manager ist NICHT verfügbar", "STATUS")
-    
-        if self.has_extended_indicators:
-            self.log("INFO", "✅ Erweiterte Indikatoren verfügbar", "STATUS")
-        else:
-            self.log("INFO", "📊 Basis-Indikatoren verfügbar (RSI, MACD, S/R)", "STATUS")
-    
-        if self.rl_enabled:
-            self.log("INFO", "✅ RL Trading Agent verfügbar", "STATUS")
-        else:
-            self.log("INFO", "📈 Standard Trading Logik aktiv", "STATUS")
-       
-    # ==========================================
-    # 2. LOGGING & UI HELPERS
-    # ==========================================
     def setup_logging(self):
         """Richtet das Logging-System ein"""
         try:
@@ -724,27 +657,41 @@ class MT5FinGPT:
 
     def ai_ki_settings_menu(self):
         """KI & Ollama Einstellungen — Parität mit GUI config_tab.py → KI & Ollama Tab"""
+        from core.app_config import app_config_manager
         while True:
             self.print_header("🤖 KI & OLLAMA EINSTELLUNGEN")
 
             print("📌 AKTUELLE KONFIGURATION:")
             print("─" * 48)
-            print(f"   KI Provider           : {self.ai_provider}")
-            print(f"   Ollama URL            : {self.ollama_url}")
-            print(f"   API Key               : {'*****' if self.ai_api_key else '(leer)'}")
-            print(f"   LLM Modell            : {getattr(self.ai, 'selected_model', self.selected_model or '(keins)')}")
-            print(f"   Intervall (Auto-Trade): {self.auto_trade_interval}s")
-            print(f"   Temperatur            : {self.ai_temperature:.1f}")
-            print(f"   Max. Tokens           : {self.ai_max_tokens}")
-            print(f"   Prompt-Sprache        : {self.ai_prompt_language}")
-            print(f"   Min. Confidence       : {self.ai_min_confidence}%")
-            print(f"   System Prompt         : {self.ai_system_prompt[:60]}...")
+            print(f"   KI Provider           : {self.app_config.ki_provider}")
+            print(f"   Ollama URL            : {self.app_config.ollama_url}")
+            
+            # Show the key depending on the provider
+            if "OpenAI" in self.app_config.ki_provider:
+                active_key = self.app_config.api_key_openai or self.app_config.api_key
+            elif "Anthropic" in self.app_config.ki_provider:
+                active_key = self.app_config.api_key_anthropic or self.app_config.api_key
+            elif "DeepSeek" in self.app_config.ki_provider:
+                active_key = self.app_config.api_key_deepseek or self.app_config.api_key
+            elif "OpenRouter" in self.app_config.ki_provider:
+                active_key = self.app_config.api_key_openrouter or self.app_config.api_key
+            else:
+                active_key = self.app_config.api_key
+
+            print(f"   API Key               : {'*****' if active_key else '(leer)'}")
+            print(f"   LLM Modell            : {self.app_config.llm_model}")
+            print(f"   Intervall (Auto-Trade): {self.app_config.interval}s")
+            print(f"   Temperatur            : {self.app_config.ai_temperature:.1f}")
+            print(f"   Max. Tokens           : {self.app_config.llm_max_tokens}")
+            print(f"   Prompt-Sprache        : {self.app_config.prompt_lang}")
+            print(f"   Min. Confidence       : {self.app_config.min_confidence}%")
+            print(f"   System Prompt         : {self.app_config.system_prompt[:60]}...")
 
             print("\n🛠️  EDITIEROPTIONEN:")
             print("─" * 48)
             print("  1. 🤖 KI Provider (Ollama / OpenAI / Anthropic / DeepSeek / OpenRouter)")
-            print("  2. 🌐 Ollama URL")
-            print("  3. 🔑 API Key")
+            print("  2. 🌐 Ollama / Base URL")
+            print("  3. 🔑 API Key (für aktuellen Provider)")
             print("  4. 🤖 LLM Modell (free text)")
             print("  5. ⏱️  Auto-Trading Intervall (Sekunden)")
             print("  6. 🌡️  KI Temperatur (0.0–1.0)")
@@ -765,40 +712,56 @@ class MT5FinGPT:
                 for i, p in enumerate(providers, 1):
                     print(f"  {i}. {p}")
                 try:
-                    idx = int(input("Wahl (1-4): ")) - 1
+                    idx = int(input(f"Wahl (1-{len(providers)}): ")) - 1
                     if 0 <= idx < len(providers):
-                        self.ai_provider = providers[idx]
-                        print(f"✅ KI Provider → {self.ai_provider}")
+                        self.app_config.ki_provider = providers[idx]
+                        app_config_manager.save()
+                        print(f"✅ KI Provider → {self.app_config.ki_provider}")
                 except ValueError:
                     print("❌ Ungültige Eingabe")
 
             elif choice == "2":
-                val = input(f"Ollama URL (aktuell: {self.ollama_url}): ").strip()
+                val = input(f"Ollama / Base URL (aktuell: {self.app_config.ollama_url}): ").strip()
                 if val:
-                    self.ollama_url = val
-                    print(f"✅ URL → {self.ollama_url}")
+                    self.app_config.ollama_url = val
+                    app_config_manager.save()
+                    print(f"✅ URL → {self.app_config.ollama_url}")
 
             elif choice == "3":
-                val = input("API Key (leer = unverändert): ").strip()
+                val = input(f"API Key für {self.app_config.ki_provider} (leer = unverändert): ").strip()
                 if val:
-                    self.ai_api_key = val
+                    if "OpenAI" in self.app_config.ki_provider:
+                        self.app_config.api_key_openai = val
+                    elif "Anthropic" in self.app_config.ki_provider:
+                        self.app_config.api_key_anthropic = val
+                    elif "DeepSeek" in self.app_config.ki_provider:
+                        self.app_config.api_key_deepseek = val
+                    elif "OpenRouter" in self.app_config.ki_provider:
+                        self.app_config.api_key_openrouter = val
+                    else:
+                        self.app_config.api_key = val
+                    app_config_manager.save()
                     print("✅ API Key gespeichert")
 
             elif choice == "4":
-                val = input(f"LLM Modell (aktuell: {self.selected_model or '(keins)'}): ").strip()
+                val = input(f"LLM Modell (aktuell: {self.app_config.llm_model or '(keins)'}): ").strip()
                 if val:
+                    self.app_config.llm_model = val
                     self.selected_model = val
                     if hasattr(self, 'ai'):
                         self.ai.selected_model = val
-                    print(f"✅ Modell → {self.selected_model}")
+                    app_config_manager.save()
+                    print(f"✅ Modell → {self.app_config.llm_model}")
 
             elif choice == "5":
                 try:
-                    val = int(input(f"Intervall in Sekunden (aktuell: {self.auto_trade_interval}, 1–120): "))
+                    val = int(input(f"Intervall in Sekunden (aktuell: {self.app_config.interval}, 1–120): "))
                     if 1 <= val <= 120:
+                        self.app_config.interval = val
                         self.auto_trade_interval = val
                         self.analysis_interval = val
-                        print(f"✅ Intervall → {self.auto_trade_interval}s")
+                        app_config_manager.save()
+                        print(f"✅ Intervall → {self.app_config.interval}s")
                     else:
                         print("❌ Bereich: 1–120")
                 except ValueError:
@@ -806,10 +769,11 @@ class MT5FinGPT:
 
             elif choice == "6":
                 try:
-                    val = float(input(f"Temperatur (aktuell: {self.ai_temperature:.1f}, 0.0–1.0): "))
+                    val = float(input(f"Temperatur (aktuell: {self.app_config.ai_temperature:.1f}, 0.0–1.0): "))
                     if 0.0 <= val <= 1.0:
-                        self.ai_temperature = val
-                        print(f"✅ Temperatur → {self.ai_temperature:.1f}")
+                        self.app_config.ai_temperature = val
+                        app_config_manager.save()
+                        print(f"✅ Temperatur → {self.app_config.ai_temperature:.1f}")
                     else:
                         print("❌ Bereich: 0.0–1.0")
                 except ValueError:
@@ -817,10 +781,11 @@ class MT5FinGPT:
 
             elif choice == "7":
                 try:
-                    val = int(input(f"Max. Tokens (aktuell: {self.ai_max_tokens}, 100–4096): "))
+                    val = int(input(f"Max. Tokens (aktuell: {self.app_config.llm_max_tokens}, 100–4096): "))
                     if 100 <= val <= 4096:
-                        self.ai_max_tokens = val
-                        print(f"✅ Max. Tokens → {self.ai_max_tokens}")
+                        self.app_config.llm_max_tokens = val
+                        app_config_manager.save()
+                        print(f"✅ Max. Tokens → {self.app_config.llm_max_tokens}")
                     else:
                         print("❌ Bereich: 100–4096")
                 except ValueError:
@@ -832,24 +797,26 @@ class MT5FinGPT:
                 try:
                     idx = int(input("Wahl (1-3): ")) - 1
                     if 0 <= idx < len(langs):
-                        self.ai_prompt_language = langs[idx]
-                        print(f"✅ Sprache → {self.ai_prompt_language}")
+                        self.app_config.prompt_lang = langs[idx]
+                        app_config_manager.save()
+                        print(f"✅ Sprache → {self.app_config.prompt_lang}")
                 except ValueError:
                     print("❌ Ungültige Eingabe")
 
             elif choice == "9":
                 try:
-                    val = int(input(f"Min. Confidence % (aktuell: {self.ai_min_confidence}, 50–100): "))
+                    val = int(input(f"Min. Confidence % (aktuell: {self.app_config.min_confidence}, 50–100): "))
                     if 50 <= val <= 100:
-                        self.ai_min_confidence = val
-                        print(f"✅ Min. Confidence → {self.ai_min_confidence}%")
+                        self.app_config.min_confidence = val
+                        app_config_manager.save()
+                        print(f"✅ Min. Confidence → {self.app_config.min_confidence}%")
                     else:
                         print("❌ Bereich: 50–100")
                 except ValueError:
                     print("❌ Ungültige Eingabe")
 
             elif choice == "10":
-                print(f"\nAktueller System Prompt:\n{self.ai_system_prompt}\n")
+                print(f"\nAktueller System Prompt:\n{self.app_config.system_prompt}\n")
                 print("Neuen Prompt eingeben (leer lassen = unverändert):")
                 lines = []
                 while True:
@@ -858,14 +825,15 @@ class MT5FinGPT:
                         break
                     lines.append(line)
                 if lines:
-                    self.ai_system_prompt = " ".join(lines)
+                    self.app_config.system_prompt = " ".join(lines)
+                    app_config_manager.save()
                     print("✅ System Prompt aktualisiert")
 
             elif choice == "11":
-                print(f"🔄 Teste Verbindung zu {self.ollama_url}...")
+                print(f"🔄 Teste Verbindung zu {self.app_config.ollama_url}...")
                 try:
                     import requests
-                    resp = requests.get(f"{self.ollama_url}/api/tags", timeout=5)
+                    resp = requests.get(f"{self.app_config.ollama_url}/api/tags", timeout=5)
                     if resp.status_code == 200:
                         models = [m['name'] for m in resp.json().get('models', [])]
                         print(f"✅ Verbunden! {len(models)} Modell(e) gefunden:")
@@ -882,34 +850,34 @@ class MT5FinGPT:
 
     def trading_style_settings_menu(self):
         """Trading Stil, AI-Fulldrive, Sessions, Nachrichten-Filter, Ausführungsqualität"""
+        from core.app_config import app_config_manager
         while True:
             self.print_header("📊 TRADING STIL & AUSFÜHRUNG")
 
             print("📌 AKTUELLE KONFIGURATION:")
             print("─" * 48)
-            print(f"   Trading Style         : {self.trading_style}")
-            print(f"   Signal-Strategie      : {self.signal_strategy}")
-            print(f"   Risikoprofil          : {self.risk_profile}")
-            print(f"   Max Risiko/Trade      : {self.max_risk_per_trade_pct}%")
-            print(f"   Max Daily Loss        : {self.max_daily_loss_pct}%")
-            print(f"   Max offene Positionen : {self.max_open_positions}")
-            print(f"   Trailing Stop         : {'✅' if self.trailing_stop_enabled else '❌'} | {self.trailing_stop_distance_pips}p Abstand")
-            print(f"   Break-Even Stop       : {'✅' if self.break_even_enabled else '❌'} | {self.break_even_distance_pips}p")
-            print(f"   Wochenend-Schutz      : {'✅' if self.weekend_exit_enabled else '❌'}")
-            print(f"   RM Max. Tagesverlust  : {self.rm_max_daily_loss_eur}€")
-            print(f"   RM Max. Wochenverlust : {self.rm_max_weekly_loss_eur}€")
-            print(f"   RM Cooldown           : {self.rm_cooldown_seconds}s")
-            print(f"   RM Max Trades/Tag     : {self.rm_max_trades_per_day}")
-            print(f"   Sessions              : {'London ' if self.sessions_london else ''}{'NY ' if self.sessions_ny else ''}{'Asia' if self.sessions_asia else ''}")
-            print(f"   Handelsfenster        : {self.trade_time_from}–{self.trade_time_to} UTC ({'✅' if self.time_filter_enabled else '❌'})")
-            print(f"   News-Filter           : {'✅' if self.news_filter_enabled else '❌'}")
-            print(f"   Max Spread            : {self.max_spread_pips}p | Max Slippage: {self.max_slippage_pips}p")
-            if "Fulldrive" in self.trading_style:
-                print(f"\n   🚀 AI-FULLDRIVE:")
-                print(f"   Min. Konfidenz        : {self.fulldrive_min_confidence}%")
-                print(f"   Sharpe-Ratio Ziel     : {self.fulldrive_sharpe_target}")
-                print(f"   Max. Drawdown         : {self.fulldrive_max_drawdown}%")
-                print(f"   Selbst-Optimierung    : {'✅' if self.fulldrive_self_optimization else '❌'}")
+            print(f"   Trading Style         : {self.app_config.trading_style}")
+            print(f"   Signal-Strategie      : {self.app_config.signal_strategy}")
+            print(f"   Risikoprofil          : {self.app_config.risk_profile}")
+            print(f"   Max Risiko/Trade      : {self.app_config.max_risk}%")
+            print(f"   Max Daily Loss        : {self.app_config.max_daily_loss}%")
+            print(f"   Max offene Positionen : {self.app_config.max_positions}")
+            print(f"   Trailing Stop         : {'✅' if self.app_config.trailing_stop else '❌'} | {self.app_config.trailing_dist}p Abstand")
+            print(f"   Break-Even Stop       : {'✅' if self.app_config.break_even else '❌'} | {self.app_config.break_even_dist}p")
+            print(f"   Wochenend-Schutz      : {'✅' if self.app_config.weekend_exit else '❌'}")
+            print(f"   RM Max. Tagesverlust  : {self.app_config.rm_max_daily_loss_eur}€")
+            print(f"   RM Max. Wochenverlust : {self.app_config.rm_max_weekly_loss_eur}€")
+            print(f"   RM Cooldown           : {self.app_config.rm_min_time_between_trades}s")
+            print(f"   RM Max Trades/Tag     : {self.app_config.rm_max_trades_per_day}")
+            print(f"   Sessions              : {'London ' if self.app_config.session_london else ''}{'NY ' if self.app_config.session_ny else ''}{'Asia' if self.app_config.session_asia else ''}")
+            print(f"   Aktive Tage           : {'Mo ' if self.app_config.day_mon else ''}{'Di ' if self.app_config.day_tue else ''}{'Mi ' if self.app_config.day_wed else ''}{'Do ' if self.app_config.day_thu else ''}{'Fr ' if self.app_config.day_fri else ''}{'Sa ' if self.app_config.day_sat else ''}{'So ' if self.app_config.day_sun else ''}")
+            print(f"   Handelsfenster        : {self.app_config.trade_time_from}–{self.app_config.trade_time_to} UTC ({'✅' if self.app_config.time_filter else '❌'})")
+            print(f"   News-Filter           : {'✅' if self.app_config.news_filter else '❌'}")
+            print(f"   Max Spread            : {self.app_config.max_spread}p | Max Slippage: {self.app_config.max_slippage}p")
+            print(f"   Debug-Modus           : {'✅' if self.app_config.debug_mode else '❌'}")
+            
+            if "Fulldrive" in self.app_config.trading_style:
+                print(f"\n   🚀 AI-FULLDRIVE (Nur via GUI einstellbar)")
 
             print("\n🛠️  EDITIEROPTIONEN:")
             print("─" * 48)
@@ -925,10 +893,11 @@ class MT5FinGPT:
             print(" 10. ⏰ Handelssitzungen & Zeitfenster")
             print(" 11. 📰 Nachrichten-Filter")
             print(" 12. ⚡ Spread & Slippage Limits")
-            print(" 13. 🚀 AI-Fulldrive Einstellungen")
+            print(" 13. 🗓️  Aktive Handelstage (Mo-So)")
+            print(" 14. 🐛 Debug-Modus umschalten")
             print("  0. ⬅️  Zurück")
 
-            choice = input("\n🎯 Ihre Wahl (0-13): ").strip()
+            choice = input("\n🎯 Ihre Wahl (0-14): ").strip()
 
             if choice == "0":
                 break
@@ -941,8 +910,9 @@ class MT5FinGPT:
                 try:
                     idx = int(input("Wahl: ")) - 1
                     if 0 <= idx < len(styles):
-                        self.trading_style = styles[idx]
-                        print(f"✅ Trading Style → {self.trading_style}")
+                        self.app_config.trading_style = styles[idx]
+                        app_config_manager.save()
+                        print(f"✅ Trading Style → {self.app_config.trading_style}")
                 except ValueError:
                     print("❌ Ungültige Eingabe")
 
@@ -953,8 +923,9 @@ class MT5FinGPT:
                 try:
                     idx = int(input("Wahl: ")) - 1
                     if 0 <= idx < len(strategies):
-                        self.signal_strategy = strategies[idx]
-                        print(f"✅ Signal-Strategie → {self.signal_strategy}")
+                        self.app_config.signal_strategy = strategies[idx]
+                        app_config_manager.save()
+                        print(f"✅ Signal-Strategie → {self.app_config.signal_strategy}")
                 except ValueError:
                     print("❌ Ungültige Eingabe")
 
@@ -965,18 +936,20 @@ class MT5FinGPT:
                 try:
                     idx = int(input("Wahl: ")) - 1
                     if 0 <= idx < len(profiles):
-                        self.risk_profile = profiles[idx]
-                        print(f"✅ Risikoprofil → {self.risk_profile}")
+                        self.app_config.risk_profile = profiles[idx]
+                        app_config_manager.save()
+                        print(f"✅ Risikoprofil → {self.app_config.risk_profile}")
                 except ValueError:
                     print("❌ Ungültige Eingabe")
 
             elif choice == "4":
                 try:
-                    rt = float(input(f"Max Risiko/Trade % (aktuell {self.max_risk_per_trade_pct}): ") or str(self.max_risk_per_trade_pct))
-                    dl = float(input(f"Max Daily Loss % (aktuell {self.max_daily_loss_pct}): ") or str(self.max_daily_loss_pct))
+                    rt = float(input(f"Max Risiko/Trade % (aktuell {self.app_config.max_risk}): ") or self.app_config.max_risk)
+                    dl = float(input(f"Max Daily Loss % (aktuell {self.app_config.max_daily_loss}): ") or self.app_config.max_daily_loss)
                     if 0.1 <= rt <= 10 and 0.5 <= dl <= 20:
-                        self.max_risk_per_trade_pct = rt
-                        self.max_daily_loss_pct = dl
+                        self.app_config.max_risk = str(rt)
+                        self.app_config.max_daily_loss = str(dl)
+                        app_config_manager.save()
                         print(f"✅ Risiko/Trade={rt}% | Daily Loss={dl}%")
                     else:
                         print("❌ Außerhalb des gültigen Bereichs")
@@ -985,106 +958,118 @@ class MT5FinGPT:
 
             elif choice == "5":
                 try:
-                    val = int(input(f"Max. Positionen (aktuell {self.max_open_positions}): "))
+                    val = int(input(f"Max. Positionen (aktuell {self.app_config.max_positions}): ") or self.app_config.max_positions)
                     if 1 <= val <= 20:
-                        self.max_open_positions = val
-                        print(f"✅ Max. Positionen → {self.max_open_positions}")
+                        self.app_config.max_positions = str(val)
+                        app_config_manager.save()
+                        print(f"✅ Max. Positionen → {self.app_config.max_positions}")
                     else:
                         print("❌ Bereich: 1–20")
                 except ValueError:
                     print("❌ Ungültige Eingabe")
 
             elif choice == "6":
-                self.trailing_stop_enabled = not self.trailing_stop_enabled
-                print(f"✅ Trailing Stop → {'aktiviert' if self.trailing_stop_enabled else 'deaktiviert'}")
-                if self.trailing_stop_enabled:
+                self.app_config.trailing_stop = not self.app_config.trailing_stop
+                app_config_manager.save()
+                print(f"✅ Trailing Stop → {'aktiviert' if self.app_config.trailing_stop else 'deaktiviert'}")
+                if self.app_config.trailing_stop:
                     try:
-                        dist = int(input(f"Trailing Abstand Pips (aktuell {self.trailing_stop_distance_pips}): ") or str(self.trailing_stop_distance_pips))
-                        self.trailing_stop_distance_pips = max(1, dist)
-                        print(f"✅ Trailing Abstand → {self.trailing_stop_distance_pips}p")
+                        dist = int(input(f"Trailing Abstand Pips (aktuell {self.app_config.trailing_dist}): ") or self.app_config.trailing_dist)
+                        self.app_config.trailing_dist = str(max(1, dist))
+                        app_config_manager.save()
+                        print(f"✅ Trailing Abstand → {self.app_config.trailing_dist}p")
                     except ValueError:
                         pass
 
             elif choice == "7":
-                self.break_even_enabled = not self.break_even_enabled
-                print(f"✅ Break-Even Stop → {'aktiviert' if self.break_even_enabled else 'deaktiviert'}")
-                if self.break_even_enabled:
+                self.app_config.break_even = not self.app_config.break_even
+                app_config_manager.save()
+                print(f"✅ Break-Even Stop → {'aktiviert' if self.app_config.break_even else 'deaktiviert'}")
+                if self.app_config.break_even:
                     try:
-                        dist = int(input(f"Break-Even Abstand Pips (aktuell {self.break_even_distance_pips}): ") or str(self.break_even_distance_pips))
-                        self.break_even_distance_pips = max(1, dist)
-                        print(f"✅ Break-Even Abstand → {self.break_even_distance_pips}p")
+                        dist = int(input(f"Break-Even Abstand Pips (aktuell {self.app_config.break_even_dist}): ") or self.app_config.break_even_dist)
+                        self.app_config.break_even_dist = str(max(1, dist))
+                        app_config_manager.save()
+                        print(f"✅ Break-Even Abstand → {self.app_config.break_even_dist}p")
                     except ValueError:
                         pass
 
             elif choice == "8":
-                self.weekend_exit_enabled = not self.weekend_exit_enabled
-                print(f"✅ Wochenend-Schutz → {'aktiviert' if self.weekend_exit_enabled else 'deaktiviert'}")
+                self.app_config.weekend_exit = not self.app_config.weekend_exit
+                app_config_manager.save()
+                print(f"✅ Wochenend-Schutz → {'aktiviert' if self.app_config.weekend_exit else 'deaktiviert'}")
 
             elif choice == "9":
                 try:
-                    dl = float(input(f"Max. Tagesverlust € (aktuell {self.rm_max_daily_loss_eur}): ") or str(self.rm_max_daily_loss_eur))
-                    wl = float(input(f"Max. Wochenverlust € (aktuell {self.rm_max_weekly_loss_eur}): ") or str(self.rm_max_weekly_loss_eur))
-                    cd = int(input(f"Cooldown Sek. (aktuell {self.rm_cooldown_seconds}, 60–600): ") or str(self.rm_cooldown_seconds))
-                    mt = int(input(f"Max Trades/Tag (aktuell {self.rm_max_trades_per_day}): ") or str(self.rm_max_trades_per_day))
-                    self.rm_max_daily_loss_eur = max(0, dl)
-                    self.rm_max_weekly_loss_eur = max(0, wl)
-                    self.rm_cooldown_seconds = max(60, min(600, cd))
-                    self.rm_max_trades_per_day = max(1, mt)
+                    dl = float(input(f"Max. Tagesverlust € (aktuell {self.app_config.rm_max_daily_loss_eur}): ") or str(self.app_config.rm_max_daily_loss_eur))
+                    wl = float(input(f"Max. Wochenverlust € (aktuell {self.app_config.rm_max_weekly_loss_eur}): ") or str(self.app_config.rm_max_weekly_loss_eur))
+                    cd = int(input(f"Cooldown Sek. (aktuell {self.app_config.rm_min_time_between_trades}, 60–600): ") or str(self.app_config.rm_min_time_between_trades))
+                    mt = int(input(f"Max Trades/Tag (aktuell {self.app_config.rm_max_trades_per_day}): ") or str(self.app_config.rm_max_trades_per_day))
+                    self.app_config.rm_max_daily_loss_eur = max(0.0, dl)
+                    self.app_config.rm_max_weekly_loss_eur = max(0.0, wl)
+                    self.app_config.rm_min_time_between_trades = max(60, min(600, cd))
+                    self.app_config.rm_max_trades_per_day = max(1, mt)
+                    app_config_manager.save()
                     print(f"✅ RM Limits aktualisiert")
                 except ValueError:
                     print("❌ Ungültige Eingabe")
 
             elif choice == "10":
                 print("\n🌍 SESSIONEN:")
-                self.sessions_london = input(f"London aktiv? (j/n, aktuell {'j' if self.sessions_london else 'n'}): ").strip().lower() != "n"
-                self.sessions_ny = input(f"New York aktiv? (j/n, aktuell {'j' if self.sessions_ny else 'n'}): ").strip().lower() != "n"
-                self.sessions_asia = input(f"Asian aktiv? (j/n, aktuell {'j' if self.sessions_asia else 'n'}): ").strip().lower() == "j"
+                self.app_config.session_london = input(f"London aktiv? (j/n, aktuell {'j' if self.app_config.session_london else 'n'}): ").strip().lower() != "n"
+                self.app_config.session_ny = input(f"New York aktiv? (j/n, aktuell {'j' if self.app_config.session_ny else 'n'}): ").strip().lower() != "n"
+                self.app_config.session_asia = input(f"Asian aktiv? (j/n, aktuell {'j' if self.app_config.session_asia else 'n'}): ").strip().lower() == "j"
                 print("\n⏰ HANDELSFENSTER (UTC):")
-                tf = input(f"Von (HH:MM, aktuell {self.trade_time_from}): ").strip() or self.trade_time_from
-                tt = input(f"Bis (HH:MM, aktuell {self.trade_time_to}): ").strip() or self.trade_time_to
-                self.trade_time_from = tf
-                self.trade_time_to = tt
-                self.time_filter_enabled = input(f"Zeitfenster-Filter aktiv? (j/n): ").strip().lower() != "n"
+                tf = input(f"Von (HH:MM, aktuell {self.app_config.trade_time_from}): ").strip() or self.app_config.trade_time_from
+                tt = input(f"Bis (HH:MM, aktuell {self.app_config.trade_time_to}): ").strip() or self.app_config.trade_time_to
+                self.app_config.trade_time_from = tf
+                self.app_config.trade_time_to = tt
+                self.app_config.time_filter = input(f"Zeitfenster-Filter aktiv? (j/n): ").strip().lower() != "n"
+                app_config_manager.save()
                 print(f"✅ Sessions & Zeiten aktualisiert")
 
             elif choice == "11":
-                self.news_filter_enabled = input(f"News-Filter aktiv? (j/n, aktuell {'j' if self.news_filter_enabled else 'n'}): ").lower() != "n"
-                if self.news_filter_enabled:
-                    self.news_filter_high = input(f"🔴 Hoch filtern? (j/n, aktuell {'j' if self.news_filter_high else 'n'}): ").lower() != "n"
-                    self.news_filter_medium = input(f"🟡 Mittel filtern? (j/n, aktuell {'j' if self.news_filter_medium else 'n'}): ").lower() == "j"
+                self.app_config.news_filter = input(f"News-Filter aktiv? (j/n, aktuell {'j' if self.app_config.news_filter else 'n'}): ").lower() != "n"
+                if self.app_config.news_filter:
+                    self.app_config.news_high = input(f"🔴 Hoch filtern? (j/n, aktuell {'j' if self.app_config.news_high else 'n'}): ").lower() != "n"
+                    self.app_config.news_medium = input(f"🟡 Mittel filtern? (j/n, aktuell {'j' if self.app_config.news_medium else 'n'}): ").lower() == "j"
                     try:
-                        self.news_before_minutes = int(input(f"Vorab-Sperrzeit Min. (aktuell {self.news_before_minutes}): ") or str(self.news_before_minutes))
-                        self.news_after_minutes = int(input(f"Nachher-Sperrzeit Min. (aktuell {self.news_after_minutes}): ") or str(self.news_after_minutes))
+                        self.app_config.news_before_min = int(input(f"Vorab-Sperrzeit Min. (aktuell {self.app_config.news_before_min}): ") or str(self.app_config.news_before_min))
+                        self.app_config.news_after_min = int(input(f"Nachher-Sperrzeit Min. (aktuell {self.app_config.news_after_min}): ") or str(self.app_config.news_after_min))
                     except ValueError:
                         pass
+                app_config_manager.save()
                 print("✅ News-Filter aktualisiert")
 
             elif choice == "12":
                 try:
-                    sp = int(input(f"Max Spread Pips (aktuell {self.max_spread_pips}): ") or str(self.max_spread_pips))
-                    sl = int(input(f"Max Slippage Pips (aktuell {self.max_slippage_pips}): ") or str(self.max_slippage_pips))
-                    self.max_spread_pips = max(1, sp)
-                    self.max_slippage_pips = max(1, sl)
-                    self.spread_check_enabled = input("Spread-Prüfung aktiviert? (j/n): ").lower() != "n"
-                    print(f"✅ Spread/Slippage → {self.max_spread_pips}p / {self.max_slippage_pips}p")
+                    sp = int(input(f"Max Spread Pips (aktuell {self.app_config.max_spread}): ") or str(self.app_config.max_spread))
+                    sl = int(input(f"Max Slippage Pips (aktuell {self.app_config.max_slippage}): ") or str(self.app_config.max_slippage))
+                    self.app_config.max_spread = max(1, sp)
+                    self.app_config.max_slippage = max(1, sl)
+                    self.app_config.spread_check = input("Spread-Prüfung aktiviert? (j/n): ").lower() != "n"
+                    app_config_manager.save()
+                    print(f"✅ Spread/Slippage → {self.app_config.max_spread}p / {self.app_config.max_slippage}p")
                 except ValueError:
                     print("❌ Ungültige Eingabe")
 
             elif choice == "13":
-                print("\n🚀 AI-FULLDRIVE MODE EINSTELLUNGEN")
-                print("─" * 40)
-                try:
-                    conf = int(input(f"Min. Konfidenz % (aktuell {self.fulldrive_min_confidence}, 50–95): ") or str(self.fulldrive_min_confidence))
-                    sharpe = float(input(f"Sharpe Ratio Ziel (aktuell {self.fulldrive_sharpe_target}): ") or str(self.fulldrive_sharpe_target))
-                    dd = float(input(f"Max. Drawdown % (aktuell {self.fulldrive_max_drawdown}): ") or str(self.fulldrive_max_drawdown))
-                    if 50 <= conf <= 95:
-                        self.fulldrive_min_confidence = conf
-                    self.fulldrive_sharpe_target = max(0.1, sharpe)
-                    self.fulldrive_max_drawdown = max(1.0, dd)
-                    self.fulldrive_self_optimization = input(f"Selbst-Optimierung? (j/n, aktuell {'j' if self.fulldrive_self_optimization else 'n'}): ").lower() != "n"
-                    print(f"✅ Fulldrive: Konfidenz={self.fulldrive_min_confidence}% | Sharpe={self.fulldrive_sharpe_target} | Max-DD={self.fulldrive_max_drawdown}%")
-                except ValueError:
-                    print("❌ Ungültige Eingabe")
+                print("\n🗓️ AKTIVE HANDELSTAGE:")
+                self.app_config.day_mon = input(f"Montag aktiv? (j/n, aktuell {'j' if self.app_config.day_mon else 'n'}): ").strip().lower() != "n"
+                self.app_config.day_tue = input(f"Dienstag aktiv? (j/n, aktuell {'j' if self.app_config.day_tue else 'n'}): ").strip().lower() != "n"
+                self.app_config.day_wed = input(f"Mittwoch aktiv? (j/n, aktuell {'j' if self.app_config.day_wed else 'n'}): ").strip().lower() != "n"
+                self.app_config.day_thu = input(f"Donnerstag aktiv? (j/n, aktuell {'j' if self.app_config.day_thu else 'n'}): ").strip().lower() != "n"
+                self.app_config.day_fri = input(f"Freitag aktiv? (j/n, aktuell {'j' if self.app_config.day_fri else 'n'}): ").strip().lower() != "n"
+                self.app_config.day_sat = input(f"Samstag aktiv? (j/n, aktuell {'j' if self.app_config.day_sat else 'n'}): ").strip().lower() == "j"
+                self.app_config.day_sun = input(f"Sonntag aktiv? (j/n, aktuell {'j' if self.app_config.day_sun else 'n'}): ").strip().lower() == "j"
+                app_config_manager.save()
+                print(f"✅ Handelstage aktualisiert")
+
+            elif choice == "14":
+                self.app_config.debug_mode = not self.app_config.debug_mode
+                app_config_manager.save()
+                print(f"✅ Debug-Modus → {'aktiviert' if self.app_config.debug_mode else 'deaktiviert'}")
+
             else:
                 print("❌ Ungültige Auswahl")
 
@@ -1092,20 +1077,21 @@ class MT5FinGPT:
 
     def notifications_settings_menu(self):
         """Benachrichtigungen — Parität mit GUI config_tab.py → Benachrichtigungen Tab"""
+        from core.app_config import app_config_manager
         while True:
             self.print_header("🔔 BENACHRICHTIGUNGEN")
 
             print("📌 AKTUELLE KONFIGURATION:")
             print("─" * 48)
-            print(f"   Telegram Token    : {'*****' if self.telegram_token else '(leer)'}")
-            print(f"   Telegram Chat ID  : {self.telegram_chat_id or '(leer)'}")
-            print(f"   Discord Webhook   : {'konfiguriert' if self.discord_webhook else '(leer)'}")
+            print(f"   Telegram Token    : {'*****' if self.app_config.tg_token else '(leer)'}")
+            print(f"   Telegram Chat ID  : {self.app_config.tg_chat_id or '(leer)'}")
+            print(f"   Discord Webhook   : {'konfiguriert' if self.app_config.discord_webhook else '(leer)'}")
             print(f"\n   🔔 FILTER:")
-            print(f"   SL Hit            : {'✅' if self.notify_sl_hit else '❌'}")
-            print(f"   TP Hit            : {'✅' if self.notify_tp_hit else '❌'}")
-            print(f"   Neuer Trade       : {'✅' if self.notify_new_trade else '❌'}")
-            print(f"   Fehler/Kritisch   : {'✅' if self.notify_error else '❌'}")
-            print(f"   Sound-Alerts       : {'✅' if self.sound_alerts_enabled else '❌'}")
+            print(f"   SL Hit            : {'✅' if self.app_config.notif_sl_hit else '❌'}")
+            print(f"   TP Hit            : {'✅' if self.app_config.notif_tp_hit else '❌'}")
+            print(f"   Neuer Trade       : {'✅' if self.app_config.notif_new_trade else '❌'}")
+            print(f"   Fehler/Kritisch   : {'✅' if self.app_config.notif_error else '❌'}")
+            print(f"   Sound-Alerts      : {'✅' if self.app_config.sound_alerts else '❌'}")
 
             print("\n🛠️  EDITIEROPTIONEN:")
             print("─" * 48)
@@ -1125,30 +1111,33 @@ class MT5FinGPT:
             elif choice == "1":
                 val = input("Telegram Bot Token (leer = unverändert): ").strip()
                 if val:
-                    self.telegram_token = val
+                    self.app_config.tg_token = val
+                    app_config_manager.save()
                     print("✅ Telegram Token gesetzt")
 
             elif choice == "2":
-                val = input(f"Telegram Chat ID (aktuell: {self.telegram_chat_id or '(leer)'}): ").strip()
+                val = input(f"Telegram Chat ID (aktuell: {self.app_config.tg_chat_id or '(leer)'}): ").strip()
                 if val:
-                    self.telegram_chat_id = val
-                    print(f"✅ Chat ID → {self.telegram_chat_id}")
+                    self.app_config.tg_chat_id = val
+                    app_config_manager.save()
+                    print(f"✅ Chat ID → {self.app_config.tg_chat_id}")
 
             elif choice == "3":
                 val = input("Discord Webhook URL (leer = unverändert): ").strip()
                 if val:
-                    self.discord_webhook = val
+                    self.app_config.discord_webhook = val
+                    app_config_manager.save()
                     print("✅ Discord Webhook gesetzt")
 
             elif choice == "4":
-                if not self.telegram_token or not self.telegram_chat_id:
+                if not self.app_config.tg_token or not self.app_config.tg_chat_id:
                     print("❌ Bitte erst Token und Chat ID konfigurieren")
                 else:
                     print("📤 Sende Test-Nachricht...")
                     try:
                         import requests
-                        url = f"https://api.telegram.org/bot{self.telegram_token}/sendMessage"
-                        resp = requests.post(url, json={"chat_id": self.telegram_chat_id, "text": "✅ FinGPT Terminal Test-Nachricht"}, timeout=5)
+                        url = f"https://api.telegram.org/bot{self.app_config.tg_token}/sendMessage"
+                        resp = requests.post(url, json={"chat_id": self.app_config.tg_chat_id, "text": "✅ FinGPT Terminal Test-Nachricht"}, timeout=5)
                         if resp.status_code == 200:
                             print("✅ Test-Nachricht erfolgreich gesendet!")
                         else:
@@ -1158,15 +1147,105 @@ class MT5FinGPT:
 
             elif choice == "5":
                 print("\n🔔 BENACHRICHTIGUNGSFILTER (j = aktiv, n = inaktiv):")
-                self.notify_sl_hit = input(f"SL Hit ({('✅' if self.notify_sl_hit else '❌')}): ").strip().lower() != "n"
-                self.notify_tp_hit = input(f"TP Hit ({('✅' if self.notify_tp_hit else '❌')}): ").strip().lower() != "n"
-                self.notify_new_trade = input(f"Neuer Trade ({('✅' if self.notify_new_trade else '❌')}): ").strip().lower() != "n"
-                self.notify_error = input(f"Fehler/Kritisch ({('✅' if self.notify_error else '❌')}): ").strip().lower() != "n"
+                self.app_config.notif_sl_hit = input(f"SL Hit ({('✅' if self.app_config.notif_sl_hit else '❌')}): ").strip().lower() != "n"
+                self.app_config.notif_tp_hit = input(f"TP Hit ({('✅' if self.app_config.notif_tp_hit else '❌')}): ").strip().lower() != "n"
+                self.app_config.notif_new_trade = input(f"Neuer Trade ({('✅' if self.app_config.notif_new_trade else '❌')}): ").strip().lower() != "n"
+                self.app_config.notif_error = input(f"Fehler/Kritisch ({('✅' if self.app_config.notif_error else '❌')}): ").strip().lower() != "n"
+                app_config_manager.save()
                 print("✅ Filter aktualisiert")
 
             elif choice == "6":
-                self.sound_alerts_enabled = not self.sound_alerts_enabled
-                print(f"✅ Sound-Alerts → {'aktiviert' if self.sound_alerts_enabled else 'deaktiviert'}")
+                self.app_config.sound_alerts = not self.app_config.sound_alerts
+                app_config_manager.save()
+                print(f"✅ Sound-Alerts → {'aktiviert' if self.app_config.sound_alerts else 'deaktiviert'}")
+
+            else:
+                print("❌ Ungültige Auswahl")
+
+            input("\nDrücken Sie Enter zum Fortfahren...")
+
+    def mcp_settings_menu(self):
+        """MCP Server Konfiguration — Parität mit GUI config_tab.py → MCP Server Tab"""
+        from core.app_config import app_config_manager
+        while True:
+            self.print_header("🔌 MCP SERVER KONFIGURATION")
+
+            print("📌 AKTUELLE KONFIGURATION:")
+            print("─" * 48)
+            print(f"   MCP Server aktiv      : {'✅' if self.app_config.mcp_enabled else '❌'}")
+            
+            # Zeige Status falls verfügbar
+            tv_status = "❌ Nicht gestartet"
+            hive_status = "❌ Nicht gestartet"
+            
+            if hasattr(self, 'trading_controller') and self.trading_controller and hasattr(self.trading_controller, 'mcp_engine'):
+                if getattr(self.trading_controller.mcp_engine, 'mcp_integration', None) and getattr(self.trading_controller.mcp_engine.mcp_integration, 'is_running', False):
+                    tv_status = "✅ Aktiv"
+                    hive_status = "✅ Aktiv"
+            
+            print(f"   TradingView MCP       : {tv_status}")
+            print(f"   Hive Intelligence MCP : {hive_status}")
+
+            print("\n🛠️  EDITIEROPTIONEN:")
+            print("─" * 48)
+            print("  1. 🔌 MCP Server umschalten (Aktiv/Inaktiv)")
+            print("  2. 🚀 MCP Server manuell starten")
+            print("  0. ⬅️  Zurück")
+
+            choice = input("\n🎯 Ihre Wahl (0-2): ").strip()
+
+            if choice == "0":
+                break
+
+            elif choice == "1":
+                self.app_config.mcp_enabled = not self.app_config.mcp_enabled
+                app_config_manager.save()
+                
+                # Wenn aktiv und Trading Controller vorhanden, starte Engine (oder stoppe sie)
+                if hasattr(self, 'trading_controller') and self.trading_controller:
+                    if self.app_config.mcp_enabled and getattr(self.trading_controller, 'mcp_engine', None):
+                        try:
+                            self.trading_controller.mcp_engine.start()
+                            print("✅ MCP Server gestartet")
+                        except Exception as e:
+                            print(f"❌ Fehler beim Starten: {e}")
+                    elif not self.app_config.mcp_enabled and getattr(self.trading_controller, 'mcp_engine', None):
+                        try:
+                            self.trading_controller.mcp_engine.stop()
+                            print("✅ MCP Server gestoppt")
+                        except Exception:
+                            pass
+                            
+                print(f"✅ MCP Server → {'aktiviert' if self.app_config.mcp_enabled else 'deaktiviert'}")
+
+            elif choice == "2":
+                print("🚀 Versuche MCP Server zu starten...")
+                if not hasattr(self, 'trading_controller') or not getattr(self, 'trading_controller', None):
+                    try:
+                        from core.trading_controller import TradingController
+                        self.trading_controller = TradingController(self)
+                    except Exception as e:
+                        print(f"❌ Trading Controller Fehler: {e}")
+                        input("\nDrücken Sie Enter zum Fortfahren...")
+                        continue
+
+                if getattr(self.trading_controller, 'mcp_engine', None) is None:
+                    try:
+                        from core.mcp_integration import create_mcp_integration
+                        self.trading_controller.mcp_engine = create_mcp_integration(self, None)
+                    except Exception as e:
+                        print(f"❌ MCP Engine Fehler: {e}")
+                        input("\nDrücken Sie Enter zum Fortfahren...")
+                        continue
+
+                if self.trading_controller.mcp_engine:
+                    try:
+                        self.trading_controller.mcp_engine.start()
+                        print("✅ MCP Server erfolgreich gestartet!")
+                    except Exception as e:
+                        print(f"❌ Fehler beim Starten: {e}")
+                else:
+                    print("❌ MCP Engine konnte nicht erstellt werden.")
 
             else:
                 print("❌ Ungültige Auswahl")

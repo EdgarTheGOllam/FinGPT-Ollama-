@@ -156,15 +156,16 @@ class CLIMenu:
             print(" 15. 🤖 KI & Ollama Einstellungen")
             print(" 16. 📊 Trading Stil & Ausführung (inkl. AI-Fulldrive)")
             print(" 17. 🔕 Benachrichtigungen (Telegram / Discord)")
+            print(" 18. 🔌 MCP Server Konfiguration")
 
-            print(f"\n{TerminalColors.FAIL} 18. ❌ Beenden{TerminalColors.ENDC}")
+            print(f"\n{TerminalColors.FAIL} 19. ❌ Beenden{TerminalColors.ENDC}")
             print(f"{TerminalColors.HEADER}────────────────────────────────────────────────────────────────────────────────{TerminalColors.ENDC}")
 
             try:
-                print(f"{TerminalColors.BOLD}🎯 Ihre Wahl (1-18): {TerminalColors.ENDC}", end="", flush=True)
+                print(f"{TerminalColors.BOLD}🎯 Ihre Wahl (1-19): {TerminalColors.ENDC}", end="", flush=True)
                 choice = input().strip()
             except KeyboardInterrupt:
-                choice = "18"
+                choice = "19"
             
             if not choice:
                 continue
@@ -429,13 +430,20 @@ class CLIMenu:
                 return True
 
             elif choice == "18":
+                if hasattr(self.app, 'mcp_settings_menu'):
+                    self.app.mcp_settings_menu()
+                else:
+                    self.print_error("MCP Einstellungen nicht gefunden")
+                return True
+
+            elif choice == "19":
                 print(f"\n{TerminalColors.OKCYAN}Fahre FinGPT System herunter...{TerminalColors.ENDC}")
                 if hasattr(self.app, 'shutdown_system'):
                     return self.app.shutdown_system()
                 return False
 
             else:
-                self.print_error("Ungültige Option gewählt. Bitte eine Zahl (1-18) eingeben.")
+                self.print_error("Ungültige Option gewählt. Bitte eine Zahl (1-19) eingeben.")
                 self.pause_menu()
                 return True
                 

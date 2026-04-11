@@ -139,86 +139,38 @@ class ChartsView:
         self.app.after(1000, self.app.load_forex_charts)
 
     def load_advanced_chart(self):
-        self.app.write_terminal(f">> Lade erweiterten Chart für {self.app.adv_symbol_var.get()}...\n")
-    
-        # Clear existing charts
-        for widget in self.app.adv_chart_container.winfo_children():
-            widget.destroy()
-        
-        loading_lbl = ctk.CTkLabel(self.app.adv_chart_container, text="Lade Daten und berechne Indikatoren...", font=ctk.CTkFont(family="Inter", size=14))
-        loading_lbl.pack(expand=True)
+        self.app.write_terminal(f">> Lade interaktiven Web-Chart für {self.app.adv_symbol_var.get()}...\n")
     
         symbol = self.app.adv_symbol_var.get()
         tf_str = self.app.adv_timeframe_var.get()
-        indicator = self.app.adv_indicator_var.get()
-    
-        # Use a style compatible with dark mode
-        mc = mpf.make_marketcolors(up='#5EBA7D', down='#E74C3C', edge='i', wick='i')
-        s = mpf.make_mpf_style(marketcolors=mc, facecolor='#1E1E1E', edgecolor='gray', 
-                               figcolor='#1E1E1E', gridcolor='#333333', gridstyle=':')
-                           
-        def fetch_and_plot_adv():
-            try:
-                if not mt5.initialize():
-                    raise Exception("MetaTrader 5 konnte nicht initialisiert werden.")
+        
+        import subprocess
+        import sys
+        import os
+        
+        # Launch the interactive pywebview chart in a separate process to avoid blocking Tkinter mainloop
+        script_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "tv_chart.py")
+        subprocess.Popen([sys.executable, script_path, symbol, tf_str])
+        
+        # Update UI text to let user know it opened in a new window
+        for widget in self.app.adv_chart_container.winfo_children():
+            widget.destroy()
             
-                # Bestimme Timeframe
-                if "M1 " in tf_str: tf = mt5.TIMEFRAME_M1
-                elif "M5" in tf_str: tf = mt5.TIMEFRAME_M5
-                elif "M15" in tf_str: tf = mt5.TIMEFRAME_M15
-                elif "M30" in tf_str: tf = mt5.TIMEFRAME_M30
-                elif "H1" in tf_str: tf = mt5.TIMEFRAME_H1
-                elif "H4" in tf_str: tf = mt5.TIMEFRAME_H4
-                else: tf = mt5.TIMEFRAME_D1
-            
-                # Lade 150 Kerzen für den großen Chart
-                rates = mt5.copy_rates_from_pos(symbol, tf, 0, 150)
-                if rates is None or len(rates) == 0:
-                    raise Exception(f"Keine Daten für {symbol} empfangen.")
-                
-                df = pd.DataFrame(rates)
-                df['time'] = pd.to_datetime(df['time'], unit='s')
-                df.set_index('time', inplace=True)
-            
-                fig = Figure(figsize=(9, 5), facecolor='#1E1E1E')
-                ax = fig.add_subplot(111)
-                ax.set_title(f"{symbol} - {tf_str.split(' ')[0]} - {indicator}", color='white')
-                ax.tick_params(colors='white')
-
-                # Indikator berechnen & Addplot vorbereiten
-                apds = []
-                if indicator == "SMA 20":
-                    sma20 = df['close'].rolling(window=20).mean()
-                    apds.append(mpf.make_addplot(sma20, color='cyan', ax=ax))
-                elif indicator == "SMA 50":
-                    sma50 = df['close'].rolling(window=50).mean()
-                    apds.append(mpf.make_addplot(sma50, color='orange', ax=ax))
-                elif indicator == "EMA 200":
-                    ema200 = df['close'].ewm(span=200, adjust=False).mean()
-                    apds.append(mpf.make_addplot(ema200, color='yellow', ax=ax))
-                elif indicator == "Bollinger Bands":
-                    sma20 = df['close'].rolling(window=20).mean()
-                    std20 = df['close'].rolling(window=20).std()
-                    upper_band = sma20 + (std20 * 2)
-                    lower_band = sma20 - (std20 * 2)
-                    apds.append(mpf.make_addplot(upper_band, color='cyan', alpha=0.5, ax=ax))
-                    apds.append(mpf.make_addplot(lower_band, color='cyan', alpha=0.5, ax=ax))
-                    apds.append(mpf.make_addplot(sma20, color='orange', alpha=0.8, ax=ax))
-            
-                plot_kwargs = dict(type='candle', ax=ax, style=s, show_nontrading=False, warn_too_much_data=2000)
-                if apds:
-                    plot_kwargs['addplot'] = apds
-                
-                mpf.plot(df, **plot_kwargs)
-                fig.tight_layout()
-            
-                # Update GUI
-                self.app.after(0, lambda: self._render_adv_chart(fig))
-            except Exception as e:
-                error_msg = str(e)
-                self.app.after(0, lambda msg=error_msg: loading_lbl.configure(text=f"Fehler: {msg}"))
-            
-        threading.Thread(target=fetch_and_plot_adv, daemon=True).start()
+        success_lbl = ctk.CTkLabel(
+            self.app.adv_chart_container, 
+            text=f"✅ Interaktiver Web-Chart für {symbol} ({tf_str}) geöffnet.", 
+            font=ctk.CTkFont(family="Inter", size=16, weight="bold"),
+            text_color="#00E676"
+        )
+        success_lbl.pack(expand=True)
+        
+        sub_lbl = ctk.CTkLabel(
+            self.app.adv_chart_container, 
+            text="Siehe externes Web-View Fenster.", 
+            font=ctk.CTkFont(family="Inter", size=14),
+            text_color="#8B949E"
+        )
+        sub_lbl.pack()
 
     def _render_adv_chart(self, fig):
         for widget in self.app.adv_chart_container.winfo_children():

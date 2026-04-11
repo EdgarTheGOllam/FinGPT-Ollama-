@@ -195,6 +195,20 @@ class RLSettingsView:
         )
         self.app.btn_start_rl.pack(fill="x", pady=(10, 10))
 
+        self.app.btn_optimize_rl = ctk.CTkButton(
+            ctrl_box, text="🚀 OPTIMIZE (Optuna)", font=ctk.CTkFont(family="Inter", size=13, weight="bold"),
+            height=35, fg_color="#8E44AD", hover_color="#732D91",
+            command=self._start_rl_optimization_sim
+        )
+        self.app.btn_optimize_rl.pack(fill="x", pady=(0, 10))
+
+        self.app.btn_finetune_rl = ctk.CTkButton(
+            ctrl_box, text="🔄 FINE-TUNE", font=ctk.CTkFont(family="Inter", size=13, weight="bold"),
+            height=35, fg_color="#3498DB", hover_color="#2980B9",
+            command=self._start_rl_finetuning_sim
+        )
+        self.app.btn_finetune_rl.pack(fill="x", pady=(0, 10))
+
         self.app.btn_stop_rl = ctk.CTkButton(
             ctrl_box, text="HALT ENGINE", font=ctk.CTkFont(family="Inter", size=13, weight="bold"),
             height=35, fg_color="#FF1744", hover_color="#C0392B", state="disabled",
@@ -445,6 +459,11 @@ class RLSettingsView:
 
         self.app._training_active = True
         self.app.btn_start_rl.configure(state="disabled", fg_color="#1A1D24")
+        try:
+            self.app.btn_optimize_rl.configure(state="disabled")
+            self.app.btn_finetune_rl.configure(state="disabled")
+        except Exception:
+            pass
         self.app.btn_stop_rl.configure(state="normal")
         self.rl_status_lbl.configure(
             text=f"Trainiere {algo} Model...", text_color="#8E44AD"
@@ -756,6 +775,11 @@ class RLSettingsView:
         self.rl_pct_lbl.configure(text="100%")
 
         self.app.btn_start_rl.configure(state="normal", fg_color="#00FF66")
+        try:
+            self.app.btn_optimize_rl.configure(state="normal")
+            self.app.btn_finetune_rl.configure(state="normal")
+        except Exception:
+            pass
         self.app.btn_stop_rl.configure(state="disabled")
 
     def _stop_rl_training_sim(self):
@@ -768,7 +792,102 @@ class RLSettingsView:
 
         self.rl_status_lbl.configure(text="Training Abgebrochen", text_color="#FF1744")
         self.app.btn_start_rl.configure(state="normal", fg_color="#00FF66")
+        try:
+            self.app.btn_optimize_rl.configure(state="normal")
+            self.app.btn_finetune_rl.configure(state="normal")
+        except Exception:
+            pass
         self.app.btn_stop_rl.configure(state="disabled")
+        try:
+            self.app.btn_optimize_rl.configure(state="normal")
+            self.app.btn_finetune_rl.configure(state="normal")
+        except Exception:
+            pass
+
+    def _get_target_symbol(self):
+        try:
+            return self.app.config_view.live_symbols_entry.get().split(",")[0].strip() or "EURUSD"
+        except:
+            return "EURUSD"
+
+    def _init_rl_manager(self):
+        if not hasattr(self.app, "rl_manager"):
+            try:
+                from trading.rl_trading_agent import RLTradingManager
+                self.app.rl_manager = RLTradingManager(self.app)
+                return True
+            except Exception as e:
+                self._write_rl_log(f"[ERROR] RLTradingManager Modul nicht ladbar: {e}", "tf")
+                return False
+        return True
+
+    def _start_rl_optimization_sim(self):
+        if self.app._training_active:
+            return
+        
+        if not self._init_rl_manager():
+            return
+            
+        self.app._training_active = True
+        self.app.btn_start_rl.configure(state="disabled")
+        self.app.btn_optimize_rl.configure(state="disabled")
+        self.app.btn_finetune_rl.configure(state="disabled")
+        self.app.btn_stop_rl.configure(state="normal")
+        
+        target_symbol = self._get_target_symbol()
+        
+        self._write_rl_log(f"\n[OPTUNA] Starte Hyperparameter-Optimierung für {target_symbol}...", "info")
+        self.rl_status_lbl.configure(text="Optuna Optimierung läuft...", text_color="#8E44AD")
+        self.rl_progress.set(0)
+        
+        def _optimize_task():
+            try:
+                success = self.app.rl_manager.optimize_agent(target_symbol, n_trials=10, total_timesteps=5000)
+                if success:
+                    self.app.after(0, lambda: self._write_rl_log(f"[OPTUNA] Optimierung erfolgreich abgeschlossen!", "success"))
+                    self.app.after(0, lambda: self.rl_status_lbl.configure(text="Optimierung beendet", text_color="#00FF66"))
+                else:
+                    self.app.after(0, lambda: self._write_rl_log(f"[OPTUNA] Optimierung fehlgeschlagen.", "tf"))
+            except Exception as e:
+                self.app.after(0, lambda: self._write_rl_log(f"[OPTUNA] Fehler: {e}", "tf"))
+            finally:
+                self.app.after(0, self._stop_rl_training_sim)
+                
+        threading.Thread(target=_optimize_task, daemon=True).start()
+
+    def _start_rl_finetuning_sim(self):
+        if self.app._training_active:
+            return
+            
+        if not self._init_rl_manager():
+            return
+            
+        self.app._training_active = True
+        self.app.btn_start_rl.configure(state="disabled")
+        self.app.btn_optimize_rl.configure(state="disabled")
+        self.app.btn_finetune_rl.configure(state="disabled")
+        self.app.btn_stop_rl.configure(state="normal")
+        
+        target_symbol = self._get_target_symbol()
+        
+        self._write_rl_log(f"\n[FINE-TUNE] Starte Continuous Learning für {target_symbol}...", "info")
+        self.rl_status_lbl.configure(text="Fine-Tuning läuft...", text_color="#3498DB")
+        self.rl_progress.set(0)
+        
+        def _finetune_task():
+            try:
+                success = self.app.rl_manager.fine_tune_agent(target_symbol, timesteps=5000)
+                if success:
+                    self.app.after(0, lambda: self._write_rl_log(f"[FINE-TUNE] Fine-Tuning erfolgreich abgeschlossen!", "success"))
+                    self.app.after(0, lambda: self.rl_status_lbl.configure(text="Fine-Tuning beendet", text_color="#00FF66"))
+                else:
+                    self.app.after(0, lambda: self._write_rl_log(f"[FINE-TUNE] Fine-Tuning fehlgeschlagen.", "tf"))
+            except Exception as e:
+                self.app.after(0, lambda: self._write_rl_log(f"[FINE-TUNE] Fehler: {e}", "tf"))
+            finally:
+                self.app.after(0, self._stop_rl_training_sim)
+                
+        threading.Thread(target=_finetune_task, daemon=True).start()
 
     # ═══════════════════════════════════════════════════════════════
     # 🌌 NEURAL NETWORK SUB-TAB

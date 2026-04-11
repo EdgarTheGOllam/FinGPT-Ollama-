@@ -352,6 +352,51 @@ class TradingController:
                         time.sleep(60)
                         continue
 
+                if news_filt:
+                    now_local = datetime.now()
+                    news_before_td = timedelta(minutes=cfg.news_before_min)
+                    news_after_td = timedelta(minutes=cfg.news_after_min)
+                    cal_events = getattr(self.app, 'calendar_events', [])
+                    blocked_by_news = False
+
+                    for ev in cal_events:
+                        imp = str(ev.get("impact", "")).upper()
+                        imp_match = False
+                        
+                        if cfg.news_high and imp in ("HOCH", "HIGH"):
+                            imp_match = True
+                        if cfg.news_medium and imp in ("MITTEL", "MEDIUM"):
+                            imp_match = True
+                        if cfg.news_low and imp in ("NIEDRIG", "LOW"):
+                            imp_match = True
+                            
+                        if not imp_match:
+                            continue
+                            
+                        ev_time_str = ev.get("time", "")
+                        if not ev_time_str or ":" not in ev_time_str:
+                            continue
+                            
+                        try:
+                            hr, mn = map(int, ev_time_str.split(":"))
+                            ev_dt = now_local.replace(hour=hr, minute=mn, second=0, microsecond=0)
+                            
+                            window_start = ev_dt - news_before_td
+                            window_end = ev_dt + news_after_td
+                            
+                            if window_start <= now_local <= window_end:
+                                self.app.write_terminal(
+                                    f">> [AUTO] Trading blockiert: Wichtiges News-Event ({ev_time_str} {ev.get('currency', '')} - {ev.get('event', '')})\\n"
+                                )
+                                blocked_by_news = True
+                                break
+                        except Exception:
+                            continue
+                            
+                    if blocked_by_news:
+                        time.sleep(60)
+                        continue
+
                 acc = mt5.account_info()
                 if acc is None:
                     time.sleep(10)
@@ -602,6 +647,47 @@ class TradingController:
                             f"Übergeordneter Trend (HTF): {htf_trend}\\n"
                             f"Nutze NUR Price Action: Kerzenformationen, Struktur, Key-Level."
                         )
+
+                        # Style-spezifisches Signal als Kontext-Hint für KI-Modus
+                        style_signal_hint = ""
+                        if style == "ICT Orderblock":
+                            try:
+                                from trading.ict_trading.ict_strategy import ICTStrategy
+                                _ict = ICTStrategy()
+                                _sig = _ict.get_signal(symbol)
+                                if hasattr(_sig, 'action') and _sig.action in ("BUY", "SELL"):
+                                    style_signal_hint = f" | ICT Signal: {_sig.action} ({getattr(_sig, 'reason', '')})"
+                            except Exception:
+                                pass
+                        elif style == "Market Profile":
+                            try:
+                                from trading.volume_profile.vp_strategy import VPStrategy
+                                _vp = VPStrategy()
+                                _sig = _vp.get_signal(symbol)
+                                if hasattr(_sig, 'action') and _sig.action in ("BUY", "SELL"):
+                                    style_signal_hint = f" | Market Profile: {_sig.action} ({getattr(_sig, 'reason', '')})"
+                            except Exception:
+                                pass
+                        elif style == "Pattern Trading":
+                            try:
+                                from trading.pattern_trading.pattern_strategy import PatternStrategy
+                                _pat = PatternStrategy()
+                                _sig = _pat.get_signal(symbol)
+                                if hasattr(_sig, 'action') and _sig.action in ("BUY", "SELL"):
+                                    style_signal_hint = f" | Pattern: {getattr(_sig, 'pattern_type', '')} → {_sig.action} ({getattr(_sig, 'reason', '')})"
+                            except Exception:
+                                pass
+                        elif style == "Structure Trading":
+                            try:
+                                from trading.structure_trading.structure_strategy import StructureStrategy
+                                _struct = StructureStrategy()
+                                _sig = _struct.get_signal(symbol)
+                                if hasattr(_sig, 'action') and _sig.action in ("BUY", "SELL"):
+                                    style_signal_hint = f" | Struktur: {_sig.action} ({getattr(_sig, 'reason', '')})"
+                            except Exception:
+                                pass
+
+                        signal_hint = signal_hint + style_signal_hint
 
                         style_instruction = {
                             "Scalping": "Kurze, präzise Bewegungen. RRR 1:2. Nur A+ Setups.",
@@ -1058,7 +1144,7 @@ class TradingController:
                             f"   >> KI-SIGNAL: {ai_signal}\\n"
                         )
                         self.app.write_terminal(
-                            f">> [AUTO] {symbol} | RSI:{res['rsi']} | MACD:{res['macd']} | Trend:{res['trend']} | Spread:{res['spread']:.1f}p | Signal: {ai_signal}\\n"
+                            f">> [AUTO] {symbol} | RSI:{rsi_val} | MACD:{macd_sig} | Trend:{htf_trend} | Spread:{spread_pips:.1f}p | Signal: {ai_signal}\\n"
                         )
 
                     if ai_signal == "WARTEN":

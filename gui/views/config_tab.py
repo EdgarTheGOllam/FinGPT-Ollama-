@@ -299,7 +299,7 @@ class ConfigView:
         self.appearance_var = ctk.StringVar(value="Dark")
         app_combo = ctk.CTkComboBox(
             c1,
-            values=["Dark", "Gedimmt", "System"],
+            values=["Dark", "Gedimmt", "White", "System"],
             variable=self.appearance_var,
             width=300,
             command=self._on_appearance_change,
@@ -319,14 +319,6 @@ class ConfigView:
             ),
         )
         theme_combo.grid(row=1, column=1, sticky="w", pady=10, padx=20)
-
-        self.mica_switch = ctk.CTkSwitch(
-            c1,
-            text="Windows 11 Mica-Effekt (Glassmorphismus)",
-            progress_color="#8E44AD",
-            command=self.app._trigger_autosave,
-        )
-        self.mica_switch.grid(row=2, column=0, columnspan=2, sticky="w", pady=15)
 
     def _build_style_tab(self, parent):
         # 1. Automatisierung & Stil
@@ -903,9 +895,9 @@ class ConfigView:
         )
 
     def _on_appearance_change(self, choice):
-        """Handles appearance mode changes. 'Gedimmt' = soft dark gray."""
+        """Handles appearance mode changes."""
         if choice == "Gedimmt":
-            # Force CTk into Dark mode, then tint the root window lighter
+            # Force CTk into Light mode (or slightly modified dark mode), then tint the root window lighter
             ctk.set_appearance_mode("Dark")
             try:
                 root = self.app
@@ -918,6 +910,19 @@ class ConfigView:
                 # Also update the tabview bg
                 root.tabview.configure(fg_color="#343748")
                 root.status_bar.configure(fg_color="#343748")
+            except Exception:
+                pass
+        elif choice == "White":
+            ctk.set_appearance_mode("Light")
+            try:
+                root = self.app
+                _WHITE_BG = "#FFFFFF"
+                root.configure(fg_color=_WHITE_BG)
+                root.main_container.configure(fg_color=_WHITE_BG)
+                root.content_frame.configure(fg_color=_WHITE_BG)
+                root.title_bar.configure(fg_color=_WHITE_BG)
+                root.tabview.configure(fg_color="#F0F0F0")
+                root.status_bar.configure(fg_color="#F0F0F0")
             except Exception:
                 pass
         elif choice == "Dark":

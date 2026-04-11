@@ -81,41 +81,35 @@ class SpotlightOverlay:
         if w <= 1 or h <= 1:
             return
 
-        # Canvas über dem gesamten Parent erstellen - WICHTIG: Transparenter Hintergrund
+        parent_bg = self.parent.cget("fg_color")
+        if isinstance(parent_bg, (tuple, list)):
+            mode = ctk.get_appearance_mode()
+            bg_color = parent_bg[0] if mode == "Light" else parent_bg[1]
+        elif parent_bg == "transparent" or not parent_bg:
+            bg_color = "#1E2228"
+        else:
+            bg_color = parent_bg
+            
+        # VERY IMPORTANT FIX: Check if bg_color is an empty string, which causes TclError
+        if not bg_color or bg_color == "":
+            bg_color = "#1E2228"
+
+        # Canvas über dem gesamten Parent erstellen
         self.canvas = tk.Canvas(
             self.parent,
             width=w,
             height=h,
             highlightthickness=0,
-            bg="",  # Transparent - kein Hintergrund!
+            bg=bg_color,
         )
-        # Canvas-Konfiguration: komplett transparent machen
-        self.canvas.configure(bg=self.parent.cget("fg_color") or "#1E2228")
 
         # Das Canvas muss HINTER allen anderen Widgets liegen
-        # Da lower() ohne Argumente in neueren Tkinter-Versionen nicht funktioniert,
-        # verwenden wir einen alternativen Trick: canvas mit lower() auf ein existierendes Geschwister
+        # Verwende den tk.Misc.lower() Aufruf, um Konflikte mit Canvas.lower(item) zu vermeiden
         try:
-            # Versuche alle Geschwister-Widgets zu finden, die vor dem Canvas liegen sollten
-            siblings = self.parent.winfo_children()
-            if siblings:
-                # Finde das erste Geschwister und setze es vor unser Canvas
-                first_sibling = siblings[0]
-                self.canvas.lower(first_sibling)
-            else:
-                # Keine Geschwister - versuche es ohne Argumente (funktioniert in älterem Tkinter)
-                self.canvas.lower()
-        except (TclError, tk.TclError, AttributeError):
-            # Fallback: after() mit verzögertem Versuch
-            def lower_canvas():
-                try:
-                    siblings = self.parent.winfo_children()
-                    if siblings:
-                        self.canvas.lower(siblings[0])
-                except Exception:
-                    pass
-
-            self.parent.after(100, lower_canvas)
+            tk.Misc.lower(self.canvas)
+        except Exception:
+            # Fallback falls Misc.lower fehlschlägt
+            pass
 
         # Positioniere das Canvas
         self.canvas.place(x=0, y=0, relwidth=1.0, relheight=1.0)

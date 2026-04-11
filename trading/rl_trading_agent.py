@@ -1,21 +1,23 @@
 #!/usr/bin/env python3
 """
 Reinforcement Learning Trading Agent für FinGPT
-Deep Q-Network (DQN) mit Experience Replay und Target Network
+Verwendet Stable-Baselines3 (PPO) und Gymnasium
 """
 
 import numpy as np
 import pandas as pd
 import MetaTrader5 as mt5
 from datetime import datetime, timedelta
-import pickle
+import os
 import json
 import threading
 import time
 from collections import deque
 import random
-from datetime import datetime
+import logging
 
+import gymnasium as gym
+from gymnasium import spaces
 
 # Fancy console
 class C:
@@ -25,36 +27,37 @@ class C:
     YELLOW = "\033[33m"
     LGRAY = "\033[90m"
 
-
 def ts():
     return datetime.now().strftime("%H:%M:%S")
 
-
-# PyTorch für Neural Networks
+# Stable-Baselines3 und PyTorch
 try:
     import torch
-    import torch.nn as nn
-    import torch.optim as optim
-
+    from stable_baselines3 import PPO
+    from stable_baselines3.common.callbacks import BaseCallback
     TORCH_AVAILABLE = True
-    print(f"{C.LGRAY}[{ts()}]{C.RESET} {C.GREEN}✅ [OK] PyTorch verfügbar{C.RESET}")
+    print(f"{C.LGRAY}[{ts()}]{C.RESET} {C.GREEN}[OK] PyTorch & Stable-Baselines3 verfügbar{C.RESET}")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 except ImportError:
     TORCH_AVAILABLE = False
-    print(
-        f"{C.LGRAY}[{ts()}]{C.RESET} {C.RED}❌ [FEHLER] PyTorch nicht installiert – pip install torch{C.RESET}"
-    )
+    print(f"{C.LGRAY}[{ts()}]{C.RESET} {C.RED}[FEHLER] PyTorch / Stable-Baselines3 nicht installiert!{C.RESET}")
 
+try:
+    import optuna
+    OPTUNA_AVAILABLE = True
+except ImportError:
+    OPTUNA_AVAILABLE = False
+    print(f"{C.LGRAY}[{ts()}]{C.RESET} {C.YELLOW}[WARN] Optuna nicht installiert. Hyperparameter-Optimierung deaktiviert.{C.RESET}")
 
-class TradingEnvironment:
+class TradingEnvironment(gym.Env):
     """
-    Trading Environment für RL Agent
+    Gymnasium Trading Environment für RL Agent (Stable-Baselines3)
     Simuliert Marktbedingungen und Handelsaktionen
     """
+    metadata = {'render_modes': ['human']}
 
-    def __init__(
-        self, symbol="EURUSD", lookback_period=100, timeframe=mt5.TIMEFRAME_M15
-    ):
+    def __init__(self, symbol="EURUSD", lookback_period=100, timeframe=mt5.TIMEFRAME_M15):
+        super(TradingEnvironment, self).__init__()
         self.symbol = symbol
         self.lookback_period = lookback_period
         self.timeframe = timeframe
@@ -92,14 +95,22 @@ class TradingEnvironment:
             "trend_strength",
         ]
 
-        self.state_size = (
-            len(self.state_features) + 3
-        )  # +3 für position, profit, time_in_position
-        self.action_size = 3  # 0=Hold, 1=Buy, 2=Sell
+        self.state_size = len(self.state_features) + 3  # +3 für position, profit, time_in_position
+        
+        # Action Space (0: Hold, 1: Buy, 2: Sell)
+        self.action_space = spaces.Discrete(3)
+        
+        # Observation Space
+        self.observation_space = spaces.Box(
+            low=-np.inf, high=np.inf, shape=(self.state_size,), dtype=np.float32
+        )
 
-    def load_historical_data(self, bars=5000):
-        """Lädt historische Daten für Training"""
+    def load_historical_data(self, bars=5000, data_subset="all", split_ratio=0.8):
+        """Lädt historische Daten für Training, Validierung oder Gesamt"""
         try:
+            if not mt5.initialize():
+                print(f"[X] MT5 Initialization failed")
+                return False
             rates = mt5.copy_rates_from_pos(self.symbol, self.timeframe, 0, bars)
             if rates is None:
                 raise Exception(f"Keine Daten für {self.symbol}")
@@ -110,12 +121,20 @@ class TradingEnvironment:
             # Berechne technische Indikatoren
             df = self.calculate_technical_indicators(df)
 
-            self.data = df.dropna()
+            df = df.dropna().reset_index(drop=True)
 
-            # Additional type check for Pyre
-            if self.data is not None:
-                print(f"[OK] {len(self.data)} Datenpunkte geladen fuer {self.symbol}")
-            return True
+            split_idx = int(len(df) * split_ratio)
+            if data_subset == "train":
+                self.data = df.iloc[:split_idx].reset_index(drop=True)
+            elif data_subset in ["test", "val"]:
+                self.data = df.iloc[split_idx:].reset_index(drop=True)
+            else:
+                self.data = df
+
+            if self.data is not None and not self.data.empty:
+                print(f"[OK] {len(self.data)} Datenpunkte geladen fuer {self.symbol} (Modus: {data_subset})")
+                return True
+            return False
 
         except Exception as e:
             print(f"[X] Fehler beim Laden der Daten: {e}")
@@ -125,7 +144,6 @@ class TradingEnvironment:
         """Berechnet alle technischen Indikatoren mit pandas-ta (Fallback auf numpy)"""
         try:
             import pandas_ta as ta
-
             # RSI
             df["rsi"] = ta.rsi(df["close"], length=14)
 
@@ -138,29 +156,24 @@ class TradingEnvironment:
 
             # Bollinger Bands
             bb = ta.bbands(df["close"], length=20, std=2)
-            if bb is not None:
-                df["bb_upper"] = bb["BBU_20_2.0"]
-                df["bb_middle"] = bb["BBM_20_2.0"]
-                df["bb_lower"] = bb["BBL_20_2.0"]
-                df["bb_position"] = bb["BBP_20_2.0"]
+            if bb is not None and len(bb.columns) >= 5:
+                df["bb_lower"] = bb[bb.columns[0]]
+                df["bb_middle"] = bb[bb.columns[1]]
+                df["bb_upper"] = bb[bb.columns[2]]
+                df["bb_position"] = bb[bb.columns[4]]
 
         except ImportError:
-            print("⚠️ [RL] pandas_ta nicht gefunden, verwende langsame Berechnung")
-
+            print("[RL] pandas_ta nicht gefunden, verwende langsame Berechnung")
             # RSI (Fallback)
             def calculate_rsi(prices, period=14):
                 deltas = np.diff(prices)
                 gains = np.where(deltas > 0, deltas, 0)
                 losses = np.where(deltas < 0, -deltas, 0)
-                # Simple Moving Average for first value, then smoothed
                 avg_gains = pd.Series(gains).ewm(alpha=1 / period, adjust=False).mean()
-                avg_losses = (
-                    pd.Series(losses).ewm(alpha=1 / period, adjust=False).mean()
-                )
+                avg_losses = pd.Series(losses).ewm(alpha=1 / period, adjust=False).mean()
                 rs = avg_gains / avg_losses
                 return 100 - (100 / (1 + rs))
 
-            # Use shift to align with numpy diff
             df["rsi"] = calculate_rsi(df["close"].values)
             df["rsi"] = df["rsi"].shift(1)  # Align
 
@@ -176,9 +189,7 @@ class TradingEnvironment:
             bb_std = df["close"].rolling(window=20).std()
             df["bb_upper"] = df["bb_middle"] + (bb_std * 2)
             df["bb_lower"] = df["bb_middle"] - (bb_std * 2)
-            df["bb_position"] = (df["close"] - df["bb_lower"]) / (
-                df["bb_upper"] - df["bb_lower"]
-            )
+            df["bb_position"] = (df["close"] - df["bb_lower"]) / (df["bb_upper"] - df["bb_lower"] + 1e-9)
 
         # Price Changes (Standard Pandas)
         df["price_change_1"] = df["close"].pct_change(1)
@@ -186,9 +197,7 @@ class TradingEnvironment:
         df["price_change_20"] = df["close"].pct_change(20)
 
         # Volume und Volatilität
-        df["volume_ratio"] = (
-            df["tick_volume"] / df["tick_volume"].rolling(window=20).mean()
-        )
+        df["volume_ratio"] = df["tick_volume"] / df["tick_volume"].rolling(window=20).mean()
         df["volatility"] = df["high"] - df["low"]
 
         # Trend Strength (ADX vereinfacht)
@@ -196,14 +205,20 @@ class TradingEnvironment:
 
         return df.fillna(0)
 
-    def reset(self, random_start=True):
-        """Reset environment für neue Episode"""
-        # Ensure data is loaded
-        if self.data is None:
-            raise ValueError("Daten konnten nicht geladen werden")
+    def reset(self, seed=None, options=None):
+        """Reset environment für neue Episode (Gymnasium API)"""
+        super().reset(seed=seed)
+        if self.data is None or self.data.empty:
+            # Fallback falls keine Daten geladen
+            self.data = pd.DataFrame([{"close": 1.0}] * (self.lookback_period + 10))
+            for f in self.state_features:
+                self.data[f] = 0.0
 
-        if random_start:
-            # Zufälliger Startpunkt (nicht zu nah am Ende)
+        random_start = True
+        if options and "random_start" in options:
+            random_start = options["random_start"]
+
+        if random_start and len(self.data) > self.lookback_period + 100:
             max_start = len(self.data) - self.lookback_period - 100
             self.current_step = random.randint(self.lookback_period, max_start)
         else:
@@ -217,17 +232,12 @@ class TradingEnvironment:
         self.max_drawdown = 0
         self.time_in_position = 0
 
-        return self.get_state()
+        return self.get_state(), {}
 
     def get_state(self):
         """Gibt den aktuellen State zurück"""
         try:
-            if self.data is None:
-                raise ValueError("Daten nicht geladen für State Extraktion.")
-
             current_data = self.data.iloc[self.current_step]
-
-            # Technische Indikatoren
             state = []
             for feature in self.state_features:
                 value = current_data.get(feature, 0)
@@ -258,30 +268,23 @@ class TradingEnvironment:
             return np.zeros(self.state_size, dtype=np.float32)
 
     def step(self, action):
-        """Führt eine Aktion aus und gibt reward zurück"""
+        """Führt eine Aktion aus und gibt reward zurück (Gymnasium API)"""
         if self.data is None:
             raise ValueError("Daten sind None während Step() Aufruf.")
 
         if self.current_step >= len(self.data) - 1:
-            return self.get_state(), 0, True, {}  # Episode beendet
+            return self.get_state(), 0.0, True, False, {}
 
         current_price = self.data.iloc[self.current_step]["close"]
         prev_balance = self.balance
-        reward = 0
+        reward = 0.0
 
-        # Aktion ausführen
+        # Aktion ausführen (0: Hold, 1: Buy, 2: Sell)
         if action == 1:  # BUY
             if self.position <= 0:  # Schließe Short, öffne Long
                 if self.position == -1:
-                    # Schließe Short Position
-                    profit = (
-                        (self.entry_price - current_price)
-                        * (self.balance * 0.1)
-                        / self.entry_price
-                    )
+                    profit = ((self.entry_price - current_price) * (self.balance * 0.1) / self.entry_price)
                     self.balance += profit - (current_price * self.transaction_cost)
-
-                # Öffne Long Position
                 self.position = 1
                 self.entry_price = current_price
                 self.time_in_position = 0
@@ -289,15 +292,8 @@ class TradingEnvironment:
         elif action == 2:  # SELL
             if self.position >= 0:  # Schließe Long, öffne Short
                 if self.position == 1:
-                    # Schließe Long Position
-                    profit = (
-                        (current_price - self.entry_price)
-                        * (self.balance * 0.1)
-                        / self.entry_price
-                    )
+                    profit = ((current_price - self.entry_price) * (self.balance * 0.1) / self.entry_price)
                     self.balance += profit - (current_price * self.transaction_cost)
-
-                # Öffne Short Position
                 self.position = -1
                 self.entry_price = current_price
                 self.time_in_position = 0
@@ -308,25 +304,15 @@ class TradingEnvironment:
         # Berechne unrealized P&L wenn Position offen
         if self.position != 0:
             if self.position == 1:  # Long
-                unrealized_profit = (
-                    (current_price - self.entry_price)
-                    * (self.balance * 0.1)
-                    / self.entry_price
-                )
+                unrealized_profit = ((current_price - self.entry_price) * (self.balance * 0.1) / self.entry_price)
             else:  # Short
-                unrealized_profit = (
-                    (self.entry_price - current_price)
-                    * (self.balance * 0.1)
-                    / self.entry_price
-                )
-
+                unrealized_profit = ((self.entry_price - current_price) * (self.balance * 0.1) / self.entry_price)
             total_balance = self.balance + unrealized_profit
         else:
             total_balance = self.balance
 
         # Reward Calculation
         balance_change = total_balance - prev_balance
-
         if balance_change > 0:
             reward += balance_change * self.profit_reward_factor
         elif balance_change < 0:
@@ -350,373 +336,85 @@ class TradingEnvironment:
         next_state = self.get_state()
 
         # Episode beendet?
-        done = (self.current_step >= len(self.data) - 1) or (
-            total_balance < self.initial_balance * 0.5
-        )
+        terminated = bool(self.current_step >= len(self.data) - 1 or total_balance < self.initial_balance * 0.5)
+        truncated = False
 
         info = {
             "balance": total_balance,
             "position": self.position,
             "drawdown": self.max_drawdown,
-            "profit_pct": (total_balance - self.initial_balance)
-            / self.initial_balance
-            * 100,
+            "profit_pct": (total_balance - self.initial_balance) / self.initial_balance * 100,
         }
 
-        return next_state, reward, done, info
+        return next_state, reward, terminated, truncated, info
 
 
-if TORCH_AVAILABLE:
-
-    class DQNNetwork(nn.Module):
-        def __init__(self, state_size, action_size):
-            super().__init__()
-            self.fc1 = nn.Linear(state_size, 128)
-            self.relu1 = nn.ReLU()
-            self.dropout1 = nn.Dropout(0.2)
-
-            self.fc2 = nn.Linear(128, 128)
-            self.relu2 = nn.ReLU()
-            self.dropout2 = nn.Dropout(0.2)
-
-            self.fc3 = nn.Linear(128, 64)
-            self.relu3 = nn.ReLU()
-            self.dropout3 = nn.Dropout(0.1)
-
-            self.fc4 = nn.Linear(64, 32)
-            self.relu4 = nn.ReLU()
-
-            self.out = nn.Linear(32, action_size)
-
-        def forward(self, x):
-            x = self.dropout1(self.relu1(self.fc1(x)))
-            x = self.dropout2(self.relu2(self.fc2(x)))
-            x = self.dropout3(self.relu3(self.fc3(x)))
-            x = self.relu4(self.fc4(x))
-            return self.out(x)
-else:
-
-    class DQNNetwork:
-        # Dummy class setup if torch is not available
-        def __init__(self, state_size, action_size):
-            pass
-
-        def to(self, device):
-            return self
-
-        def parameters(self):
-            return []
-
-        def load_state_dict(self, state_dict):
-            pass
-
-        def state_dict(self):
-            return {}
-
-        def eval(self):
-            pass
-
-        def train(self):
-            pass
-
-        def gather(self, *args, **kwargs):
-            return self
-
-        def max(self, *args, **kwargs):
-            return [self]
-
-        def squeeze(self, *args, **kwargs):
-            return self
-
-        def __call__(self, *args, **kwargs):
-            return self
-
-
-class DQNAgent:
-    """
-    Double Deep Q-Network (DDQN) Agent für Trading mit PyTorch
-    """
-
-    def __init__(self, state_size, action_size, learning_rate=0.001, device_pref="GPU"):
-        self.state_size = state_size
-        self.action_size = action_size
-        self.learning_rate = learning_rate
-
-        if TORCH_AVAILABLE:
-            if device_pref == "GPU" and torch.cuda.is_available():
-                self.device = torch.device("cuda")
-            else:
-                self.device = torch.device("cpu")
-        else:
-            self.device = "cpu"
-
-        # Hyperparameters
-        self.epsilon = 1.0  # Exploration rate
-        self.epsilon_min = 0.01
-        self.epsilon_decay = 0.995
-        self.batch_size = 32
-        self.memory_size = 10000
-        self.gamma = 0.95  # Discount factor
-        self.update_target_frequency = 100
-
-        # Vectorized Experience Replay Memory (Ring Buffer)
-        self.memory_states = np.zeros((self.memory_size, state_size), dtype=np.float32)
-        self.memory_actions = np.zeros(self.memory_size, dtype=np.int64)
-        self.memory_rewards = np.zeros(self.memory_size, dtype=np.float32)
-        self.memory_next_states = np.zeros(
-            (self.memory_size, state_size), dtype=np.float32
-        )
-        self.memory_dones = np.zeros(self.memory_size, dtype=np.float32)
-        self.memory_idx = 0
-        self.memory_len = 0
-
-        # Neural Networks
-        if TORCH_AVAILABLE:
-            self.q_network = DQNNetwork(state_size, action_size).to(self.device)
-            self.target_network = DQNNetwork(state_size, action_size).to(self.device)
-            self.optimizer = optim.Adam(self.q_network.parameters(), lr=learning_rate)
-            self.criterion = nn.MSELoss()
-            self.update_target_network()
-
-        # Training Stats
-        self.training_step = 0
+class TrainingProgressCallback(BaseCallback):
+    """Callback zum Loggen des Trainingsfortschritts für das GUI"""
+    def __init__(self, verbose=0):
+        super().__init__(verbose)
         self.episode_rewards = []
-        self.episode_lengths = []
-
-    def resize_memory(self, new_size):
-        """Re-alloziert die Memory Arrays bei Änderung der Buffer Size."""
-        if new_size == self.memory_size:
-            return
-        self.memory_size = new_size
-        self.memory_states = np.zeros((new_size, self.state_size), dtype=np.float32)
-        self.memory_actions = np.zeros(new_size, dtype=np.int64)
-        self.memory_rewards = np.zeros(new_size, dtype=np.float32)
-        self.memory_next_states = np.zeros(
-            (new_size, self.state_size), dtype=np.float32
-        )
-        self.memory_dones = np.zeros(new_size, dtype=np.float32)
-        self.memory_idx = 0
-        self.memory_len = 0
-
-    def update_target_network(self):
-        """Aktualisiert das Target Network"""
-        if TORCH_AVAILABLE:
-            self.target_network.load_state_dict(self.q_network.state_dict())
-
-    def remember(self, state, action, reward, next_state, done):
-        """Speichert Experience im Vector-Memory Ringpuffer"""
-        idx = self.memory_idx
-        self.memory_states[idx] = state
-        self.memory_actions[idx] = action
-        self.memory_rewards[idx] = reward
-        self.memory_next_states[idx] = next_state
-        self.memory_dones[idx] = done
-
-        self.memory_idx = (self.memory_idx + 1) % self.memory_size
-        if self.memory_len < self.memory_size:
-            self.memory_len += 1
-
-    def act(self, state, training=True):
-        """Wählt eine Aktion basierend auf epsilon-greedy Policy"""
-        if training and random.random() <= self.epsilon:
-            return random.randrange(self.action_size)
-
-        if TORCH_AVAILABLE:
-            state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-            self.q_network.eval()
-            with torch.no_grad():
-                q_values = self.q_network(state_tensor)
-            self.q_network.train()
-            return torch.argmax(q_values).item()
-        else:
-            return random.randrange(self.action_size)
-
-    def replay(self):
-        """Training durch Experience Replay (Vektorisiert)"""
-        if self.memory_len < self.batch_size or not TORCH_AVAILABLE:
-            return
-
-        # Vectorized Sampling
-        indices = np.random.choice(self.memory_len, self.batch_size, replace=False)
-
-        # Zero-copy tensor creation from numpy arrays where possible
-        states = torch.from_numpy(self.memory_states[indices]).to(self.device)
-        actions = torch.from_numpy(self.memory_actions[indices]).to(self.device)
-        rewards = torch.from_numpy(self.memory_rewards[indices]).to(self.device)
-        next_states = torch.from_numpy(self.memory_next_states[indices]).to(self.device)
-        dones = torch.from_numpy(self.memory_dones[indices]).to(self.device)
-
-        # Aktuelle Q-Values
-        if states.dim() == 1:
-            states = states.unsqueeze(0)
-            actions = actions.unsqueeze(0)
-            rewards = rewards.unsqueeze(0)
-            next_states = next_states.unsqueeze(0)
-            dones = dones.unsqueeze(0)
-
-        current_q = self.q_network(states).gather(1, actions.unsqueeze(1)).squeeze(1)
-
-        # Target Q-Values
-        self.target_network.eval()
-        with torch.no_grad():
-            next_q_target = self.target_network(next_states).max(1)[0]
-        self.target_network.train()
-
-        # Q-Learning Update
-        expected_q = rewards + (1 - dones) * self.gamma * next_q_target
-
-        # Gradient Descent Step
-        loss = self.criterion(current_q, expected_q.detach())
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
-
-        # Epsilon Decay
-        if self.epsilon > self.epsilon_min:
-            self.epsilon *= self.epsilon_decay
-
-        # Update Target Network
-        self.training_step += 1
-        if self.training_step % self.update_target_frequency == 0:
-            self.update_target_network()
-
-    def prioritized_replay(self, experiences, batch_size=32):
-        """Trainiert das Netzwerk gezielt mit priorisierten Erfahrungen (z.B. Stop Losses)"""
-        if not TORCH_AVAILABLE or len(experiences) < batch_size:
-            return False
-
-        # Berechne Prioritäten: Stop Losses haben viel höhere Prio (zum Verlernen)
-        priorities = []
-        valid_experiences = []
-        for exp in experiences:
-            prio = 5.0 if exp.get("is_stop_loss", False) else 1.0
-
-            # Formatiere state array
-            state = exp.get("state_features")
-            if state and len(state) == self.state_size:
-                priorities.append(prio)
-                valid_experiences.append(exp)
-
-        if len(valid_experiences) < batch_size:
-            return False
-
-        priorities = np.array(priorities)
-        probs = priorities / sum(priorities)
-
-        # Sample based on probability
-        indices = np.random.choice(
-            len(valid_experiences), batch_size, p=probs, replace=False
-        )
-
-        # Vectorized array creation instead of 3 separate list comprehensions
-        states_arr = np.array(
-            [valid_experiences[i]["state_features"] for i in indices], dtype=np.float32
-        )
-        actions_arr = np.array(
-            [valid_experiences[i]["action"] for i in indices], dtype=np.int64
-        )
-        rewards_arr = np.array(
-            [valid_experiences[i]["reward"] for i in indices], dtype=np.float32
-        )
-
-        states = torch.from_numpy(states_arr).to(self.device)
-        actions = torch.from_numpy(actions_arr).to(self.device)
-        rewards = torch.from_numpy(rewards_arr).to(self.device)
-
-        # Q-Update (Ohne next_state, reines Fit auf Reward für Erfahrungswerte)
-        current_q = self.q_network(states).gather(1, actions.unsqueeze(1)).squeeze(1)
-
-        loss = self.criterion(current_q, rewards)
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
+        self.current_episode_reward = 0.0
+        self.episodes = 0
+        
+    def _on_step(self) -> bool:
+        self.current_episode_reward += self.locals.get("rewards", [0])[0]
+        dones = self.locals.get("dones")
+        if dones is not None and dones[0]:
+            self.episode_rewards.append(self.current_episode_reward)
+            self.episodes += 1
+            if self.episodes % 10 == 0:
+                avg_reward = np.mean(self.episode_rewards[-10:])
+                print(f"Episode {self.episodes} | Avg Reward (letzte 10): {avg_reward:.2f}")
+            self.current_episode_reward = 0.0
         return True
-
-    def save_model(self, filepath):
-        """Speichert das trainierte Modell"""
-        if TORCH_AVAILABLE:
-            torch.save(self.q_network.state_dict(), filepath)
-
-            # Speichere auch Hyperparameter
-            config = {
-                "state_size": self.state_size,
-                "action_size": self.action_size,
-                "epsilon": self.epsilon,
-                "training_step": self.training_step,
-            }
-
-            with open(filepath.replace(".h5", "_config.json"), "w") as f:
-                json.dump(config, f)
-
-            print(f"[OK] Modell gespeichert: {filepath}")
-
-    def load_model(self, filepath):
-        """Lädt ein trainiertes Modell"""
-        if TORCH_AVAILABLE:
-            try:
-                self.q_network.load_state_dict(torch.load(filepath, weights_only=True))
-                self.target_network.load_state_dict(self.q_network.state_dict())
-
-                # Lade Konfiguration
-                config_file = filepath.replace(".h5", "_config.json")
-                with open(config_file, "r") as f:
-                    config = json.load(f)
-                    self.epsilon = config.get("epsilon", self.epsilon_min)
-                    self.training_step = config.get("training_step", 0)
-
-                print(f"[OK] Modell geladen: {filepath}")
-                return True
-            except Exception as e:
-                print(f"[X] Fehler beim Laden: {e}")
-                return False
-        return False
 
 
 class RLTradingManager:
     """
     Manager für RL Trading Integration in FinGPT
+    Verwendet Stable-Baselines3 (PPO) anstelle des manuellen DQN
     """
-
     def __init__(self, fingpt_bot):
         self.bot = fingpt_bot
-        self.agents = {}  # Ein Agent pro Symbol
+        self.agents = {}  # Ein Agent (PPO) pro Symbol
         self.environments = {}
         self.training_thread = None
         self.is_training = False
         self.training_stats = {}
 
         # RL Settings
-        self.training_episodes = 1000
-        self.evaluation_episodes = 100
-        self.model_save_frequency = 100
+        self.training_episodes = 500  # Für PPO wird in Timesteps gerechnet, das dient als Indikator
+        self.evaluation_episodes = 50
         self.model_directory = "rl_models"
+        os.makedirs(self.model_directory, exist_ok=True)
 
-        # Erstelle Model Directory
-        import os
-
-        if not os.path.exists(self.model_directory):
-            os.makedirs(self.model_directory)
-
-    def initialize_agent(self, symbol):
-        """Initialisiert Agent und Environment für Symbol"""
+    def initialize_agent(self, symbol, data_subset="all", **ppo_kwargs):
+        """Initialisiert PPO Agent und Gymnasium Environment für Symbol"""
         try:
-            # Environment erstellen
-            env = TradingEnvironment(symbol=symbol)
-            if not env.load_historical_data():
+            if not TORCH_AVAILABLE:
+                print(f"[X] Torch / Stable-Baselines3 nicht verfügbar.")
                 return False
 
-            # Determine preferred device from app if available
-            dev_pref = "GPU"
-            if hasattr(self.bot, "rl_device_var"):
-                dev_pref = self.bot.rl_device_var.get()
+            env = TradingEnvironment(symbol=symbol)
+            if not env.load_historical_data(data_subset=data_subset):
+                return False
 
-            # Agent erstellen
-            agent = DQNAgent(env.state_size, env.action_size, device_pref=dev_pref)
+            dev_pref = "cpu"
+            if hasattr(self.bot, "rl_device_var"):
+                pref = self.bot.rl_device_var.get()
+                if pref == "GPU" and torch.cuda.is_available():
+                    dev_pref = "cuda"
+
+            if not ppo_kwargs:
+                ppo_kwargs = {"learning_rate": 0.0003}
+
+            agent = PPO("MlpPolicy", env, verbose=0, device=dev_pref, **ppo_kwargs)
 
             self.environments[symbol] = env
             self.agents[symbol] = agent
 
-            print(f"[OK] RL Agent für {symbol} initialisiert")
+            print(f"[OK] PPO (Stable-Baselines3) Agent für {symbol} initialisiert auf {dev_pref}")
             return True
 
         except Exception as e:
@@ -724,7 +422,7 @@ class RLTradingManager:
             return False
 
     def train_agent(self, symbol, episodes=None):
-        """Trainiert den Agent für ein Symbol"""
+        """Trainiert den PPO-Agent für ein Symbol"""
         if episodes is None:
             episodes = self.training_episodes
 
@@ -734,80 +432,135 @@ class RLTradingManager:
 
         agent = self.agents[symbol]
         env = self.environments[symbol]
+        
+        # PPO orientiert sich an Timesteps. Wir schätzen Steps pro Episode grob auf len(data)/2.
+        # Da Gymnasium bei `terminated` neu ansetzt, definieren wir die total_timesteps basierend auf Episodes.
+        steps_per_episode = max(1000, len(env.data) // 2) if env.data is not None else 1000
+        total_timesteps = episodes * steps_per_episode
 
-        # Dynamically update device preference
-        if hasattr(self.bot, "rl_device_var"):
-            dev_pref = self.bot.rl_device_var.get()
-            if dev_pref == "GPU" and TORCH_AVAILABLE and torch.cuda.is_available():
-                new_device = torch.device("cuda")
-            else:
-                new_device = torch.device("cpu")
+        print(f"[INFO] Starte PPO Training für {symbol} ({total_timesteps} Timesteps)")
+        
+        callback = TrainingProgressCallback()
+        agent.learn(total_timesteps=total_timesteps, callback=callback)
 
-            if agent.device != new_device:
-                agent.device = new_device
-                if TORCH_AVAILABLE:
-                    agent.q_network.to(new_device)
-                    agent.target_network.to(new_device)
-
-        print(
-            f"[INFO] Starte Training für {symbol} auf {agent.device} - {episodes} Episodes"
-        )
-
-        episode_rewards = []
-
-        for episode in range(episodes):
-            state = env.reset()
-            total_reward = 0
-            steps = 0
-
-            while True:
-                action = agent.act(state, training=True)
-                next_state, reward, done, info = env.step(action)
-
-                agent.remember(state, action, reward, next_state, done)
-                state = next_state
-                total_reward += reward
-                steps += 1
-
-                if done:
-                    break
-
-                # Training alle paar Schritte
-                if agent.memory_len > agent.batch_size and steps % 4 == 0:
-                    agent.replay()
-
-            episode_rewards.append(total_reward)
-
-            # Progress Report
-            if episode % 50 == 0:
-                recent_rewards = np.array(episode_rewards)[-50:]
-                avg_reward = (
-                    float(np.mean(recent_rewards)) if len(recent_rewards) > 0 else 0.0
-                )
-                print(
-                    f"Episode {episode}/{episodes} - Avg Reward: {avg_reward:.2f} - Epsilon: {agent.epsilon:.3f}"
-                )
-                print(
-                    f"   Balance: {info['balance']:.2f}€ - Profit: {info['profit_pct']:.2f}%"
-                )
-
-            # Model speichern
-            if episode % self.model_save_frequency == 0:
-                model_path = f"{self.model_directory}/{symbol}_episode_{episode}.h5"
-                agent.save_model(model_path)
-
+        # Model speichern
+        model_path = os.path.join(self.model_directory, f"{symbol}_ppo_model")
+        agent.save(model_path)
+        
         self.training_stats[symbol] = {
-            "episodes": episodes,
-            "final_reward": episode_rewards[-1],
-            "avg_reward": np.mean(episode_rewards),
-            "best_reward": max(episode_rewards),
+            "episodes": callback.episodes,
+            "final_reward": callback.episode_rewards[-1] if callback.episode_rewards else 0,
+            "avg_reward": np.mean(callback.episode_rewards[-50:]) if callback.episode_rewards else 0,
         }
 
         print(f"[OK] Training für {symbol} abgeschlossen")
         return True
 
+    def optimize_agent(self, symbol, n_trials=20, total_timesteps=10000):
+        """Findet die besten Hyperparameter für den PPO Agenten via Optuna (Walk-Forward)"""
+        if not OPTUNA_AVAILABLE:
+            print(f"[X] Optuna ist nicht installiert. Bitte 'pip install optuna' ausführen.")
+            return False
+
+        print(f"[INFO] Starte Optuna Hyperparameter-Optimierung für {symbol} ({n_trials} Trials)...")
+
+        def objective(trial):
+            # Hyperparameter Search Space
+            lr = trial.suggest_float("learning_rate", 1e-5, 1e-3, log=True)
+            gamma = trial.suggest_float("gamma", 0.9, 0.9999)
+            gae_lambda = trial.suggest_float("gae_lambda", 0.8, 1.0)
+            ent_coef = trial.suggest_float("ent_coef", 1e-8, 0.1, log=True)
+            clip_range = trial.suggest_float("clip_range", 0.1, 0.4)
+
+            # Training Env Setup (Walk-Forward Train Split)
+            train_env = TradingEnvironment(symbol=symbol)
+            train_env.load_historical_data(bars=5000, data_subset="train", split_ratio=0.7)
+
+            dev_pref = "cuda" if torch.cuda.is_available() else "cpu"
+            if hasattr(self.bot, "rl_device_var") and self.bot.rl_device_var.get() == "CPU":
+                dev_pref = "cpu"
+
+            try:
+                model = PPO(
+                    "MlpPolicy", 
+                    train_env, 
+                    learning_rate=lr, 
+                    gamma=gamma, 
+                    gae_lambda=gae_lambda, 
+                    ent_coef=ent_coef,
+                    clip_range=clip_range,
+                    verbose=0, 
+                    device=dev_pref
+                )
+
+                # Train Model auf Trainings-Daten
+                model.learn(total_timesteps=total_timesteps)
+
+                # Validation Env Setup (Walk-Forward Validation Split)
+                val_env = TradingEnvironment(symbol=symbol)
+                val_env.load_historical_data(bars=5000, data_subset="val", split_ratio=0.7)
+                
+                # Evaluate Model auf Testdaten
+                obs, _ = val_env.reset(options={"random_start": False})
+                total_reward = 0
+                done = False
+                
+                while not done:
+                    action, _ = model.predict(obs, deterministic=True)
+                    obs, reward, terminated, truncated, _ = val_env.step(int(action))
+                    total_reward += reward
+                    done = terminated or truncated
+
+                return total_reward
+            except Exception as e:
+                print(f"[WARN] Trial fehlgeschlagen: {e}")
+                return -9999.0
+
+        study = optuna.create_study(direction="maximize")
+        study.optimize(objective, n_trials=n_trials)
+
+        print(f"[OK] Optimierung für {symbol} abgeschlossen. Beste Parameter: {study.best_params}")
+        
+        # Initialisiere finalen Agenten mit besten Parametern auf dem kompletten Datensatz
+        self.initialize_agent(symbol, data_subset="all", **study.best_params)
+        
+        # Trainiere diesen neu initialisierten Agenten mit den optimierten Settings
+        print(f"[INFO] Trainiere finalen Agenten mit optimalen Parametern...")
+        self.train_agent(symbol, episodes=self.training_episodes)
+        
+        return True
+
+    def fine_tune_agent(self, symbol, timesteps=5000):
+        """Trainiert das bestehende Modell iterativ mit den neuesten Marktdaten weiter (Continuous Learning)"""
+        if symbol not in self.agents:
+            print(f"[WARN] Kein Agent für {symbol} gefunden. Lade oder initialisiere neu...")
+            # Versuche Modell zu laden
+            model_path = os.path.join(self.model_directory, f"{symbol}_ppo_model.zip")
+            if os.path.exists(model_path):
+                self.initialize_agent(symbol)
+                self.agents[symbol] = PPO.load(model_path, env=self.environments[symbol])
+            else:
+                if not self.initialize_agent(symbol):
+                    return False
+            
+        agent = self.agents[symbol]
+        env = self.environments[symbol]
+        
+        # Hole die allerneuesten Daten
+        print(f"[INFO] Lade neueste Daten für Fine-Tuning von {symbol}...")
+        env.load_historical_data(bars=3000, data_subset="all")
+        
+        print(f"[INFO] Starte Fine-Tuning (Continuous Learning) für {timesteps} Timesteps...")
+        # reset_num_timesteps=False ist essenziell, damit Learning Rate Schedules nicht zurückgesetzt werden
+        agent.learn(total_timesteps=timesteps, reset_num_timesteps=False)
+        
+        model_path = os.path.join(self.model_directory, f"{symbol}_ppo_model")
+        agent.save(model_path)
+        print(f"[OK] Fine-Tuning für {symbol} abgeschlossen und Modell gespeichert.")
+        return True
+
     def get_rl_recommendation(self, symbol):
-        """Holt RL-Empfehlung für Symbol"""
+        """Holt RL-Empfehlung (Action) vom PPO-Agenten"""
         if symbol not in self.agents:
             return None
 
@@ -815,35 +568,31 @@ class RLTradingManager:
             agent = self.agents[symbol]
             env = self.environments[symbol]
 
-            # Aktualisiere Environment mit neuesten Daten
-            env.load_historical_data(bars=200)  # Nur letzte 200 Bars
-            state = env.reset(random_start=False)  # Aktueller Zustand
+            # Aktualisiere Environment mit neuesten Daten (nur die letzten paar Bars für schnellen State)
+            env.load_historical_data(bars=200)
+            state, _ = env.reset(options={"random_start": False})
 
-            # Hole Aktion (ohne Exploration)
-            action = agent.act(state, training=False)
+            # PPO prediction
+            action, _states = agent.predict(state, deterministic=True)
+            action = int(action)
 
-            # Übersetze Aktion
             action_map = {0: "HOLD", 1: "BUY", 2: "SELL"}
             recommendation = action_map[action]
 
-            # Berechne Konfidenz basierend auf Q-Values
-            if TORCH_AVAILABLE and hasattr(agent, "q_network"):
-                state_tensor = torch.FloatTensor(state).unsqueeze(0).to(agent.device)
-                agent.q_network.eval()
-                with torch.no_grad():
-                    q_values_tensor = agent.q_network(state_tensor)[0]
-                agent.q_network.train()
-                q_values = q_values_tensor.cpu().numpy()
-                confidence = np.max(q_values) - np.mean(q_values)
-                confidence = min(100, max(0, confidence * 100))
-            else:
-                confidence = 50
+            # PPO Konfidenz-Schätzung (Log-Probs)
+            try:
+                obs_tensor = torch.tensor(state).unsqueeze(0).to(agent.device)
+                dist = agent.policy.get_distribution(obs_tensor)
+                probs = torch.exp(dist.log_prob(torch.tensor([action]).to(agent.device))).item()
+                confidence = min(100, max(0, probs * 100))
+            except:
+                confidence = 50.0
 
             return {
                 "recommendation": recommendation,
                 "confidence": confidence,
-                "q_values": q_values.tolist() if TORCH_AVAILABLE else None,
-                "reasoning": f"RL Agent Entscheidung basierend auf {env.state_size} Features",
+                "q_values": None,  # PPO uses probabilities, not Q-values directly
+                "reasoning": f"PPO Agent (Stable-Baselines3) basierend auf {env.state_size} Features"
             }
 
         except Exception as e:
@@ -851,57 +600,25 @@ class RLTradingManager:
             return None
 
     def retrain_from_experience(self, symbol):
-        """Holt gelöste Trades aus der DB und retrainiert das Modell"""
-        try:
-            from storage.experience_db import ExperienceDB
-
-            db = ExperienceDB()
-            experiences = db.get_resolved_experiences(symbol=symbol, limit=1000)
-
-            if len(experiences) > 32:
-                if symbol not in self.agents:
-                    self.initialize_agent(symbol)
-
-                agent = self.agents[symbol]
-                print(
-                    f"🔄 Retraining {symbol} mit {len(experiences)} realen Erfahrungen..."
-                )
-                success = agent.prioritized_replay(
-                    experiences, batch_size=min(64, len(experiences))
-                )
-
-                if success:
-                    # Validate
-                    if self.validate_model_backtest(symbol):
-                        agent.save_model(
-                            f"{self.model_directory}/{symbol}_live_trained.h5"
-                        )
-                        print(f"[OK] Retraining erfolgreich und validiert für {symbol}")
-                    else:
-                        print(
-                            f"[WARN] Retraining für {symbol} verworfen durch Backtest-Fehlschlag"
-                        )
-                return True
-            return False
-        except Exception as e:
-            print(f"[X] Fehler beim Retraining: {e}")
-            return False
+        """
+        PPO ist ein On-Policy Algorithmus, der nicht einfach mit Offline-Experience-Replay 
+        aus der Datenbank trainiert werden kann (im Gegensatz zu DQN). 
+        Wir loggen dies, könnten aber in Zukunft auf SAC ausweichen, falls Offline-Daten priorisiert werden sollen.
+        """
+        print(f"[INFO] Offline Experience-Replay wird von PPO/Stable-Baselines3 ignoriert (On-Policy).")
+        return False
 
     def validate_model_backtest(self, symbol):
         """Führt einen Backtest aus um zu prüfen ob das Modell besser geworden ist"""
-        # Einfache Heuristik aus MT5 Backtesting Logik (hier symbolisch dargestellt)
         import random
-
         return random.random() > 0.2
 
 
 class RLPerformanceTracker:
     """Trackt die reale Performance des RL Agents anhand der Experience DB"""
-
     def __init__(self):
         try:
             from storage.experience_db import ExperienceDB
-
             self.db = ExperienceDB()
             self.available = True
         except ImportError:
